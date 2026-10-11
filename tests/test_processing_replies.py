@@ -100,17 +100,61 @@ def test_expired_authorization_is_unknown_not_resent(reminders):
         assert db.get(Outbox, delivery["delivery_id"]).status == "unknown"
 
 
-def test_processing_failure_cancels_pending_reply(reminders):
+def test_processing_failure_cancels_reply_and_tells_the_chat_once(reminders):
     app, client, ids = reminders
     saved = message(client, update_id=200).json()
     class Failed(MockProvider):
         def structure(self, text, *, categories=()):
             raise ProviderError("synthetic_failure")
     assert Worker(app.state.sessions, app.state.settings, provider=Failed()).run_once()
-    assert claim(client).json() == {"items": []}
     with app.state.sessions() as db:
         assert db.get(Job, saved["job_id"]).status == "failed"
-        assert db.scalar(select(Outbox)).status == "cancelled"
+        rows = db.scalars(select(Outbox).order_by(Outbox.created_at, Outbox.id)).all()
+        assert [(row.status, row.message_kind) for row in rows] == [("cancelled", None), ("pending", "processing_failed")]
+        assert rows[0].job_id == saved["job_id"] and rows[1].job_id is None and rows[1].reminder_id is None
+        assert (rows[1].bot_id, rows[1].chat_id) == (BASE["bot_id"], BASE["chat_id"])
+    items = claim(client).json()["items"]
+    assert len(items) == 1
+    assert items[0]["text"].startswith("Не получилось разобрать запись с ИИ. Исходник сохранён.")
+    assert "в истории" in items[0]["text"] and items[0]["callback_token"] is None
+    assert auth(client, items[0]).json() == {"send": True}
+    assert result(client, items[0]).status_code == 200
+    assert claim(client).json() == {"items": []}
+    assert not Worker(app.state.sessions, app.state.settings, provider=Failed()).run_once()
+    with app.state.sessions() as db:
+        assert db.scalar(select(func.count()).select_from(Outbox)) == 2
+        sent = db.scalar(select(Outbox).where(Outbox.message_kind == "processing_failed"))
+        assert sent.status == "sent" and sent.message_text is None
+
+
+def test_expired_lease_also_tells_the_chat(reminders):
+    app, client, ids = reminders
+    saved = message(client, update_id=200).json()
+    worker = Worker(app.state.sessions, app.state.settings, provider=MockProvider())
+    with app.state.sessions.begin() as db:
+        job = db.get(Job, saved["job_id"])
+        job.status, job.lease_until = "running", time.time() - 5
+    worker.claim()
+    with app.state.sessions() as db:
+        assert db.get(Job, saved["job_id"]).error_code == "execution_unknown"
+        kinds = sorted(str(row.message_kind) for row in db.scalars(select(Outbox)))
+        assert kinds == ["None", "processing_failed"]
+    assert len(claim(client).json()["items"]) == 1
+
+
+def test_no_failure_message_when_nobody_waits_in_telegram(app, client):
+    from tests.conftest import register
+    from tests.test_notes import submit
+
+    register(client)
+    job = submit(client, text="Купить хлеб").json()
+    class Failed(MockProvider):
+        def structure(self, text, *, categories=()):
+            raise ProviderError("synthetic_failure")
+    assert Worker(app.state.sessions, app.state.settings, provider=Failed()).run_once()
+    with app.state.sessions() as db:
+        assert db.get(Job, job["id"]).status == "failed"
+        assert db.scalar(select(func.count()).select_from(Outbox)) == 0
 
 
 def test_shared_claim_limit_and_utf16_length(reminders):

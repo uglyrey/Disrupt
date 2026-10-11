@@ -42,12 +42,13 @@ def test_invalid_details_are_omitted_without_disabling_grounding(caplog):
     assert "conclusions_omitted=1 items_omitted=1 due_text_omitted=1" in caplog.text
 
 
-def test_punctuation_paraphrase_and_invented_facts_do_not_become_quotes():
+def test_case_is_recovered_but_paraphrase_and_invented_facts_do_not_become_quotes():
     result = repair_structure_quotes(structured(items=[
         {"kind": "task", "text": "Купить хлеб", "source_quote": "купить хлеб"},
         {"kind": "task", "text": "Позвонить", "source_quote": "Позвонить завтра"},
     ]), "Купить хлеб. Не звонить завтра.")
-    assert result.items == [] and result._grounding_details_omitted
+    assert [item.source_quote for item in result.items] == ["Купить хлеб"]
+    assert result._grounding_details_omitted
 
 
 def test_worker_keeps_note_and_valid_items_with_one_dispatch_and_visible_warning(app, client):
