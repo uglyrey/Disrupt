@@ -147,6 +147,18 @@ def test_slots_count_and_free():
     assert slots.counts == {}
 
 
+def test_the_csp_names_the_socket_address(app_factory):
+    plain = app_factory()
+    with TestClient(plain) as client:
+        csp = client.get("/health").headers["content-security-policy"]
+        assert "connect-src 'self' ws://127.0.0.1:8000;" in csp
+    secure = app_factory(public_origin="https://beresta.example", secure_cookies=True)
+    with TestClient(secure) as client:
+        csp = client.get("/health").headers["content-security-policy"]
+        assert "connect-src 'self' wss://beresta.example;" in csp
+        assert "script-src 'self';" in csp
+
+
 # Deletion confirmation
 
 
