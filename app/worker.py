@@ -38,7 +38,7 @@ from app.models import (
 from app.providers import ProviderError, make_provider, validate_result
 from app.reminders import auto_reminders
 from app.retry_policy import breaker_open, decide
-from app.services import ensure_category, lock_account, save_revision
+from app.services import lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_speech_provider
 from app.usage import UsageRecorder
 
@@ -286,21 +286,7 @@ class Worker:
                     ],
                 )
                 if result.category_name:
-                    existing_id = next(
-                        (
-                            category_id
-                            for name, category_id in category_context.items()
-                            if name.casefold() == result.category_name.casefold()
-                        ),
-                        None,
-                    )
-                    category = (
-                        db.scalar(
-                            select(Category).where(Category.id == existing_id, Category.user_id == user_id)
-                        )
-                        if existing_id
-                        else ensure_category(db, user_id, result.category_name, best_effort=True)
-                    )
+                    category = resolve_ai_category(db, user_id, result.category_name, category_context)
                     note.category_id = category.id if category else None
                 db.add(note)
                 db.flush()

@@ -142,8 +142,7 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
     await until(() => calls.filter(c => c.url.pathname.endsWith('/opened')).length === 2 && !$('title').disabled);
     assert.equal(calls.filter(c => c.url.pathname.endsWith('/opened')).at(-1).body.search_operation_id,search.body.operation_id);
 
-    const row = $('categories').querySelector('form');
-    row.querySelector('input').value = 'Проект'; submit(row);
+    await w.eval(`renameCategory(${JSON.stringify(note.category_id)},'Проект')`);
     await until(() => $('note-category').selectedOptions[0].textContent === 'Проект');
     assert.equal($('note-category').value,note.category_id);
     assert.equal(calls.filter(c => c.url.pathname === '/api/v1/search/events').length,1);
@@ -194,6 +193,7 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
     await require('./web_job_waiting.cjs')();
     await require('./web_failed_job_retry.cjs')();
     await require('./web_workspace.cjs')();
+    await require('./web_categories.cjs')();
     await require('./web_note_ux.cjs')();
     await require('./web_focus.cjs')();
     await require('./web_onboarding.cjs')();
