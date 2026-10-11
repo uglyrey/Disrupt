@@ -10,6 +10,7 @@ from app.models import Item, Note
 from app.related import MIN_SCORE, NoteDoc, build_index, graph_edges, related_notes
 from app.security import get_login_session
 from app.services import owned_note
+from app.task_due import resolve_due
 
 CORPUS_LIMIT = 1000
 GRAPH_NEIGHBOURS = 3
@@ -36,6 +37,17 @@ def load_docs(db, user_id, *, must_include=None, cap=CORPUS_LIMIT):
         NoteDoc(row.id, row.title, row.markdown, tuple(texts[row.id]), row.category_id, row.updated_at)
         for row in rows
     ]
+
+
+def task_row(item, title, note_version, updated_at, created_at, timezone):
+    """One task for the list. `due_resolved_at` is the deadline as a moment, or None when it is unknown."""
+    resolved, has_time = resolve_due(item.due_at, item.due_text, created_at, timezone)
+    return {
+        "id": item.id, "text": item.text, "status": item.status, "version": item.version,
+        "due_at": item.due_at, "due_text": item.due_text, "due_resolved_at": resolved, "due_has_time": has_time,
+        "position": item.position, "category_id": item.category_id, "note_id": item.note_id,
+        "note_title": title, "note_version": note_version, "note_updated_at": updated_at,
+    }
 
 
 def build_router(database, settings):
@@ -89,7 +101,7 @@ def build_router(database, settings):
             select(Item.status, func.count()).where(*mine).group_by(Item.status)
         ).all())
         statement = (
-            select(Item, Note.title, Note.version, Note.updated_at)
+            select(Item, Note.title, Note.version, Note.updated_at, Note.created_at)
             .join(Note, (Note.id == Item.note_id) & (Note.user_id == Item.user_id))
             .where(*mine)
         )
@@ -107,15 +119,8 @@ def build_router(database, settings):
         return {
             "status": status, "limit": limit, "offset": offset, "has_more": len(rows) > limit,
             "counts": {"open": counts.get("open", 0), "completed": counts.get("completed", 0)},
-            "items": [
-                {
-                    "id": item.id, "text": item.text, "status": item.status, "version": item.version,
-                    "due_at": item.due_at, "due_text": item.due_text, "position": item.position,
-                    "category_id": item.category_id, "note_id": item.note_id,
-                    "note_title": title, "note_version": note_version, "note_updated_at": updated_at,
-                }
-                for item, title, note_version, updated_at in rows[:limit]
-            ],
+            "items": [task_row(item, title, note_version, updated_at, created_at, settings.limit_timezone)
+                      for item, title, note_version, updated_at, created_at in rows[:limit]],
         }
 
     return router

@@ -28,6 +28,7 @@ from app.models import (
     new_id,
 )
 from app.providers import ProviderError, make_provider, validate_result
+from app.reminders import auto_reminders
 from app.services import ensure_category, lock_account, save_revision
 from app.speech import CloudRuSpeechProvider, make_speech_provider
 from app.usage import UsageRecorder
@@ -291,6 +292,13 @@ class Worker:
                     )
                 db.flush()
                 save_revision(db, note)
+                try:
+                    # The note matters more than its reminders: a failure here leaves the note as it is.
+                    with db.begin_nested():
+                        auto_reminders(db, note, self.settings)
+                except Exception as exc:
+                    log_error("auto_reminder_failed", "internal_error", log_file=self.settings.error_log_file,
+                              job_id=job_id, exception=exc)
                 capture = db.get(Capture, capture_id)
                 record_event(db, user_id, "processing_completed", job_id, capture.channel)
                 db.commit()

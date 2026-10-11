@@ -32,7 +32,7 @@
 | `/internal/v1/telegram/link-request` | `bot_id`, `update_id`, `telegram_user_id`, `chat_id`, `code` | `link_request_id`, `status: pending` |
 | `/internal/v1/telegram/updates` | те же четыре ID, `text`, `processing_mode: ai/manual` | `capture_id`, `job_id: UUID/null`, `status: saved`, `note_url` |
 | `/internal/v1/telegram/voice` | multipart: те же четыре ID, `processing_mode: ai`, файл `audio` | тот же ответ сохранения |
-| `/internal/v1/telegram/actions` | `bot_id`, `update_id`, `telegram_user_id`, `callback_token` | `status: completed/already_completed` |
+| `/internal/v1/telegram/actions` | `bot_id`, `update_id`, `telegram_user_id`, `callback_token`, `action` (по умолчанию `done`) | `status: completed/already_completed/snoozed`, для `snoozed` ещё `local_time` |
 
 ID Telegram — числа int64 (в multipart строковое представление), UUID — строки. Владелец определяется ядром по подтвержденной TelegramIdentity, а не по переданному `user_id`. Привязка по одноразовому коду должна требовать окончательного подтверждения в авторизованном вебе. Бот сам связь не подтверждает.
 

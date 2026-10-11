@@ -3,9 +3,30 @@ from datetime import datetime
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StringConstraints, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    StringConstraints,
+    field_validator,
+)
 
 NonBlank = Annotated[str, StringConstraints(min_length=1)]
+
+# Version and generation counters live in 32-bit database columns. A bigger number can never match and
+# would only break the query, so it is refused as an ordinary invalid value. The JSON schema stays the same.
+MAX_COUNTER = 2**31 - 1
+
+
+def _counter_in_range(value):
+    if value > MAX_COUNTER:
+        raise ValueError("Counter is too large")
+    return value
+
+
+Counter = Annotated[int, Field(ge=1), AfterValidator(_counter_in_range)]
 
 
 class StrictModel(BaseModel):
@@ -124,7 +145,7 @@ class CaptureResponse(AudioMetadata):
 
 
 class TranscriptEdit(StrictModel):
-    version: int = Field(ge=1)
+    version: Counter
     text: str = Field(min_length=1, max_length=12000)
 
     @field_validator("text")
@@ -187,7 +208,7 @@ class StructuredNote(StrictModel):
 
 
 class NoteEdit(StrictModel):
-    version: int = Field(ge=1)
+    version: Counter
     title: str = Field(min_length=1, max_length=200)
     markdown: str = Field(min_length=1, max_length=24000)
 
@@ -200,12 +221,12 @@ class NoteEdit(StrictModel):
 
 
 class ConclusionEdit(StrictModel):
-    version: int = Field(ge=1)
+    version: Counter
     status: Literal["accepted", "rejected"]
 
 
 class VersionRequest(StrictModel):
-    version: int = Field(ge=1)
+    version: Counter
 
 
 class ReminderContent(StrictModel):
@@ -244,11 +265,11 @@ class ReminderCreate(ReminderContent):
 
 
 class ReminderEdit(ReminderContent):
-    generation: int = Field(ge=1)
+    generation: Counter
 
 
 class ReminderCancel(StrictModel):
-    generation: int = Field(ge=1)
+    generation: Counter
 
 
 class ReminderResponse(StrictModel):

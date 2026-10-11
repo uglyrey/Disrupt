@@ -3,7 +3,16 @@ import logging
 import re
 import time
 
-from .clients import MAX_AUDIO_BYTES, REJECTIONS, CoreClient, Rejected, RemoteFailure, TelegramClient
+from .clients import (
+    ACTION_PREFIXES,
+    MAX_AUDIO_BYTES,
+    REJECTIONS,
+    TOKEN_CHARS,
+    CoreClient,
+    Rejected,
+    RemoteFailure,
+    TelegramClient,
+)
 from .config import Settings
 from .limit_text import saved_reply
 from .state import OffsetStore
@@ -55,6 +64,7 @@ LOGIN_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 # callback_data is limited to 64 bytes, so a longer code cannot travel through a button.
 LINK_CODE = re.compile(r"[A-Za-z0-9_-]{22,%d}" % (64 - len(LINK_PREFIX)))
 MANUAL_TTL = 600
+TELEGRAM_UNITS = 4096
 WATCH_TTL = 600
 WATCH_INTERVAL = 3.0
 
@@ -174,12 +184,7 @@ class Bot:
                     await self.answer_callback(callback)
                     await self.answer_buttons(chat_id, identity, token, sender)
                     return
-                payload = {k: v for k, v in identity.items() if k != "chat_id"}
-                result = await self.core.post("/telegram/actions", {**payload, "callback_token": token})
-                if result.get("status") not in {"completed", "already_completed"}:
-                    raise RemoteFailure("core_invalid_response")
-                await self.notify(chat_id, "Задача выполнена.")
-                await self.answer_callback(callback)
+                await self.reminder_button(callback, chat_id, identity, token)
                 return
             text = message.get("text", "")
             command, _, argument = text.partition(" ") if isinstance(text, str) else ("", "", "")
@@ -250,12 +255,74 @@ class Bot:
         except Rejected as error:
             await self.notify(chat_id, REJECTIONS[str(error)], self.settings.web_url)
 
-    async def answer_callback(self, callback):
+    async def answer_callback(self, callback, text=None, *, alert=False):
+        payload = {"callback_query_id": callback["id"]}
+        if text:
+            payload["text"] = text[:200]
+            if alert:
+                payload["show_alert"] = True
         try:
-            await self.telegram.call("answerCallbackQuery", {"callback_query_id": callback["id"]})
+            await self.telegram.call("answerCallbackQuery", payload)
         except RemoteFailure as error:
             if error.fatal:
                 raise
+
+    async def reminder_button(self, callback, chat_id, identity, data):
+        """Done, in an hour or tomorrow under a delivered reminder. The core decides, the bot reports."""
+        action, token = "done", data
+        if data[:2] in ACTION_PREFIXES:
+            action, token = ACTION_PREFIXES[data[:2]], data[2:]
+            if not TOKEN_CHARS.fullmatch(token):
+                return
+        payload = {k: v for k, v in identity.items() if k != "chat_id"}
+        try:
+            result = await self.core.post("/telegram/actions", {**payload, "callback_token": token, "action": action})
+        except Rejected as error:
+            # Stop the spinner and say why. Nothing else is sent to the chat.
+            await self.answer_callback(callback, REJECTIONS[str(error)], alert=True)
+            return
+        status, local_time = result.get("status"), result.get("local_time")
+        if status == "completed":
+            outcome, toast = "Готово, отметил выполненным", "Выполнено"
+        elif status == "already_completed":
+            outcome, toast = "Уже выполнено", "Уже выполнено"
+        elif status == "snoozed" and isinstance(local_time, str) and re.fullmatch(r"[0-2][0-9]:[0-5][0-9]", local_time):
+            outcome = ("Напомню через час, в " if action == "snooze_hour" else "Напомню завтра в ") + local_time
+            toast = outcome
+        else:
+            raise RemoteFailure("core_invalid_response")
+        await self.answer_callback(callback, toast)
+        await self.show_outcome(callback["message"], chat_id, outcome)
+
+    async def show_outcome(self, message, chat_id, outcome):
+        """Take the buttons away and add the outcome to the same message. If Telegram refuses, send a short new one."""
+        message_id = message.get("message_id")
+        original = message.get("text")
+        text = outcome
+        if isinstance(original, str) and original:
+            joined = original + "\n\n" + outcome
+            if len(joined.encode("utf-16-le")) // 2 <= TELEGRAM_UNITS:
+                text = joined
+        markup = message.get("reply_markup")
+        keyboard = markup.get("inline_keyboard") if isinstance(markup, dict) else None
+        links = [
+            [{"text": button["text"], "url": button["url"]}]
+            for row in (keyboard if isinstance(keyboard, list) else []) if isinstance(row, list)
+            for button in row
+            if isinstance(button, dict) and isinstance(button.get("text"), str) and isinstance(button.get("url"), str)
+        ]
+        if type(message_id) is int:
+            try:
+                await self.telegram.call("editMessageText", {
+                    "chat_id": chat_id, "message_id": message_id, "text": text,
+                    "link_preview_options": {"is_disabled": True}, "reply_markup": {"inline_keyboard": links},
+                })
+                return
+            except RemoteFailure as error:
+                if error.fatal:
+                    raise
+                logger.warning("bot_edit_failed code=%s", error.code)
+        await self.notify(chat_id, outcome)
 
     async def answer_buttons(self, chat_id, identity, token, sender):
         """Buttons of the sign-in and linking questions. Only the explicit yes reaches the core."""

@@ -289,8 +289,17 @@ def test_queue_limit(client, app):
 def test_static_page_and_health(client):
     assert client.get("/health").json()["simulation"] is True
     assert client.get("/").status_code == 200
-    assert "default-src 'self'" in client.get("/").headers["content-security-policy"]
+    policy = client.get("/").headers["content-security-policy"]
+    assert "default-src 'self'" in policy
+    # The player for a chosen or just recorded file reads a blob: address.
+    assert "media-src 'self' blob:" in policy
     assert client.get("/static/app.js").status_code == 200
+    icon = client.get("/static/favicon.svg")
+    assert icon.status_code == 200 and icon.headers["content-type"].startswith("image/svg+xml")
+    for page in ("/", "/privacy", "/terms", "/cookies", "/data-deletion"):
+        text = client.get(page).text
+        assert 'rel="icon" href="/static/favicon.svg"' in text, page
+        assert "Beresta" not in text, f"{page}: the name is written beresta"
 
 
 def test_api_docs_are_closed_by_default_and_open_on_request(app_factory):

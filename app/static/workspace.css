@@ -6,3 +6,4 @@ body{background:var(--wash);color:var(--ink)}header{max-width:none;padding:18px 
 
 #mobile-library-toggle{display:none}
 @media(max-width:640px){.workspace.has-note>#mobile-library-toggle{display:block;margin:16px 20px 0;align-self:flex-start;background:#e8eddf;color:var(--ink)}.workspace.has-note:not(.library-open)>.workspace-nav,.workspace.has-note:not(.library-open)>.library-column{display:none}.workspace.has-note .editor-column{padding-top:20px}}
+.dialog-status{margin:12px 0 0}.dialog-status:empty{display:none}.dialog-status:not(:empty){padding:10px 12px;border-radius:8px;background:#edf3e7;font-size:13px}

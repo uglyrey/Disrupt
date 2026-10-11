@@ -161,7 +161,8 @@ def test_claim_authorize_result_and_callback_are_one_safe_flow(reminders):
     response = claim(client)
     assert response.status_code == 200, response.text
     item = response.json()["items"][0]
-    assert item["delivery_id"] == ids["delivery"] and item["text"] == "Позвонить"
+    assert item["delivery_id"] == ids["delivery"]
+    assert item["text"].startswith("Напоминание\n\nПозвонить\n\nИз заметки «")
     assert item["note_url"].startswith(app.state.settings.public_origin + "/?capture=")
     assert claim(client).json() == {"items": []}
     with app.state.sessions() as db:
@@ -194,10 +195,10 @@ def test_internal_auth_and_bot_scope(reminders):
     assert len(claim(client).json()["items"]) == 1
 
 
-def test_note_reminder_has_no_completion_button(reminders):
+def test_note_reminder_has_buttons_too(reminders):
     app, client, ids = reminders
     due_delivery(app, client, ids, item=False)
-    assert claim(client).json()["items"][0]["callback_token"] is None
+    assert claim(client).json()["items"][0]["callback_token"] is not None
 
 
 @pytest.mark.parametrize("change", ["notifications", "blocked", "chat", "generation", "completed", "future"])

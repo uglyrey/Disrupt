@@ -30,6 +30,14 @@ module.exports=async()=>{
   $('tool-original').click();await settled();assert.equal($('original-details').open,true);assert.equal($('pop-original').hidden,false);assert.equal($('markdown').value,'Unsaved');assert.equal($('markdown').hidden,false);
   $('mobile-library-toggle').click();assert.equal($('mobile-library-toggle').getAttribute('aria-expanded'),'true');
   $('mobile-library-toggle').click();assert.equal($('workspace').classList.contains('library-open'),false);
+  // A dialog hides the line under the header, so its own status line carries the text.
+  $('manage-categories').click();assert.equal($('category-dialog').open,true);
+  const dialogStatus=$('category-dialog').querySelector('.dialog-status');assert.ok(dialogStatus);assert.equal(dialogStatus.textContent,'');
+  $('category-name').value=' research ';$('category-form').onsubmit({preventDefault(){},target:$('category-form')});await settled();
+  assert.equal(dialogStatus.textContent,'Такая категория уже есть.');assert.equal($('message').textContent,'Такая категория уже есть.');
+  $('category-dialog').close();$('manage-categories').click();assert.equal(dialogStatus.textContent,'','status is cleared when the dialog opens');
+  $('category-dialog').close();
+  $('open-telegram').click();assert.ok($('telegram-dialog').querySelector('.dialog-status'));$('telegram-dialog').close();
   $('open-feedback').click();assert.equal($('feedback-dialog').open,true);
   $('feedback-subject').value='Bug';$('feedback-description').value='Synthetic reproduction';
   await $('feedback-form').onsubmit({preventDefault(){}});assert.match($('feedback-status').textContent,/Текст сохранён/);assert.equal($('feedback-description').value,'Synthetic reproduction');

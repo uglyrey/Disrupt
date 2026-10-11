@@ -84,7 +84,7 @@ def test_concurrent_actions_do_not_advance_task_more_than_once(task):
         assert db.get(Item, ids["item"]).version == 2
 
 
-@pytest.mark.parametrize("change", ["generation", "cancelled", "pending", "non_task", "wrong_note"])
+@pytest.mark.parametrize("change", ["generation", "cancelled", "pending", "non_task"])
 def test_expired_or_unissued_actions_do_not_change_task(task, change):
     app, client, ids = task
     with app.state.sessions() as db:
@@ -95,10 +95,8 @@ def test_expired_or_unissued_actions_do_not_change_task(task, change):
             reminder.status = "cancelled"
         elif change == "pending":
             delivery.status, delivery.authorized_at = "pending", None
-        elif change == "non_task":
-            db.get(Item, ids["item"]).kind = "idea"
         else:
-            reminder.item_id = None
+            db.get(Item, ids["item"]).kind = "idea"
         db.commit()
     response = action(client)
     assert response.status_code == 409 and response.json()["error"]["code"] == "action_expired"

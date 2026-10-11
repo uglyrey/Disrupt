@@ -64,6 +64,11 @@ def seed_items(app, user_id, note_id, *specs):
     return ids
 
 
+def proposals_only(client):
+    """The AI does not set reminders itself, so the note screen and the Telegram reply only propose them."""
+    assert client.patch("/api/v1/assistant/settings", json={"ai_reminders_enabled": False}).status_code == 200
+
+
 def second_user(app, name="second"):
     other = TestClient(app)
     account = register(other, name)
@@ -282,6 +287,7 @@ def test_days_follow_the_configured_time_zone(app_factory):
 
 def test_note_detail_proposes_a_reminder_for_an_open_task_with_a_deadline(app, client):
     register(client)
+    proposals_only(client)
     note = ready_note(app, client)
     task = next(item for item in note["items"] if item["kind"] == "task")
     tomorrow = datetime.now(MOSCOW).date() + timedelta(days=1)
@@ -297,6 +303,7 @@ def test_note_detail_proposes_a_reminder_for_an_open_task_with_a_deadline(app, c
 
 def test_proposal_goes_away_with_a_reminder_and_returns_after_cancel(app, client):
     register(client)
+    proposals_only(client)
     note = ready_note(app, client)
     task = next(item for item in note["items"] if item["kind"] == "task")
     path = f"/api/v1/notes/{note['id']}"
@@ -332,6 +339,7 @@ def test_proposal_uses_the_configured_time_zone_and_is_private(app_factory):
     app = app_factory(limit_timezone="Asia/Vladivostok")
     with TestClient(app) as client:
         register(client)
+        proposals_only(client)
         note = ready_note(app, client)
         task = next(item for item in note["items"] if item["kind"] == "task")
         assert task["proposed_reminder"]["timezone"] == "Asia/Vladivostok"
@@ -345,6 +353,7 @@ def test_proposal_uses_the_configured_time_zone_and_is_private(app_factory):
 
 def test_processing_reply_offers_a_reminder_for_a_task_with_a_deadline(reminders):
     app, client, ids = reminders
+    proposals_only(client)
     processed(app, client)
     delivery = claim(client).json()["items"][0]
     text = delivery["text"]
@@ -359,6 +368,7 @@ def test_processing_reply_offers_a_reminder_for_a_task_with_a_deadline(reminders
 
 def test_processing_reply_has_no_hint_without_a_deadline_or_with_a_reminder(reminders):
     app, client, ids = reminders
+    proposals_only(client)
     assert message(client, update_id=300, text="Просто мысль без задач").status_code == 200
     assert Worker(app.state.sessions, app.state.settings, provider=MockProvider()).run_once()
     plain = claim(client).json()["items"][0]
@@ -376,6 +386,7 @@ def test_processing_reply_has_no_hint_without_a_deadline_or_with_a_reminder(remi
 
 def test_hint_keeps_the_telegram_length_limit(reminders):
     app, client, ids = reminders
+    proposals_only(client)
     saved = processed(app, client)
     with app.state.sessions.begin() as db:
         db.scalar(select(Note).where(Note.capture_id == saved["capture_id"])).markdown = "😀" * 6000
@@ -535,3 +546,40 @@ def test_tasks_list_pages_and_validates_arguments(app, client):
     for params in ({"limit": 0}, {"limit": 201}, {"offset": -1}, {"status": "weird"}):
         assert client.get("/api/v1/tasks", params=params).status_code == 422
     assert TestClient(app).get("/api/v1/tasks").status_code == 401
+
+
+def test_tasks_list_resolves_the_quoted_deadline_from_the_note_time(app, client):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    owner = register(client)["id"]
+    zone = ZoneInfo("Europe/Moscow")
+    written = datetime(2026, 10, 5, 12, 0, tzinfo=zone).timestamp()  # Monday
+    note = seed_note(app, owner, written)
+    with app.state.sessions.begin() as db:
+        for position, (text, due_text, due_at) in enumerate([
+            ("Дата со временем", "12 октября в 15:00", None),
+            ("Завтра без времени", "завтра", None),
+            ("Через два часа", "через 2 часа", None),
+            ("Не разобрать", "когда-нибудь потом", None),
+            ("Без цитаты", None, None),
+            ("Дата в поле", "до пятницы", 1790000000.0),
+        ]):
+            db.add(Item(user_id=owner, note_id=note, kind="task", status="open", text=text, due_text=due_text,
+                        due_at=due_at, position=position))
+    rows = {row["text"]: row for row in client.get("/api/v1/tasks").json()["items"]}
+
+    def moment(*args):
+        return datetime(*args, tzinfo=zone).timestamp()
+
+    exact = rows["Дата со временем"]
+    assert exact["due_resolved_at"] == moment(2026, 10, 12, 15) and exact["due_has_time"] is True
+    tomorrow = rows["Завтра без времени"]
+    assert tomorrow["due_resolved_at"] == moment(2026, 10, 6, 9) and tomorrow["due_has_time"] is False
+    soon = rows["Через два часа"]
+    assert soon["due_resolved_at"] == moment(2026, 10, 5, 14) and soon["due_has_time"] is True
+    for name in ("Не разобрать", "Без цитаты"):
+        assert rows[name]["due_resolved_at"] is None and rows[name]["due_has_time"] is False
+    assert rows["Не разобрать"]["due_text"] == "когда-нибудь потом"
+    stored = rows["Дата в поле"]
+    assert stored["due_resolved_at"] == 1790000000.0 and stored["due_has_time"] is True
