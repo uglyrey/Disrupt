@@ -13,6 +13,13 @@ PROGRAM_BASE_URL = "https://shared1.multitool.works:4000/v1"
 OFFICIAL_BASE_URL = "https://foundation-models.api.cloud.ru/v1"
 ALLOWED_MODEL_BASE_URLS = {PROGRAM_BASE_URL, OFFICIAL_BASE_URL}
 LLM_READ_TIMEOUT_SECONDS = 90
+LLM_READ_TIMEOUT_RANGE = (30, 240)
+RESPONSE_BYTE_LIMIT = 256000
+
+
+def stream_deadline_seconds(read_timeout: int) -> int:
+    """Total wall-clock limit for a streamed answer: twice the read timeout, at most 300 s."""
+    return min(read_timeout * 2, 300)
 
 
 def read_secret_file(path: str, *, maximum: int = 16384) -> str:
@@ -69,6 +76,9 @@ class Settings:
     limit_timezone: str = "Europe/Moscow"
     session_seconds: int = 86400
     lease_seconds: int = 120
+    # Ждём ответ модели не дольше этого времени на одно чтение. Потоковый режим включают только после ручной проверки.
+    llm_read_timeout_seconds: int = LLM_READ_TIMEOUT_SECONDS
+    llm_stream: bool = False
     delivery_lease_seconds: int = 60
     error_log_file: str = "data/errors.log"
     audio_storage_path: str = "data/audio"
@@ -128,8 +138,17 @@ class Settings:
             raise ValueError("NOTES_LIMIT_TIMEZONE must be a known IANA time zone") from None
         if self.provider not in {"mock", "cloudru"}:
             raise ValueError("NOTES_PROVIDER must be mock or cloudru")
-        if self.lease_seconds < LLM_READ_TIMEOUT_SECONDS + 30:
-            raise ValueError("Worker lease must exceed the provider timeout")
+        low, high = LLM_READ_TIMEOUT_RANGE
+        if not low <= self.llm_read_timeout_seconds <= high:
+            raise ValueError(f"NOTES_LLM_READ_TIMEOUT_SECONDS must be between {low} and {high}")
+        longest_call = (
+            stream_deadline_seconds(self.llm_read_timeout_seconds)
+            if self.llm_stream else self.llm_read_timeout_seconds
+        )
+        if self.lease_seconds < longest_call + 30:
+            raise ValueError(
+                f"Worker lease must exceed the provider timeout by 30 seconds (needs at least {longest_call + 30})"
+            )
         if self.provider == "cloudru" and (
             not self.cloudru_model
             or self.live_call_limit <= 0
@@ -169,7 +188,18 @@ class Settings:
         if analytics_file and analytics_key:
             raise ValueError("Use either NOTES_ANALYTICS_PSEUDONYM_KEY or NOTES_ANALYTICS_PSEUDONYM_KEY_FILE")
 
+        llm_read_timeout = int(os.environ.get("NOTES_LLM_READ_TIMEOUT_SECONDS", str(LLM_READ_TIMEOUT_SECONDS)))
+        llm_stream = flag("NOTES_LLM_STREAM", False)
+        # The lease follows the longest possible model call, so a slow answer is never cut off by the worker.
+        derived_lease = max(
+            cls.lease_seconds,
+            (stream_deadline_seconds(llm_read_timeout) if llm_stream else llm_read_timeout) + 30,
+        )
+
         return cls(
+            llm_read_timeout_seconds=llm_read_timeout,
+            llm_stream=llm_stream,
+            lease_seconds=derived_lease,
             analytics_pseudonym_key=(read_secret_file(analytics_file, maximum=4096) if analytics_file else analytics_key),
             internal_api_token=(
                 read_secret_file(internal_token_file, maximum=4096) if internal_token_file else internal_token
