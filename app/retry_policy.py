@@ -7,7 +7,7 @@ deployment is not already struggling. Every limit is read from the database, so 
 import random
 import time
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from app.models import Job, ProviderUsage
 
@@ -73,7 +73,9 @@ def retries_in_last_hour(db, now, user_id=None):
     A retry leaves a receipt whose request_id contains `:r<N>` (see UsageRecorder), so nothing new is stored.
     """
     receipts = select(func.count()).select_from(ProviderUsage).where(
-        ProviderUsage.occurred_at >= now - HOUR, ProviderUsage.request_id.like("%:r%"),
+        ProviderUsage.occurred_at >= now - HOUR,
+        # Exactly the retry receipts of capture jobs (`<job>:llm:rN`, `<job>:stt:rN`), never other ids with ":r".
+        or_(ProviderUsage.request_id.like("%:llm:r_"), ProviderUsage.request_id.like("%:stt:r_")),
     )
     waiting = select(func.count()).select_from(Job).where(Job.status == "queued", Job.attempts > 0)
     if user_id is not None:
