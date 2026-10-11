@@ -59,8 +59,8 @@ function taskRows() {
     note_id: 'n1', note_title: 'План', note_version: 3, note_updated_at: 1791220000, ...extra});
   return [
     row('t1', 'Позвонить <b>маме</b>', {due_at: 1700000000}),
-    row('t2', 'Купить молоко', {due_text: 'завтра'}),
-    row('t3', 'Отправить макет', {note_id: 'n2', note_title: 'Другая'}),
+    row('t2', 'Купить молоко', {due_text: 'завтра', due_resolved_at: Date.now() / 1000 + 86400, due_has_time: false}),
+    row('t3', 'Отправить макет', {note_id: 'n2', note_title: 'Другая', due_text: 'до пятницы'}),
     row('t4', 'Старое дело', {status: 'completed'}),
   ];
 }
@@ -218,7 +218,11 @@ async function tasksView() {
     assert.equal($('tasks-list').querySelector('b'), null, 'Task text is never markup');
     const first = $('tasks-list').querySelector('.tk-row');
     assert.match(first.querySelector('.tk-due').textContent, /^Просрочено, срок /);
-    assert.equal($('tasks-list').querySelectorAll('.tk-row')[1].querySelector('.tk-due').textContent, 'Срок из записи: «завтра»');
+    const second = $('tasks-list').querySelectorAll('.tk-row')[1];
+    assert.equal(second.querySelector('.tk-due').textContent, 'Срок завтра');
+    assert.equal($('tasks-list').querySelectorAll('.tk-row')[2].querySelector('.tk-due'), null, 'An unresolved quote shows no deadline');
+    assert.ok(!$('tasks-list').textContent.includes('до пятницы') && !$('tasks-list').textContent.includes('из записи'), 'The quote is never shown');
+    assert.ok(first.querySelector('.tk-due').compareDocumentPosition(first.querySelector('.tk-note')) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'Deadline goes before the note link');
     const box = first.querySelector('input[type=checkbox]');
     assert.equal(w.document.getElementById(box.getAttribute('aria-labelledby')).textContent, 'Позвонить <b>маме</b>');
     assert.equal(first.querySelector('.tk-note').textContent, 'План');

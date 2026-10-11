@@ -18,9 +18,16 @@
   }
   function placePop(entry) {
     // Desktop popovers hang from the right edge of their button. If that runs off the left edge, hang from the left.
-    entry.pop.classList.remove('is-left');
-    const box = entry.pop.getBoundingClientRect();
-    if (box.width && box.left < 8) entry.pop.classList.add('is-left');
+    // If it only runs into the columns on the left, make it narrower so it stays inside the note column.
+    const pop = entry.pop;
+    pop.classList.remove('is-left'); pop.style.maxWidth = '';
+    if (window.getComputedStyle(pop).position === 'fixed') return; // On a phone it is a sheet at the bottom.
+    const box = pop.getBoundingClientRect();
+    if (!box.width) return;
+    if (box.left < 8) { pop.classList.add('is-left'); return; }
+    const column = pop.closest('.editor-column');
+    const edge = column ? column.getBoundingClientRect().left + 8 : 0;
+    if (box.left < edge && box.right - edge >= 280) pop.style.maxWidth = `${Math.floor(box.right - edge)}px`;
   }
   function openTool(key, {focus = true} = {}) {
     const entry = tools.get(key);

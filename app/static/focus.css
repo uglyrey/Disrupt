@@ -119,3 +119,5 @@
   #capture-card .tools .tool-btn.quiet{width:42px;height:42px}
 }
 @media(prefers-reduced-motion:reduce){.tool-btn::after{transition:none}}
+/* The sticky columns on the left must not paint over a popover that reaches into them. */
+@media(min-width:641px){.editor-column{position:relative;z-index:1}}

@@ -39,7 +39,7 @@
   new MutationObserver(categoriesNavigation).observe(get('category-filter'),{childList:true});
   get('clear-search').addEventListener('click',()=>{get('library-title').textContent='Все заметки';categoriesNavigation();});
   function openDialog(id,opener) {
-    const dialog=get(id);dialog.showModal();dialog._opener=opener;
+    const dialog=get(id);dialog.querySelector('.dialog-status')?.replaceChildren();dialog.showModal();dialog._opener=opener;
   }
   for(const [button,id] of [['manage-categories','category-dialog'],['open-telegram','telegram-dialog'],['open-feedback','feedback-dialog']])get(button).onclick=event=>openDialog(id,event.currentTarget);
   for(const button of document.querySelectorAll('[data-close-dialog]'))button.onclick=()=>button.closest('dialog').close();
