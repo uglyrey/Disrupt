@@ -79,6 +79,14 @@ def build_dashboard(db, settings, user_id, days, now=None):
         ProductEvent.user_id == user_id, ProductEvent.name == "task_completed",
         ProductEvent.occurred_at >= period_start,
     )).all()
+    # Events stay as history. A task that was reopened or removed no longer counts as done.
+    done_ids = {operation.split(":")[0] for operation in done_events}
+    done_now = (
+        set(db.scalars(select(Item.id).where(
+            Item.user_id == user_id, Item.kind == "task", Item.status == "completed", Item.id.in_(done_ids),
+        )).all())
+        if done_ids else set()
+    )
 
     note_counts = dict(db.execute(
         select(Note.category_id, func.count()).where(Note.user_id == user_id).group_by(Note.category_id)
@@ -116,7 +124,7 @@ def build_dashboard(db, settings, user_id, days, now=None):
         "notes_per_day": [{"date": day.isoformat(), "notes": count} for day, count in per_day.items()],
         "tasks": {
             "open": task_open, "completed": task_done,
-            "completed_in_period": len({operation.split(":")[0] for operation in done_events}),
+            "completed_in_period": len(done_now),
             "completion_rate": round(task_done / total_tasks, 2) if total_tasks else None,
         },
         "ideas": ideas,

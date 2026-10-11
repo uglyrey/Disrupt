@@ -6,7 +6,7 @@
   const $ = id => document.getElementById(id);
   const NS = 'http://www.w3.org/2000/svg';
   const ASSISTANT_COST = 1;
-  const VIEWS = ['overview', 'assistant'];
+  const VIEWS = ['overview', 'assistant', 'tasks'];
   const monthsShort = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const weekdaysShort = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
   const zoneNames = {'Europe/Moscow': 'Москва', 'Europe/Berlin': 'Берлин', 'Asia/Yekaterinburg': 'Екатеринбург',
@@ -89,11 +89,16 @@
       else if (VIEWS.includes(location.hash.replace(/^#/, ''))) history.replaceState(null, '', location.pathname + location.search);
     } catch (_) { /* a sandboxed frame may refuse */ }
   }
+  function markCurrent(button, on) {
+    if (on) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
+  }
   function syncNav() {
-    for (const button of document.querySelectorAll('[data-brain-view]')) {
-      button.setAttribute('aria-pressed', String(button.dataset.brainView === current));
-    }
+    for (const button of document.querySelectorAll('[data-brain-view]')) markCurrent(button, button.dataset.brainView === current);
+    markCurrent($('nav-notes'), !current);
     $('workspace').classList.toggle('has-view', Boolean(current));
+    // On a phone the row scrolls sideways. Keep the open section in view without moving the page.
+    const nav = $('main-nav'), here = nav.querySelector('[aria-current]');
+    if (here && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, here.offsetLeft - (nav.clientWidth - here.offsetWidth) / 2);
   }
   function hideViews() {
     current = null;
@@ -112,6 +117,7 @@
   }
   function refresh(name) {
     if (name === 'overview') loadOverview();
+    else if (name === 'tasks') window.BerestaTasks?.open();
     else openAssistant();
   }
   function navigate(name) {
@@ -129,6 +135,13 @@
     }
   }
   for (const button of document.querySelectorAll('[data-brain-view]')) button.onclick = () => navigate(button.dataset.brainView);
+  // "Все заметки" leaves a screen. Inside the notes workspace it only opens the list on a phone.
+  $('nav-notes').onclick = () => {
+    if (current) { setHash(null); route(); return; }
+    $('workspace').classList.add('library-open');
+    $('mobile-library-toggle').setAttribute('aria-expanded', 'true');
+  };
+  syncNav();
   window.addEventListener('hashchange', route);
   // Another view (a note, a source, the capture form) took the column: the screens step aside.
   new MutationObserver(() => {
@@ -137,7 +150,8 @@
     }
   }).observe($('workspace'), {attributes: true, attributeFilter: ['hidden'], subtree: true});
   new MutationObserver(() => {
-    if ($('workspace').hidden) { hideViews(); usage = null; settingsKnown = false; } else route();
+    $('main-nav').hidden = $('workspace').hidden;
+    if ($('workspace').hidden) { hideViews(); window.BerestaTasks?.reset(); usage = null; settingsKnown = false; } else route();
   }).observe($('workspace'), {attributes: true, attributeFilter: ['hidden']});
   $('category-navigation').addEventListener('click', () => $('workspace').classList.add('library-open'));
 
@@ -376,7 +390,7 @@
   let settingsKnown = false;
   function pollMs() { return typeof window.assistantPollMs === 'number' ? window.assistantPollMs : 2000; }
   function maxWaitMs() { return typeof window.assistantMaxWaitMs === 'number' ? window.assistantMaxWaitMs : 180000; }
-  function stopAll() { for (const kind of Object.keys(state)) { state[kind]++; running[kind] = false; } if (!$('workspace').hidden) syncButtons(); }
+  function stopAll() { window.BerestaTasks?.stop(); for (const kind of Object.keys(state)) { state[kind]++; running[kind] = false; } if (!$('workspace').hidden) syncButtons(); }
   function say(kind, text) { $(slots[kind].status).textContent = text; }
   function noteButton(id, title, className) {
     const button = el('button', title, className); button.type = 'button';
