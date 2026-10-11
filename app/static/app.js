@@ -31,6 +31,7 @@ const errors = {
   provider_invalid_response:'ИИ ответил, но результат не удалось принять. Исходник сохранён. %RETRY%',
   provider_incomplete_response:'ИИ не успел закончить ответ. Исходник сохранён. %RETRY%',
   provider_response_too_large:'Ответ ИИ получился слишком большим. Исходник сохранён. Его можно сохранить без ИИ.',
+  provider_connect_failed:'Не удалось связаться с сервисом ИИ. Исходник сохранён. %RETRY%',
   provider_connection_unknown:'Не удалось связаться с сервисом ИИ. Запрос мог быть учтён. Исходник сохранён. %RETRY%',
   ungrounded_quote:'ИИ вернул неточную цитату. Исходник сохранён. %RETRY%',
   provider_rate_limit:'Сервис ИИ ограничил запросы. Подождите немного. Исходник сохранён. %RETRY%',
@@ -369,6 +370,12 @@ async function openNote(id, {userAction = false, search = null, reminder = null,
     });
   } finally { setNoteBusy(false); }
 }
+// While a retry is scheduled the job stays queued and carries retry_at (seconds). The server retries by itself.
+function retryNote(job) {
+  if (job.status !== 'queued' || !job.retry_at) return '';
+  const time = new Date(job.retry_at*1000).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  return `Сервис ИИ не ответил. Попробуем ещё раз в ${time}. Запись сохранена.`;
+}
 async function loadJobs() {
   const jobs = await api('/api/v1/jobs'); $('jobs').replaceChildren();
   for (const job of jobs) {
@@ -387,6 +394,7 @@ async function loadJobs() {
         actions.append(manual); row.append(actions);
       }
     }
+    if (retryNote(job)) row.append(element('p',retryNote(job)));
     if (job.status === 'succeeded' && job.error_code === 'ungrounded_details_omitted') row.append(element('p','Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.'));
     if (job.note_id) {
       const button = element('button','Открыть заметку','quiet');
@@ -456,14 +464,19 @@ function watchSavedJob(job, generation, kind = 'text', draft = '') {
   });
 }
 async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGeneration, draft = $('thought').value} = {}) {
-  let lastStatus = 'queued';
+  let lastStatus = 'queued', waiting = false, historyShown = false;
   // About five minutes: the model may answer in up to NOTES_LLM_READ_TIMEOUT_SECONDS plus queue time.
-  for (let i=0; i<300 && currentEpoch===epoch && generation===viewGeneration; i++) {
+  // A retry the server scheduled within ten minutes is followed too (the deadline moves past that retry).
+  let deadline = Date.now() + 300000;
+  while (currentEpoch===epoch && generation===viewGeneration && Date.now() < deadline) {
     const job = await api(`/api/v1/jobs/${id}`);
     if (currentEpoch!==epoch || generation!==viewGeneration) return;
     lastStatus = job.status;
-    $('job-status').textContent = job.status === 'queued'
+    waiting = Boolean(retryNote(job));
+    if (waiting && job.retry_at*1000 - Date.now() < 600000) deadline = Math.max(deadline, job.retry_at*1000 + 150000);
+    $('job-status').textContent = waiting ? retryNote(job) : job.status === 'queued'
       ? 'В очереди. Исходник сохранён. Можно продолжить работу.' : statusLabels[job.status];
+    if (waiting && !historyShown) { historyShown = true; await loadJobs(); }  // History rows show the same text.
     if (job.status === 'succeeded') {
       if (job.error_code === 'ungrounded_details_omitted') $('job-status').textContent = 'Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.';
       await loadNotes(); await loadJobs(); await loadProviderUsage();
@@ -488,10 +501,11 @@ async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGenera
       } else message(error);
       return;
     }
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, waiting ? 5000 : 1000));
   }
   if (currentEpoch===epoch && generation===viewGeneration) {
-    message(lastStatus === 'queued'
+    message(waiting ? 'Исходник сохранён. ИИ попробует ещё раз позже. Статус доступен в последних записях.'
+      : lastStatus === 'queued'
       ? 'Исходник сохранён. Задание пока в очереди. Статус доступен в последних записях.'
       : 'Исходник сохранён. Обработка ещё не завершилась. Статус доступен в последних записях.');
   }
