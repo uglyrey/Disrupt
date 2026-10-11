@@ -32,6 +32,9 @@ from app.reminder_proposals import propose_reminder
 MAX_CATEGORIES = 100
 MAX_ITEMS = 30
 
+# Paging never needs to go further. A larger offset is cut to this, and the page is empty.
+MAX_OFFSET = 10**9
+
 
 def lock_account(db, user_id):
     db.execute(update(User).where(User.id == user_id).values(source=User.source))
@@ -597,9 +600,11 @@ def saved_audio_view(db, capture):
     }
 
 
-def job_view(db, job):
-    capture = db.get(Capture, job.capture_id)
-    note_id = db.scalar(select(Note.id).where(Note.capture_id == job.capture_id))
+def job_view(db, job, *, capture=None, note_id=None):
+    """One job. A list passes the capture and note it already loaded, so the list costs two queries, not 2 per job."""
+    if capture is None:
+        capture = db.get(Capture, job.capture_id)
+        note_id = db.scalar(select(Note.id).where(Note.capture_id == job.capture_id))
     return {
         "id": job.id,
         "capture_id": job.capture_id,
@@ -611,3 +616,12 @@ def job_view(db, job):
         "created_at": job.created_at,
         "finished_at": job.finished_at,
     }
+
+
+def job_views(db, jobs):
+    ids = [job.capture_id for job in jobs]
+    if not ids:
+        return []
+    captures = {c.id: c for c in db.scalars(select(Capture).where(Capture.id.in_(ids)))}
+    notes = dict(db.execute(select(Note.capture_id, Note.id).where(Note.capture_id.in_(ids))).all())
+    return [job_view(db, job, capture=captures[job.capture_id], note_id=notes.get(job.capture_id)) for job in jobs]

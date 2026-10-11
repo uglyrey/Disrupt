@@ -13,7 +13,7 @@ from app.schemas import (
     ReminderTimeResponse,
 )
 from app.security import get_login_session
-from app.services import owned_note
+from app.services import MAX_OFFSET, owned_note
 
 
 def build_router(database):
@@ -38,7 +38,7 @@ def build_router(database):
         owned_note(db, note_id, session.user_id)
         rows = db.scalars(select(Reminder).where(
             Reminder.note_id == note_id, Reminder.user_id == session.user_id,
-        ).order_by(Reminder.scheduled_at, Reminder.id).offset(offset).limit(limit))
+        ).order_by(Reminder.scheduled_at, Reminder.id).offset(min(offset, MAX_OFFSET)).limit(limit))
         return [reminder_view(db, row) for row in rows]
 
     @router.get("/reminders/{reminder_id}", response_model=ReminderResponse)

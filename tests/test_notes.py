@@ -297,7 +297,9 @@ def test_static_page_and_health(client):
     icon = client.get("/static/favicon.svg")
     assert icon.status_code == 200 and icon.headers["content-type"].startswith("image/svg+xml")
     for page in ("/", "/privacy", "/terms", "/cookies", "/data-deletion"):
-        assert 'rel="icon" href="/static/favicon.svg"' in client.get(page).text, page
+        text = client.get(page).text
+        assert 'rel="icon" href="/static/favicon.svg"' in text, page
+        assert "Beresta" not in text, f"{page}: the name is written beresta"
 
 
 def test_api_docs_are_closed_by_default_and_open_on_request(app_factory):

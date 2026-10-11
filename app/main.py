@@ -59,11 +59,13 @@ from app.security import (
     verify_password,
 )
 from app.services import (
+    MAX_OFFSET,
     capture_text,
     capture_view,
     create_audio_capture,
     edit_note,
     job_view,
+    job_views,
     note_view,
     owned_capture,
     owned_note,
@@ -408,7 +410,7 @@ def create_app(
             .order_by(Job.created_at.desc(), Job.id)
             .limit(limit)
         ).all()
-        return [job_view(db, job) for job in jobs]
+        return job_views(db, jobs)
 
     @app.get("/api/v1/jobs/{job_id}")
     def read_job(job_id: str, request: Request, db=Depends(database)):
@@ -433,6 +435,7 @@ def create_app(
         db=Depends(database),
     ):
         session = get_login_session(request, db)
+        offset = min(offset, MAX_OFFSET)  # A number beyond the database integer would be a 500; the page is empty anyway.
         notes = search_notes(
             db, session.user_id, q=q, category_id=category_id, channel=channel, input_kind=input_kind,
             limit=limit, offset=offset,
