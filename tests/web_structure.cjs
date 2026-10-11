@@ -192,6 +192,7 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
       }
     }
     await require('./web_job_waiting.cjs')();
+    await require('./web_failed_job_retry.cjs')();
     await require('./web_workspace.cjs')();
     await require('./web_note_ux.cjs')();
     await require('./web_focus.cjs')();
