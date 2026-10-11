@@ -34,6 +34,7 @@ from app.models import (
     User,
     new_id,
 )
+from app.reminders import local_clock, reschedule, snooze_time
 from app.schemas import (
     IntegrationError,
     LinkResponse,
@@ -115,34 +116,8 @@ def telegram_identity(db, body):
     return identity
 
 
-def complete_telegram_task(db, body):
-    identity = telegram_identity(db, body)
-    lock_account(db, identity.user_id)
-    delivery = db.scalar(select(Outbox).where(Outbox.callback_token_hash == hash_token(body.callback_token)))
-    if delivery is None:
-        raise IntegrationRejection(409, "action_expired", "Кнопка недействительна или устарела")
-    if (delivery.user_id, delivery.bot_id, delivery.chat_id) != (
-        identity.user_id, body.bot_id, identity.chat_id,
-    ):
-        raise IntegrationRejection(403, "action_forbidden", "Кнопка принадлежит другому аккаунту")
-    reminder = db.get(Reminder, delivery.reminder_id)
-    item = db.get(Item, reminder.item_id) if reminder and reminder.item_id else None
-    if (
-        reminder is None or item is None or reminder.user_id != identity.user_id
-        or item.user_id != identity.user_id or item.note_id != reminder.note_id or item.kind != "task"
-        or delivery.authorized_at is None or delivery.status not in {"authorized", "sent", "unknown", "cancelled"}
-    ):
-        raise IntegrationRejection(409, "action_expired", "Кнопка больше не относится к действующей задаче")
-    if item.status == "completed":
-        return {"status": "already_completed"}
-    if (
-        reminder.status not in {"confirmed", "sent", "unknown"}
-        or reminder.generation != delivery.generation or delivery.status == "cancelled"
-    ):
-        raise IntegrationRejection(409, "action_expired", "Напоминание отменено или изменено")
-    note = db.scalar(select(Note).where(Note.id == item.note_id, Note.user_id == identity.user_id))
-    if note is None:
-        raise IntegrationRejection(409, "action_expired", "Запись больше недоступна")
+def complete_item(db, identity, item, note):
+    """Mark a task done exactly as the site does: version bumps, revision, event, other reminders cancelled."""
     db.execute(
         update(Note).where(Note.id == note.id, Note.user_id == identity.user_id)
         .values(version=Note.version + 1, updated_at=time.time()),
@@ -155,6 +130,49 @@ def complete_telegram_task(db, body):
     record_event(db, identity.user_id, "task_completed", f"{item.id}:{item.version}", "telegram")
     db.flush()
     save_revision(db, note)
+
+
+def handle_telegram_action(db, body):
+    """A button under a delivered reminder: done, snooze for an hour, or snooze until tomorrow."""
+    identity = telegram_identity(db, body)
+    lock_account(db, identity.user_id)
+    delivery = db.scalar(select(Outbox).where(Outbox.callback_token_hash == hash_token(body.callback_token)))
+    if delivery is None:
+        raise IntegrationRejection(409, "action_expired", "Кнопка недействительна или устарела")
+    if (delivery.user_id, delivery.bot_id, delivery.chat_id) != (
+        identity.user_id, body.bot_id, identity.chat_id,
+    ):
+        raise IntegrationRejection(403, "action_forbidden", "Кнопка принадлежит другому аккаунту")
+    reminder = db.get(Reminder, delivery.reminder_id) if delivery.reminder_id else None
+    item = db.get(Item, reminder.item_id) if reminder and reminder.item_id else None
+    if (
+        reminder is None or reminder.user_id != identity.user_id
+        or (reminder.item_id is not None and (
+            item is None or item.user_id != identity.user_id or item.note_id != reminder.note_id or item.kind != "task"
+        ))
+        or delivery.authorized_at is None or delivery.status not in {"authorized", "sent", "unknown", "cancelled"}
+    ):
+        raise IntegrationRejection(409, "action_expired", "Кнопка больше не относится к действующей задаче")
+    finished = item.status == "completed" if item is not None else reminder.status == "completed"
+    if body.action == "done" and finished:
+        return {"status": "already_completed"}
+    if (
+        reminder.status not in {"confirmed", "sent", "unknown"}
+        or reminder.generation != delivery.generation or delivery.status == "cancelled"
+        or (item is not None and item.status != "open")
+    ):
+        raise IntegrationRejection(409, "action_expired", "Напоминание отменено, изменено или уже выполнено")
+    if body.action != "done":
+        when = snooze_time(reminder, body.action, time.time())
+        reschedule(db, reminder, when, reminder.timezone, reminder.text, "telegram")
+        return {"status": "snoozed", "local_time": local_clock(reminder)}
+    if item is None:
+        reminder.status = "completed"
+        return {"status": "completed"}
+    note = db.scalar(select(Note).where(Note.id == item.note_id, Note.user_id == identity.user_id))
+    if note is None:
+        raise IntegrationRejection(409, "action_expired", "Запись больше недоступна")
+    complete_item(db, identity, item, note)
     return {"status": "completed"}
 
 
@@ -295,9 +313,9 @@ def build_router(database, settings):
 
         return process_update(db, body, "text", handle)
 
-    @router.post("/telegram/actions", response_model=ActionResponse)
+    @router.post("/telegram/actions", response_model=ActionResponse, response_model_exclude_none=True)
     def telegram_action(body: ActionRequest, db=Depends(database)):
-        return process_update(db, body, "action", lambda _: complete_telegram_task(db, body))
+        return process_update(db, body, "action", lambda _: handle_telegram_action(db, body))
 
     @router.post("/deliveries/claim", response_model=ClaimResponse)
     def claim(body: ClaimRequest, db=Depends(database)):

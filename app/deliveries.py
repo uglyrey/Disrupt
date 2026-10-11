@@ -5,12 +5,16 @@ import hmac
 import json
 import secrets
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import and_, or_, select
 
 from app.analytics import record_event
 from app.models import Capture, Item, Job, Note, Outbox, Reminder, TelegramIdentity
+from app.reminder_proposals import label_for
+from app.reminders import AUTO_KEY_PREFIX
 from app.security import hash_token
 from app.services import item_view, lock_account, reminder_proposals
 
@@ -111,11 +115,47 @@ def utf16_units(text):
     return len(text.encode("utf-16-le")) // 2
 
 
-def reminder_hint(db, note, settings, now=None):
-    """One line offering a reminder for the first open task whose deadline can be read, or an empty string.
+def clip(text, units):
+    """Cut text to at most `units` UTF-16 units without splitting a character. Adds an ellipsis when cut."""
+    if utf16_units(text) <= units:
+        return text
+    cut = text.encode("utf-16-le")[:max(units - 1, 0) * 2].decode("utf-16-le", errors="ignore")
+    return cut.rstrip() + "…"
 
-    Nothing is stored. The link opens the note, where the user confirms or changes the time.
+
+def short_task(text):
+    task = " ".join(text.split())
+    return task if len(task) <= HINT_TASK_CHARS else task[:HINT_TASK_CHARS - 1].rstrip() + "…"
+
+
+def auto_reminder_hint(db, note, settings, now):
+    """The line for reminders the AI has set for this note, or an empty string. They are still ahead and can be changed."""
+    rows = db.scalars(select(Reminder).where(
+        Reminder.note_id == note.id, Reminder.user_id == note.user_id, Reminder.status == "confirmed",
+        Reminder.scheduled_at > now, Reminder.idempotency_key.like(AUTO_KEY_PREFIX + "%"),
+    ).order_by(Reminder.scheduled_at, Reminder.id)).all()
+    if not rows:
+        return ""
+    first = rows[0]
+    zone = ZoneInfo(first.timezone)
+    local = datetime.fromtimestamp(first.scheduled_at, zone).replace(tzinfo=None)
+    label = label_for(local, datetime.fromtimestamp(now, zone).replace(tzinfo=None))
+    link = settings.public_origin + "/?capture=" + note.capture_id + "&reminder=" + first.id
+    if len(rows) == 1:
+        return f"Напоминание поставлено: {label}, «{short_task(first.text)}». Изменить: {link}"
+    return f"Напоминаний поставлено: {len(rows)}. Ближайшее: {label}, «{short_task(first.text)}». Изменить: {link}"
+
+
+def reminder_hint(db, note, settings, now=None):
+    """One line about reminders for a processed note, or an empty string.
+
+    Reminders the AI has set are named first. Otherwise the line offers a reminder for the first open
+    task whose deadline can be read, and nothing is stored: the link opens the note, where the user
+    confirms or changes the time.
     """
+    done = auto_reminder_hint(db, note, settings, time.time() if now is None else now.timestamp())
+    if done:
+        return done
     items = [item_view(item) for item in db.scalars(
         select(Item).where(Item.note_id == note.id, Item.user_id == note.user_id).order_by(Item.position, Item.id)
     )]
@@ -123,14 +163,22 @@ def reminder_hint(db, note, settings, now=None):
     for item in items:
         proposal = proposals.get(item["id"])
         if proposal:
-            task = " ".join(item["text"].split())
-            task = task if len(task) <= HINT_TASK_CHARS else task[:HINT_TASK_CHARS - 1].rstrip() + "…"
             link = settings.public_origin + "/?capture=" + note.capture_id + "#remind"
             return (
-                f"Предлагаю напоминание: {proposal['label']}, «{task}». "
+                f"Предлагаю напоминание: {proposal['label']}, «{short_task(item['text'])}». "
                 f"Подтвердить или изменить время: {link}"
             )
     return ""
+
+
+def reminder_message_text(reminder, note):
+    """Plain text of a due reminder: a heading, the reminder itself, and the note it came from."""
+    source = ""
+    if note.title and note.title.strip():
+        source = "\n\nИз заметки «" + clip(" ".join(note.title.split()), 200) + "»"
+    head = "Напоминание\n\n"
+    room = TELEGRAM_UNITS - utf16_units(head) - utf16_units(source)
+    return head + clip(reminder.text.strip(), room) + source
 
 
 def processing_reply_text(note, hint=""):
@@ -231,7 +279,7 @@ def claim_deliveries(db, body, settings):
                 continue
             reminder, note = target
         lease = secrets.token_urlsafe(32)
-        callback = secrets.token_urlsafe(32) if reminder is not None and reminder.item_id is not None else None
+        callback = secrets.token_urlsafe(32) if reminder is not None else None
         row.status, row.lease_token_hash = "leased", hash_token(lease)
         row.lease_until = now + settings.delivery_lease_seconds
         row.authorized_at = row.result_hash = row.retry_at = row.error_code = row.telegram_message_id = None
@@ -239,7 +287,7 @@ def claim_deliveries(db, body, settings):
         results.append({
             "delivery_id": row.id, "lease_token": lease, "generation": row.generation,
             "chat_id": row.chat_id,
-            "text": row.message_text if message else reminder.text if reminder is not None
+            "text": row.message_text if message else reminder_message_text(reminder, note) if reminder is not None
             else processing_reply_text(note, reminder_hint(db, note, settings)),
             "note_url": settings.public_origin + "/" if message else settings.public_origin
                         + "/?capture=" + note.capture_id

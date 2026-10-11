@@ -45,6 +45,10 @@ class User(Base):
     assistant_recommendations_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default=true(),
     )
+    # AI turns a readable deadline of a task into a confirmed reminder by itself. Off keeps proposals only.
+    ai_reminders_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true(),
+    )
     # Always stored lowercased. Empty until the owner of the address confirms it.
     email: Mapped[str | None] = mapped_column(String(254), nullable=True)
     email_verified_at: Mapped[float | None] = mapped_column(Float, nullable=True)
