@@ -83,6 +83,8 @@ class CloudRuSpeechProvider:
             if not isinstance(text, str) or not text.strip() or "\x00" in text or len(text) > 12000:
                 raise ProviderError("stt_invalid_response")
             return text
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            raise ProviderError("stt_connect_failed") from None  # Never sent, so nothing is billed.
         except httpx.TimeoutException:
             raise ProviderError("stt_timeout_unknown") from None
         except httpx.HTTPError:

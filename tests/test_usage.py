@@ -87,7 +87,7 @@ def test_timeout_receipt_keeps_unknown_result_without_automatic_retry(app, clien
         raise httpx.ReadTimeout("SYNTHETIC PRIVATE ERROR", request=request)
 
     provider = CloudRuProvider("fake-test-key", "test-model", transport=httpx.MockTransport(transport))
-    worker = Worker(app.state.sessions, app.state.settings, provider)
+    worker = Worker(app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), provider)
     assert worker.run_once() and not worker.run_once() and calls == [1]
     with app.state.sessions() as db:
         receipt = db.scalar(select(ProviderUsage))
@@ -98,7 +98,7 @@ def test_timeout_receipt_keeps_unknown_result_without_automatic_retry(app, clien
 def test_crash_after_receipt_does_not_re_dispatch_after_lease(app, client):
     register(client)
     job = submit(client).json()
-    worker = Worker(app.state.sessions, app.state.settings)
+    worker = Worker(app.state.sessions, replace(app.state.settings, ai_retries_enabled=False))
     assert worker.claim() == job["id"]
     row_id = worker.usage.start(job["id"], "llm", worker.provider)
     with app.state.sessions() as db:

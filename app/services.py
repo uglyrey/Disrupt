@@ -615,6 +615,9 @@ def job_view(db, job, *, capture=None, note_id=None):
         "original_text": capture.original_text,
         "created_at": job.created_at,
         "finished_at": job.finished_at,
+        # Automatic retries. retry_at is set only while the job waits for its next attempt.
+        "attempts": job.attempts or 0,
+        "retry_at": job.not_before if job.status == "queued" and job.attempts else None,
     }
 
 

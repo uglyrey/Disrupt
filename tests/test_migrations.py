@@ -150,3 +150,38 @@ def test_analytics_metadata_upgrade_keeps_old_events_unknown_and_usage(tmp_path,
         command.check(config)
     finally:
         engine.dispose()
+
+
+def test_job_retry_columns_round_trip_and_keep_existing_jobs(tmp_path, monkeypatch):
+    url = "sqlite:///" + (tmp_path / "retries.db").as_posix()
+    monkeypatch.setenv("NOTES_DATABASE_URL", url)
+    monkeypatch.setenv("NOTES_PROVIDER", "mock")
+    config = Config("alembic.ini")
+    command.upgrade(config, "e7b3c1d9a2f4")
+    engine, _ = make_database(url)
+    try:
+        with engine.begin() as db:
+            db.execute(text("INSERT INTO users (id,username,password_hash,live_calls) VALUES ('u','legacy','hash',0)"))
+            db.execute(text(
+                "INSERT INTO captures (id,user_id,original_text,idempotency_key,created_at) VALUES ('c','u','text','key',1)"
+            ))
+            db.execute(text(
+                "INSERT INTO jobs (id,capture_id,user_id,status,provider,error_code,created_at) "
+                "VALUES ('j','c','u','failed','mock','provider_unavailable',1)"
+            ))
+        command.upgrade(config, "head")
+        command.check(config)
+        with engine.connect() as db:
+            row = db.execute(text("SELECT attempts,not_before,last_error_code,last_failed_at FROM jobs")).one()
+            assert tuple(row) == (0, None, None, None)  # Old jobs carry no invented retry history.
+            assert db.execute(text("SELECT error_code FROM jobs")).scalar() == "provider_unavailable"
+        command.downgrade(config, "e7b3c1d9a2f4")
+        with engine.connect() as db:
+            columns = {item[1] for item in db.execute(text("PRAGMA table_info(jobs)")).all()}
+            assert {"attempts", "not_before", "last_error_code", "last_failed_at"}.isdisjoint(columns)
+            assert db.execute(text("SELECT status FROM jobs")).scalar() == "failed"
+            assert db.execute(text("PRAGMA foreign_key_check")).all() == []
+        command.upgrade(config, "head")
+        command.check(config)
+    finally:
+        engine.dispose()

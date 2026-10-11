@@ -6,6 +6,7 @@ import os
 import re
 import time
 from collections import Counter
+from email.utils import parsedate_to_datetime
 from typing import Literal, Protocol
 
 import httpx
@@ -57,10 +58,32 @@ DEMO_TEXT = (
 
 
 class ProviderError(Exception):
-    def __init__(self, code: str, *, http_status: int | None = None):
+    def __init__(self, code: str, *, http_status: int | None = None, retry_after: float | None = None):
         self.code = code
         self.http_status = http_status
+        # Seconds the gateway asked us to wait (header Retry-After). Only the worker's retry policy reads it.
+        self.retry_after = retry_after
         super().__init__(code)
+
+
+def parse_retry_after(value, *, now=None):
+    """Retry-After as seconds. Accepts a number or an HTTP date. Garbage and the past give None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    value = value.strip()
+    try:
+        seconds = float(value) if value.replace(".", "", 1).isdigit() else None
+    except ValueError:
+        seconds = None
+    if seconds is None:
+        try:
+            moment = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError):
+            return None
+        if moment.tzinfo is None:
+            return None
+        seconds = moment.timestamp() - (time.time() if now is None else now)
+    return seconds if 0 <= seconds < 86400 * 7 else None
 
 
 class LLMProvider(Protocol):
@@ -535,7 +558,13 @@ class CloudRuProvider:
                 if response.status_code != 200:
                     # Persist the status class/code only. The provider response may contain
                     # user text or infrastructure details and is deliberately discarded.
-                    raise ProviderError(self._status_code(response.status_code), http_status=response.status_code)
+                    raise ProviderError(
+                        self._status_code(response.status_code), http_status=response.status_code,
+                        retry_after=(
+                            parse_retry_after(response.headers.get("retry-after"))
+                            if response.status_code == 429 else None
+                        ),
+                    )
                 if self._stream:
                     content, finish_reason, usage = self._read_stream(response)
                     on_usage(response_tokens(usage))
@@ -640,6 +669,9 @@ class CloudRuProvider:
                 raise ProviderError("provider_incomplete_response")
             result = self.parse_content(content)
             return repair_structure_quotes(result, text)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # The request was never sent, so nothing can have been billed.
+            raise ProviderError("provider_connect_failed") from None
         except httpx.TimeoutException:
             raise ProviderError("provider_timeout_unknown") from None
         except httpx.HTTPError:
@@ -672,6 +704,9 @@ class CloudRuProvider:
                 raise ProviderError("provider_incomplete_response")
             result = self.unwrap_content(content)
             return validate_assistant(kind, result, context)
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # The request was never sent, so nothing can have been billed.
+            raise ProviderError("provider_connect_failed") from None
         except httpx.TimeoutException:
             raise ProviderError("provider_timeout_unknown") from None
         except httpx.HTTPError:

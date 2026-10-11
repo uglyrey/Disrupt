@@ -5712,6 +5712,21 @@
               }
             ],
             "title": "Finished At"
+          },
+          "attempts": {
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
           }
         },
         "required": [
@@ -5723,7 +5738,9 @@
           "note_id",
           "original_text",
           "created_at",
-          "finished_at"
+          "finished_at",
+          "attempts",
+          "retry_at"
         ],
         "title": "AudioJobResponse",
         "type": "object"
