@@ -277,6 +277,31 @@ async function popovers() {
   } finally { await closeWindow(t); }
 }
 
+async function popoverStaysInNoteColumn() {
+  const t = boot(); const {w, $} = t;
+  try {
+    await openFirst(t);
+    // jsdom has no layout, so the geometry is stubbed. The note column starts at 516, the popover would start at 496.
+    const rect = (left, right) => ({left, right, top: 0, bottom: 10, width: right - left, height: 10, x: left, y: 0});
+    const column = $('note-card').closest('.editor-column');
+    column.getBoundingClientRect = () => rect(516, 1280);
+    $('pop-reminders').getBoundingClientRect = () => rect(496, 976);
+    $('tool-reminders').click();
+    assert.equal($('pop-reminders').style.maxWidth, '452px', 'narrower, so it stays right of the library column');
+    assert.equal($('pop-reminders').classList.contains('is-left'), false);
+    $('tool-reminders').click();
+    // Enough room: nothing changes.
+    $('pop-reminders').getBoundingClientRect = () => rect(540, 1020);
+    $('tool-reminders').click();
+    assert.equal($('pop-reminders').style.maxWidth, '', 'no limit when it fits');
+    $('tool-reminders').click();
+    // Off the left edge of the window: it hangs from the left, as before.
+    $('pop-reminders').getBoundingClientRect = () => rect(-20, 460);
+    $('tool-reminders').click();
+    assert.equal($('pop-reminders').classList.contains('is-left'), true);
+  } finally { await closeWindow(t); }
+}
+
 async function badges() {
   const t = boot(); const {w, $} = t;
   try {
@@ -372,9 +397,10 @@ module.exports = async () => {
   await failedSaveAndLeaving();
   await titleFit();
   await popovers();
+  await popoverStaysInNoteColumn();
   await badges();
   await importIntoCapture();
   await noFooter();
-  console.log('Focus checks passed: autosave, one request at a time, conflict, flush on leaving, title fit, popovers, badges, import, no footer.');
+  console.log('Focus checks passed: autosave, one request at a time, conflict, flush on leaving, title fit, popovers, popover inside the note column, badges, import, no footer.');
 };
 if (require.main === module) module.exports().catch(error => { console.error(error); process.exitCode = 1; });

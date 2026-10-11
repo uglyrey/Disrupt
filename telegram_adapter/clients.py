@@ -10,6 +10,12 @@ from .config import Settings
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
 
 
+# A reminder button carries one of these prefixes before the secret token: done, in an hour, tomorrow.
+# A bare token (a message sent before the update) means "done".
+ACTION_PREFIXES = {"d:": "done", "h:": "snooze_hour", "t:": "snooze_tomorrow"}
+TOKEN_CHARS = re.compile(r"[A-Za-z0-9_-]{1,62}")
+
+
 class RemoteFailure(Exception):
     """Sanitized error: never retain response bodies, URLs containing tokens, or note text."""
 
@@ -34,7 +40,7 @@ REJECTIONS = {
     "empty_input": "В записи нет текста.",
     "quota_exceeded": "Лимит обработки исчерпан. Сохрани текст без ИИ командой /save текст записи.",
     "action_forbidden": "Это действие недоступно для твоего аккаунта.",
-    "action_expired": "Кнопка устарела. Открой задачу в веб-приложении.",
+    "action_expired": "Кнопка устарела: напоминание уже выполнено, перенесено или отменено. Посмотри его в beresta.",
     "invalid_login": "Ссылка входа недействительна. Начни вход в beresta ещё раз.",
     "login_expired": "Ссылка входа истекла. Начни вход в beresta ещё раз.",
     "login_used": "Эта ссылка уже использована. Если нужно, начни вход в beresta заново.",
@@ -181,10 +187,17 @@ class TelegramClient:
             "link_preview_options": {"is_disabled": True},
             "reply_markup": {"inline_keyboard": [[{"text": "Открыть Beresta", "url": item["note_url"]}]]},
         }
-        if item["callback_token"] is not None:
-            payload["reply_markup"]["inline_keyboard"].append([
-                {"text": "Выполнено", "callback_data": item["callback_token"]},
-            ])
+        token = item["callback_token"]
+        if token is not None:
+            # A reminder: three actions in one row and a link to the reminder under them.
+            payload["reply_markup"]["inline_keyboard"] = [
+                [
+                    {"text": "Выполнено", "callback_data": "d:" + token},
+                    {"text": "Через час", "callback_data": "h:" + token},
+                    {"text": "Завтра", "callback_data": "t:" + token},
+                ],
+                [{"text": "Открыть напоминание", "url": item["note_url"]}],
+            ]
         result = {"status": "unknown", "telegram_message_id": None,
                   "error_code": "telegram_unknown", "retry_after_seconds": None}
         try:

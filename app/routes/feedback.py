@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.feedback_models import Feedback
-from app.schemas import StrictModel
+from app.schemas import Counter, StrictModel
 from app.security import get_login_session, throttle
 
 
@@ -50,7 +50,7 @@ class FeedbackView(FeedbackCreate):
 
 class FeedbackUpdate(StrictModel):
     status: Literal['new', 'in_progress', 'resolved']
-    version: int = Field(ge=1)
+    version: Counter
 
 
 def view(row):

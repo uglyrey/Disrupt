@@ -54,7 +54,8 @@ def test_model_items_category_and_unconfirmed_time(app, client):
     assert stored == [{k: v for k, v in i.items() if k != "proposed_reminder"} for i in note["items"]]
     assert len(client.get("/api/v1/categories").json()) == 1
     with app.state.sessions() as db:
-        assert db.scalar(select(func.count()).select_from(Reminder)) == 0
+        # The AI sets the reminder itself (it is on by default). The time still never lands on the task.
+        assert [r.item_id for r in db.scalars(select(Reminder))] == [task["id"]]
 
 
 @pytest.mark.parametrize("change", ["quote", "time", "ownership"])

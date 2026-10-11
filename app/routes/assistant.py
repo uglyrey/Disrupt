@@ -3,7 +3,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import Field
+from pydantic import Field, model_validator
 from sqlalchemy import select
 
 from app.assistant import AssistantLimitReached, create_request, owned_request, request_view
@@ -22,7 +22,21 @@ class AssistantDigest(StrictModel):
 
 
 class AssistantSettingsPatch(StrictModel):
-    recommendations_enabled: bool
+    recommendations_enabled: bool | None = None
+    ai_reminders_enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def something_to_change(self):
+        if self.recommendations_enabled is None and self.ai_reminders_enabled is None:
+            raise ValueError("Укажите хотя бы одну настройку")
+        return self
+
+
+def settings_view(user):
+    return {
+        "recommendations_enabled": user.assistant_recommendations_enabled,
+        "ai_reminders_enabled": user.ai_reminders_enabled,
+    }
 
 
 def build_router(database, settings):
@@ -75,14 +89,17 @@ def build_router(database, settings):
     @router.get("/settings")
     def read_settings(request: Request, db=Depends(database)):
         session = get_login_session(request, db)
-        return {"recommendations_enabled": db.get(User, session.user_id).assistant_recommendations_enabled}
+        return settings_view(db.get(User, session.user_id))
 
     @router.patch("/settings")
     def update_settings(body: AssistantSettingsPatch, request: Request, db=Depends(database)):
         session = get_login_session(request, db, write=True)
         user = db.get(User, session.user_id)
-        user.assistant_recommendations_enabled = body.recommendations_enabled
+        if body.recommendations_enabled is not None:
+            user.assistant_recommendations_enabled = body.recommendations_enabled
+        if body.ai_reminders_enabled is not None:
+            user.ai_reminders_enabled = body.ai_reminders_enabled
         db.commit()
-        return {"recommendations_enabled": user.assistant_recommendations_enabled}
+        return settings_view(user)
 
     return router

@@ -27,6 +27,7 @@
 #reminder-form #reminder-preview:not(:empty) { margin: 16px 0 0; color: #24352d; }
 .reminder-row { margin-top: 8px; padding: 12px 14px; }
 .reminder-row.is-cancelled { opacity: .65; }
+.reminder-row.is-linked { border-color: #527d53; box-shadow: 0 0 0 2px #527d5340; }
 .reminder-row p { margin: 4px 0 0; }
 .reminder-line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 .reminder-when { font-size: 15px; color: #24352d; }

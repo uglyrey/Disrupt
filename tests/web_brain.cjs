@@ -59,13 +59,13 @@ function taskRows() {
     note_id: 'n1', note_title: 'План', note_version: 3, note_updated_at: 1791220000, ...extra});
   return [
     row('t1', 'Позвонить <b>маме</b>', {due_at: 1700000000}),
-    row('t2', 'Купить молоко', {due_text: 'завтра'}),
-    row('t3', 'Отправить макет', {note_id: 'n2', note_title: 'Другая'}),
+    row('t2', 'Купить молоко', {due_text: 'завтра', due_resolved_at: Date.now() / 1000 + 86400, due_has_time: false}),
+    row('t3', 'Отправить макет', {note_id: 'n2', note_title: 'Другая', due_text: 'до пятницы'}),
     row('t4', 'Старое дело', {status: 'completed'}),
   ];
 }
 
-function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, days = dashboard, related = null} = {}) {
+function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, aiReminders = true, reminderRows = [], days = dashboard, related = null} = {}) {
   const dom = new JSDOM(read('index.html'), {url, runScripts: 'outside-only'}), w = dom.window;
   const $ = id => w.document.getElementById(id);
   w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
@@ -76,7 +76,7 @@ function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, da
   const task = {id: 'i1', kind: 'task', text: 'Позвонить маме', status: 'open', version: 1, due_text: 'завтра в 10', due_at: null,
     proposed_reminder: {local_time: '2026-10-11T10:00:00', timezone: 'Europe/Moscow', label: 'завтра в 10:00'}};
   const state = {
-    calls: [], settings, polls: 0, queued: 2, askError: null, task, hold: null,
+    calls: [], settings, aiReminders, reminderRows, polls: 0, queued: 2, askError: null, task, hold: null,
     usage: {simulation: false, daily_unit_limit: 30, daily_units_used: 3, daily_units_remaining: 27,
       limit_resets_at: new Date(Date.now() + 3 * 3600000).toISOString(), ...usage},
     related: related || [{note_id: 'n2', title: 'Другая', category_id: null, updated_at: 1791220000, score: 0.3, shared_terms: ['макет', 'запуск']}],
@@ -98,7 +98,7 @@ function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, da
     if (/^\/api\/v1\/captures\/k-?[\w-]*$/.test(p) && method === 'GET') return reply({capture_id: 'k1', note_id: 'n1', input_kind: 'text'});
     if (/^\/api\/v1\/notes\/n[12]$/.test(p) && method === 'GET') return reply(note(p.slice(-2)));
     if (/^\/api\/v1\/notes\/n[12]\/related$/.test(p)) return reply({note_id: p.split('/')[4], related: state.related});
-    if (/^\/api\/v1\/notes\/n[12]\/reminders$/.test(p)) return reply([]);
+    if (/^\/api\/v1\/notes\/n[12]\/reminders$/.test(p)) return reply(p.includes('/n1/') ? state.reminderRows : []);
     if (p === '/api/v1/telegram/links') return reply({identities: [], pending: []});
     if (/\/(opened|original-opened)$/.test(p)) return reply(null, 204);
     if (p === '/api/v1/reminders/resolve-time') {
@@ -124,8 +124,12 @@ function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, da
     }
     if (p === '/api/v1/dashboard') return reply(state.dashboard.fn(Number(u.searchParams.get('days')), {empty: state.dashboard.empty}));
     if (p === '/api/v1/assistant/settings') {
-      if (method === 'PATCH') { state.settings = body.recommendations_enabled; }
-      return reply({recommendations_enabled: state.settings});
+      if (method === 'PATCH') {
+        if (state.patchError) return reply({detail: 'Сервер не принял настройку.'}, 500);
+        if (body.recommendations_enabled !== undefined) state.settings = body.recommendations_enabled;
+        if (body.ai_reminders_enabled !== undefined) state.aiReminders = body.ai_reminders_enabled;
+      }
+      return reply({recommendations_enabled: state.settings, ai_reminders_enabled: state.aiReminders});
     }
     if (p === '/api/v1/assistant/requests') return reply([{...digestRow, result: null}, {...recRow, result: null}, {...askRow, result: null}]);
     if (method === 'POST' && p === '/api/v1/assistant/ask') {
@@ -214,7 +218,11 @@ async function tasksView() {
     assert.equal($('tasks-list').querySelector('b'), null, 'Task text is never markup');
     const first = $('tasks-list').querySelector('.tk-row');
     assert.match(first.querySelector('.tk-due').textContent, /^Просрочено, срок /);
-    assert.equal($('tasks-list').querySelectorAll('.tk-row')[1].querySelector('.tk-due').textContent, 'Срок из записи: «завтра»');
+    const second = $('tasks-list').querySelectorAll('.tk-row')[1];
+    assert.equal(second.querySelector('.tk-due').textContent, 'Срок завтра');
+    assert.equal($('tasks-list').querySelectorAll('.tk-row')[2].querySelector('.tk-due'), null, 'An unresolved quote shows no deadline');
+    assert.ok(!$('tasks-list').textContent.includes('до пятницы') && !$('tasks-list').textContent.includes('из записи'), 'The quote is never shown');
+    assert.ok(first.querySelector('.tk-due').compareDocumentPosition(first.querySelector('.tk-note')) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'Deadline goes before the note link');
     const box = first.querySelector('input[type=checkbox]');
     assert.equal(w.document.getElementById(box.getAttribute('aria-labelledby')).textContent, 'Позвонить <b>маме</b>');
     assert.equal(first.querySelector('.tk-note').textContent, 'План');
@@ -426,6 +434,84 @@ async function recommendations() {
   } finally { off.dom.window.close(); }
 }
 
+async function aiReminderSetting() {
+  const off = boot({aiReminders: false});
+  try {
+    await until(() => !off.$('workspace').hidden, 'workspace');
+    off.$('nav-assistant').click();
+    await until(() => off.state.calls.some(c => c.url.pathname === '/api/v1/assistant/settings'), 'settings request');
+    await until(() => off.$('airem-switch').checked === false, 'switch shows the saved value');
+    assert.equal(off.$('airem-switch').getAttribute('role'), 'switch');
+    assert.equal(off.$('airem-switch-label').textContent.trim(), 'ИИ сам ставит напоминания');
+    off.$('airem-switch').checked = true;
+    off.$('airem-switch').dispatchEvent(new off.w.Event('change', {bubbles: true}));
+    await until(() => off.$('airem-status').textContent.startsWith('Включено'), 'turned on');
+    const patch = off.state.calls.filter(c => c.method === 'PATCH').at(-1);
+    assert.deepEqual(patch.body, {ai_reminders_enabled: true}, 'Only this setting is sent');
+    assert.equal(off.state.aiReminders, true); assert.equal(off.state.settings, true, 'Recommendations stay as they were');
+    assert.equal(off.$('airem-switch').disabled, false);
+    off.$('airem-switch').checked = false;
+    off.$('airem-switch').dispatchEvent(new off.w.Event('change', {bubbles: true}));
+    await until(() => off.$('airem-status').textContent.startsWith('Выключено'), 'turned off');
+    assert.deepEqual(off.state.calls.filter(c => c.method === 'PATCH').at(-1).body, {ai_reminders_enabled: false});
+    // A refusal puts the switch back.
+    off.state.patchError = true;
+    off.$('airem-switch').checked = true;
+    off.$('airem-switch').dispatchEvent(new off.w.Event('change', {bubbles: true}));
+    await until(() => off.$('airem-status').textContent.startsWith('Не удалось сохранить'), 'failure shown');
+    assert.equal(off.$('airem-switch').checked, false); assert.equal(off.$('airem-switch').disabled, false);
+  } finally { off.dom.window.close(); }
+
+  // Older servers do not send the field: the switch stays on, as that is the default.
+  const old = boot();
+  try {
+    await until(() => !old.$('workspace').hidden, 'workspace');
+    old.state.aiReminders = undefined;
+    old.$('nav-assistant').click();
+    await until(() => old.state.calls.some(c => c.url.pathname === '/api/v1/assistant/settings'), 'settings request');
+    await sleep(20);
+    assert.equal(old.$('airem-switch').checked, true);
+  } finally { old.dom.window.close(); }
+}
+
+const reminderRow = (extra = {}) => ({id: 'rem1', note_id: 'n1', item_id: 'i1', scheduled_at: '2026-10-11T06:00:00+00:00',
+  timezone: 'Europe/Moscow', text: 'Позвонить маме', status: 'confirmed', generation: 1, confirmed_at: '2026-10-10T09:00:00+00:00',
+  delivery_status: null, previous_attempt_unknown: false, ...extra});
+
+async function reminderLink() {
+  // The link in a Telegram reminder: the note opens, the reminders popover opens and the reminder is marked.
+  const link = boot({url: 'https://beresta.invalid/?capture=k-n1&reminder=rem1', reminderRows: [reminderRow(), reminderRow({id: 'rem2', text: 'Другое'})]});
+  try {
+    await until(() => link.$('reminders-list').querySelector('.is-linked'), 'marked reminder');
+    const marked = link.$('reminders-list').querySelectorAll('.is-linked');
+    assert.equal(marked.length, 1); assert.equal(marked[0].dataset.id, 'rem1');
+    const pop = link.w.BerestaFocus.tools.get('reminders').pop;
+    assert.equal(pop.hidden, false, 'The reminders popover is open');
+    assert.equal(link.w.location.search, '?capture=k-n1', 'The reminder part leaves the address');
+    assert.equal(link.$('reminder-form').hidden, true, 'Nothing is edited without the person');
+  } finally { link.dom.window.close(); }
+
+  // A reminder that is gone (or not of this note) opens nothing, and the address is still cleaned.
+  const gone = boot({url: 'https://beresta.invalid/?capture=k-n1&reminder=missing', reminderRows: [reminderRow()]});
+  try {
+    await until(() => gone.$('reminders-list').querySelector('.reminder-row'), 'reminders listed');
+    assert.equal(gone.$('reminders-list').querySelector('.is-linked'), null);
+    assert.equal(gone.w.BerestaFocus.tools.get('reminders').pop.hidden, true);
+    assert.equal(gone.w.location.search, '?capture=k-n1');
+  } finally { gone.dom.window.close(); }
+
+  // A reminder done in Telegram reads as done and cannot be edited or cancelled again.
+  const done = boot({url: 'https://beresta.invalid/?capture=k-n1', reminderRows: [reminderRow({status: 'completed'})]});
+  try {
+    await until(() => done.$('reminders-list').querySelector('.reminder-row'), 'reminders listed');
+    const card = done.$('reminders-list').querySelector('.reminder-row');
+    assert.match(card.querySelector('.reminder-status').textContent, /^Выполнено/);
+    assert.equal(card.querySelector('[data-action="edit"]').disabled, true);
+    assert.equal(card.querySelector('[data-action="cancel"]').disabled, true);
+    assert.equal(done.w.document.querySelectorAll('.reminder-row:not(.is-cancelled)').length, 0, 'Not counted as active');
+  } finally { done.dom.window.close(); }
+}
+
 async function digest() {
   const {dom, w, $, state} = boot();
   try {
@@ -507,8 +593,10 @@ module.exports = async () => {
   await askFlow();
   await limitMessage();
   await recommendations();
+  await aiReminderSetting();
   await digest();
   await relatedAndReminders();
-  console.log('Brain checks passed: navigation and hashes, tasks view, overview, ask with polling, 429, recommendations, digest, related notes, suggested reminders.');
+  await reminderLink();
+  console.log('Brain checks passed: navigation and hashes, tasks view, overview, ask with polling, 429, recommendations, digest, related notes, suggested reminders, the AI reminders switch, the reminder link.');
 };
 if (require.main === module) module.exports().catch(error => { console.error(error); process.exitCode = 1; });

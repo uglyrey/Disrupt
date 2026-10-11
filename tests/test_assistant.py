@@ -147,10 +147,10 @@ def test_recommendations_use_notes_and_open_tasks(app, client):
 
 def test_recommendations_can_be_turned_off_and_on(app, client):
     register(client)
-    assert client.get(OPEN + "/settings").json() == {"recommendations_enabled": True}
+    assert client.get(OPEN + "/settings").json() == {"recommendations_enabled": True, "ai_reminders_enabled": True}
     response = client.patch(OPEN + "/settings", json={"recommendations_enabled": False})
-    assert response.status_code == 200 and response.json() == {"recommendations_enabled": False}
-    assert client.get(OPEN + "/settings").json() == {"recommendations_enabled": False}
+    assert response.status_code == 200 and response.json() == {"recommendations_enabled": False, "ai_reminders_enabled": True}
+    assert client.get(OPEN + "/settings").json() == {"recommendations_enabled": False, "ai_reminders_enabled": True}
     blocked = post(client, "/recommendations", "rec-off")
     assert blocked.status_code == 409 and "выключены" in blocked.json()["detail"]
     assert count(app, AssistantRequest) == 0
@@ -313,7 +313,7 @@ def test_owner_isolation(app, client):
     assert view["input_note_ids"] == [] and view["result"]["citations"] == []
     # Settings are per user.
     stranger.patch(OPEN + "/settings", json={"recommendations_enabled": False})
-    assert client.get(OPEN + "/settings").json() == {"recommendations_enabled": True}
+    assert client.get(OPEN + "/settings").json() == {"recommendations_enabled": True, "ai_reminders_enabled": True}
     assert note_id not in json.dumps(stranger.get(OPEN + "/requests").json())
 
 

@@ -45,7 +45,12 @@ const errors = {
   audio_storage_unavailable:'Не удалось прочитать аудио. Попробуйте открыть оригинал позже.',
 };
 for (const code of Object.keys(errors)) errors[code] = errors[code].replace('%RETRY%','Нажмите «Отправить ещё раз с ИИ» или сохраните без ИИ.');
-function message(text = '') { $('message').textContent = text; }
+// The line under the header is hidden behind a modal dialog, so an open dialog with a status line shows the text too.
+function message(text = '') {
+  $('message').textContent = text;
+  const status = document.querySelector('dialog[open] .dialog-status');
+  if (status) status.textContent = text;
+}
 function authMessage(text = '') {
   $('auth-message').textContent = text;
   $('auth-message').hidden = !text;
@@ -652,6 +657,8 @@ async function loadCategories() {
 $('category-form').onsubmit = async event => {
   event.preventDefault(); const button = event.target.querySelector('button'); button.disabled = true;
   try {
+    const name = $('category-name').value.trim().toLowerCase();
+    if (name && categories.some(category => category.name.trim().toLowerCase() === name)) { message('Такая категория уже есть.'); return; }
     await api('/api/v1/categories',{method:'POST',body:JSON.stringify({name:$('category-name').value})});
     $('category-name').value = ''; await loadCategories(); message('Категория добавлена.');
   } catch(e) { message(e.message); } finally { button.disabled = false; }

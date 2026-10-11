@@ -16,6 +16,7 @@ class ActionRequest(StrictModel):
     update_id: int = Field(ge=0, le=9223372036854775807)
     telegram_user_id: TelegramID
     callback_token: str = Field(min_length=1, max_length=64)
+    action: Literal["done", "snooze_hour", "snooze_tomorrow"] = "done"
 
     @field_validator("callback_token")
     @classmethod
@@ -26,7 +27,9 @@ class ActionRequest(StrictModel):
 
 
 class ActionResponse(StrictModel):
-    status: Literal["completed", "already_completed"]
+    status: Literal["completed", "already_completed", "snoozed"]
+    # Local time of the new schedule as "HH:MM" in the reminder's zone. Set only for "snoozed".
+    local_time: str | None = None
 
 
 class ClaimRequest(StrictModel):

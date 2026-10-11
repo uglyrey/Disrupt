@@ -5469,6 +5469,16 @@
             "maxLength": 64,
             "minLength": 1,
             "title": "Callback Token"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "done",
+              "snooze_hour",
+              "snooze_tomorrow"
+            ],
+            "title": "Action",
+            "default": "done"
           }
         },
         "additionalProperties": false,
@@ -5487,9 +5497,21 @@
             "type": "string",
             "enum": [
               "completed",
-              "already_completed"
+              "already_completed",
+              "snoozed"
             ],
             "title": "Status"
+          },
+          "local_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Time"
           }
         },
         "additionalProperties": false,
@@ -5595,15 +5617,30 @@
       "AssistantSettingsPatch": {
         "properties": {
           "recommendations_enabled": {
-            "type": "boolean",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Recommendations Enabled"
+          },
+          "ai_reminders_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Reminders Enabled"
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "recommendations_enabled"
-        ],
         "title": "AssistantSettingsPatch"
       },
       "AudioJobResponse": {
