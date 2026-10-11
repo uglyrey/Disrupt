@@ -115,6 +115,14 @@ module.exports = async function checkJobWaiting() {
     assert.match(s.$('message').textContent,/Неподтверждённые выводы, задачи или сроки не добавлены/);
     assert.match(s.$('jobs').textContent,/Неподтверждённые выводы, задачи или сроки не добавлены/);
   } finally { s?.dom.window.close(); }
+  try {
+    s = await scenario(); s.job.status = 'succeeded'; s.job.note_id = 'blocked-note';
+    s.job.error_code = 'ai_output_blocked'; s.finish();
+    await until(() => !s.$('note-card').hidden && !s.$('title').disabled);
+    assert.match(s.$('message').textContent,/ИИ ответил странно, заметка сохранена без обработки/);
+    assert.match(s.$('jobs').textContent,/ИИ ответил странно, заметка сохранена без обработки/);
+    assert.doesNotMatch(s.$('jobs').textContent,/Неподтверждённые/);
+  } finally { s?.dom.window.close(); }
   for (const audio of [false,true]) {
     try {
       s = await scenario({audio,pauseResultRead:true});

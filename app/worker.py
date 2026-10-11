@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy import or_, select, update
 
 from app import crypto
+from app.ai_guard import BLOCKED_CODE, OutputGuard
 from app.analytics import record_event
 from app.assistant import run_assistant_once
 from app.audio_contracts import AUDIO_MEDIA_TYPES, AudioReader, SpeechProvider
@@ -72,6 +73,7 @@ class Worker:
         self.audio_storage = audio_storage
         self.speech_provider = speech_provider
         self.usage = UsageRecorder(sessions, settings)
+        self.guard = OutputGuard.for_runtime(settings, self.provider)
 
     def original_for_job(self, job_id):
         with self.sessions() as db:
@@ -257,8 +259,16 @@ class Worker:
                     measured(original, categories=tuple(category_context), on_usage=on_usage)
                     if measured else self.provider.structure(original, categories=tuple(category_context))
                 )
-                return validate_result(result, original)
+                checked = validate_result(result, original)
+                rule = self.guard.structured_violation(checked, original)
+                if rule is None:
+                    return checked
+                # The answer repeated a secret, our instructions or a key-like string. Keep only what the person wrote.
+                blocked.append(rule)
+                log_error("ai_output_blocked", rule, log_file=self.settings.error_log_file, job_id=job_id)
+                return self.guard.safe_note(original)
 
+            blocked = []
             result = self.usage.call(job_id, "llm", self.provider, structure)
             now = time.time()
             with self.sessions() as db:
@@ -267,7 +277,8 @@ class Worker:
                     update(Job)
                     .where(Job.id == job_id, Job.status == "running", Job.lease_until >= now)
                     .values(status="succeeded", finished_at=now,
-                            error_code="ungrounded_details_omitted" if result._grounding_details_omitted else None)
+                            error_code=BLOCKED_CODE if blocked else (
+                                "ungrounded_details_omitted" if result._grounding_details_omitted else None))
                 ).rowcount
                 if not completed:
                     db.rollback()

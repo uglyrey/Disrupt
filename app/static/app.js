@@ -33,6 +33,7 @@ const errors = {
   provider_response_too_large:'Ответ ИИ получился слишком большим. Исходник сохранён. Его можно сохранить без ИИ.',
   provider_connect_failed:'Не удалось связаться с сервисом ИИ. Исходник сохранён. %RETRY%',
   provider_connection_unknown:'Не удалось связаться с сервисом ИИ. Запрос мог быть учтён. Исходник сохранён. %RETRY%',
+  ai_output_blocked:'ИИ ответил странно, заметка сохранена без обработки.',
   ungrounded_quote:'ИИ вернул неточную цитату. Исходник сохранён. %RETRY%',
   provider_rate_limit:'Сервис ИИ ограничил запросы. Подождите немного. Исходник сохранён. %RETRY%',
   provider_unavailable:'Сервис ИИ сейчас недоступен. Исходник сохранён. %RETRY%',
@@ -45,6 +46,13 @@ const errors = {
   stt_failed:'Не удалось распознать запись. Оригинал сохранён.',
   audio_storage_unavailable:'Не удалось прочитать аудио. Попробуйте открыть оригинал позже.',
 };
+const omittedNotice = 'Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.';
+const blockedNotice = 'ИИ ответил странно, заметка сохранена без обработки.';
+// A finished job can carry a short note about what was left out.
+function jobNotice(job) {
+  if (job.status !== 'succeeded') return '';
+  return job.error_code === 'ai_output_blocked' ? blockedNotice : job.error_code === 'ungrounded_details_omitted' ? omittedNotice : '';
+}
 for (const code of Object.keys(errors)) errors[code] = errors[code].replace('%RETRY%','Нажмите «Отправить ещё раз с ИИ» или сохраните без ИИ.');
 // The line under the header is hidden behind a modal dialog, so an open dialog with a status line shows the text too.
 function message(text = '') {
@@ -395,7 +403,7 @@ async function loadJobs() {
       }
     }
     if (retryNote(job)) row.append(element('p',retryNote(job)));
-    if (job.status === 'succeeded' && job.error_code === 'ungrounded_details_omitted') row.append(element('p','Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.'));
+    if (jobNotice(job)) row.append(element('p',jobNotice(job)));
     if (job.note_id) {
       const button = element('button','Открыть заметку','quiet');
       button.onclick = () => openNote(job.note_id,{userAction:true}).catch(e => message(e.message)); row.append(button);
@@ -478,17 +486,18 @@ async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGenera
       ? 'В очереди. Исходник сохранён. Можно продолжить работу.' : statusLabels[job.status];
     if (waiting && !historyShown) { historyShown = true; await loadJobs(); }  // History rows show the same text.
     if (job.status === 'succeeded') {
-      if (job.error_code === 'ungrounded_details_omitted') $('job-status').textContent = 'Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.';
+      if (jobNotice(job)) $('job-status').textContent = jobNotice(job);
       await loadNotes(); await loadJobs(); await loadProviderUsage();
       if (currentEpoch!==epoch || generation!==viewGeneration) return;
       if (canShowJobResult(generation,draft)) {
         await openNote(job.note_id,{backgroundDraft:draft});
-        if (job.error_code === 'ungrounded_details_omitted' && currentEpoch === epoch &&
+        if (jobNotice(job) && currentEpoch === epoch &&
             viewGeneration === generation + 1 && currentNote?.id === job.note_id) {
-          message('Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.');
+          message(jobNotice(job));
         }
       } else message('Запись обработана. Она доступна в списке заметок.' +
-        (job.error_code === 'ungrounded_details_omitted' ? ' Неподтверждённые выводы, задачи или сроки не добавлены.' : ''));
+        (job.error_code === 'ai_output_blocked' ? ' ' + blockedNotice
+          : job.error_code === 'ungrounded_details_omitted' ? ' Неподтверждённые выводы, задачи или сроки не добавлены.' : ''));
       return;
     }
     if (job.status === 'failed') {
