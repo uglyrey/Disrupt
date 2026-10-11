@@ -637,32 +637,43 @@ async function loadCategories() {
   categories = await api('/api/v1/categories');
   fillCategoryOptions($('category-filter'),true);
   if (currentNote) fillCategoryOptions($('note-category'),false,currentNote.category_id || '');
-  $('categories').replaceChildren();
-  for (const category of categories) {
-    const row = element('form','','category-row'), input = document.createElement('input');
-    input.value = category.name; input.maxLength = 100; input.required = true;
-    input.setAttribute('aria-label',`Название категории ${category.name}`);
-    const button = element('button','Переименовать','quiet'); button.type = 'submit';
-    row.append(input,button);
-    row.onsubmit = async event => {
-      event.preventDefault(); button.disabled = true;
-      try {
-        await api(`/api/v1/categories/${category.id}`,{method:'PATCH',body:JSON.stringify({version:category.version,name:input.value})});
-        await loadCategories(); message('Название категории сохранено.');
-      } catch(e) { message(e.message); } finally { button.disabled = false; }
-    };
-    $('categories').append(row);
-  }
 }
-$('category-form').onsubmit = async event => {
-  event.preventDefault(); const button = event.target.querySelector('button'); button.disabled = true;
-  try {
-    const name = $('category-name').value.trim().toLowerCase();
-    if (name && categories.some(category => category.name.trim().toLowerCase() === name)) { message('Такая категория уже есть.'); return; }
-    await api('/api/v1/categories',{method:'POST',body:JSON.stringify({name:$('category-name').value})});
-    $('category-name').value = ''; await loadCategories(); message('Категория добавлена.');
-  } catch(e) { message(e.message); } finally { button.disabled = false; }
-};
+// Category actions for the sidebar (workspace.js draws the menu). Each one reloads the list.
+function categoryKey(name) { return name.trim().toLowerCase().replaceAll('ё','е'); }
+async function createCategory(name) {
+  name = name.trim();
+  if (!name) throw new Error('Введите название.');
+  const same = categories.find(category => categoryKey(category.name) === categoryKey(name));
+  if (same) { const error = new Error('Такая категория уже есть.'); error.category = same; throw error; }
+  const created = await api('/api/v1/categories',{method:'POST',body:JSON.stringify({name})});
+  await loadCategories();
+  return created;
+}
+async function renameCategory(id, name) {
+  const category = categories.find(item => item.id === id);
+  name = name.trim();
+  if (!category) throw new Error('Категория не найдена. Обновите страницу.');
+  if (!name) throw new Error('Введите название.');
+  if (name === category.name) return category;
+  if (categories.some(item => item.id !== id && categoryKey(item.name) === categoryKey(name))) throw new Error('Такая категория уже есть.');
+  const renamed = await api(`/api/v1/categories/${id}`,{method:'PATCH',body:JSON.stringify({version:category.version,name})});
+  await loadCategories();
+  // Note rows show the category name, so the list is read again. A failed refresh must not undo the rename.
+  await loadNotes().catch(() => {});
+  return renamed;
+}
+async function deleteCategory(id) {
+  const category = categories.find(item => item.id === id);
+  if (!category) throw new Error('Категория не найдена. Обновите страницу.');
+  await api(`/api/v1/categories/${id}?version=${category.version}`,{method:'DELETE'});
+  const wasOpen = currentNote?.category_id === id, wasFiltered = activeFilter.category === id;
+  if (wasFiltered) { activeFilter = {...activeFilter,category:''}; }
+  await loadCategories();
+  if (wasFiltered) $('category-filter').value = '';
+  await loadNotes();
+  if (wasOpen && !hasDrafts()) await openNote(currentNote.id);
+  return wasFiltered;
+}
 let searchSeq = 0, searchTimer = null;
 window.searchDebounceMs = 300;
 $('search-form').onsubmit = async event => {

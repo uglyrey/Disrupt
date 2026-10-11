@@ -493,7 +493,7 @@ async function phoneMenu() {
     assert.equal(more.getAttribute('aria-expanded'), 'false'); assert.equal(menu.classList.contains('is-open'), false);
     more.click();
     assert.equal(more.getAttribute('aria-expanded'), 'true'); assert.equal(menu.classList.contains('is-open'), true);
-    for (const id of ['manage-categories', 'open-telegram', 'open-feedback']) assert.equal(menu.contains($(id)), true, id);
+    for (const id of ['open-telegram', 'open-feedback']) assert.equal(menu.contains($(id)), true, id);
     assert.equal($('category-navigation').closest('.nav-row'), menu.closest('.nav-row'));
     key(w, w.document.body, {key: 'Escape'});
     assert.equal(menu.classList.contains('is-open'), false);
