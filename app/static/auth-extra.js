@@ -213,7 +213,7 @@
       showLinks('tg-login-link', 'tg-login-app', start.deep_link);
       el('tg-login-hint').hidden = false;
       loginBox.hidden = false;
-      say('tg-login-status', 'Ждём подтверждения в Telegram. Нажмите там «Запустить», затем «Да, это я».');
+      say('tg-login-status', 'Ждём подтверждения в Telegram…');
       savedFlow.save({id: start.login_id, expires: Date.parse(start.expires_at), purpose: 'login'});
       watchLogin(start, false);
       goTo(target, start.deep_link);
