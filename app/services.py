@@ -424,6 +424,53 @@ def ensure_category(db, user_id, name, *, best_effort=False):
     return category
 
 
+MAX_AI_CATEGORIES = 15
+AI_CATEGORY_MAX_LENGTH = 40
+_CATEGORY_URL = re.compile(r"://|www\.|\b[\w-]+\.(?:com|ru|org|net|io|me|рф|su)\b", re.IGNORECASE)
+_CATEGORY_QUOTES = frozenset("«»„“”‘’\"'`")
+
+
+def category_key(name):
+    return name.casefold().replace("ё", "е")
+
+
+def clean_ai_category_name(raw):
+    """Name the model proposed in a safe form, or None when it is not a usable category name."""
+    if not isinstance(raw, str):
+        return None
+    name = raw.strip()
+    if not name or any(char in name for char in "\r\n\x00") or any(char in _CATEGORY_QUOTES for char in name):
+        return None
+    name = " ".join(name.split())
+    if len(name) > AI_CATEGORY_MAX_LENGTH or not any(char.isalpha() for char in name) or _CATEGORY_URL.search(name):
+        return None
+    return name[0].upper() + name[1:]
+
+
+def resolve_ai_category(db, user_id, proposed, known):
+    """Category for a note the model has just structured, or None.
+
+    `known` maps the names the model was shown to their ids. A match there wins even if the
+    category was renamed meanwhile. Otherwise the name is cleaned and matched ignoring case and ё/е.
+    From MAX_AI_CATEGORIES categories on, the model may only reuse existing ones.
+    """
+    name = clean_ai_category_name(proposed)
+    if name is None:
+        return None
+    key = category_key(name)
+    existing_id = next((category_id for known_name, category_id in known.items() if category_key(known_name) == key), None)
+    if existing_id:
+        return db.scalar(select(Category).where(Category.id == existing_id, Category.user_id == user_id))
+    lock_account(db, user_id)
+    rows = db.scalars(select(Category).where(Category.user_id == user_id).order_by(Category.id)).all()
+    for category in rows:
+        if category_key(category.name) == key:
+            return category
+    if len(rows) >= MAX_AI_CATEGORIES:
+        return None
+    return ensure_category(db, user_id, name, best_effort=True)
+
+
 def rename_category(db, category, name, version):
     lock_account(db, category.user_id)
     conflict = next(
