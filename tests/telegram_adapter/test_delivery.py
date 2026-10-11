@@ -62,9 +62,15 @@ def test_full_scheduler_sender_and_completed_button_flow(reminders, tmp_path):
             assert await sender.run_once()
             assert not await sender.run_once()
             assert not sender.journal.path.exists()
-            button = sends[0]["reply_markup"]["inline_keyboard"][1][0]
-            assert button["text"] == "Выполнено" and len(button["callback_data"].encode()) <= 64
-            assert sends[0]["text"] == "Позвонить" and "parse_mode" not in sends[0]
+            first, link = sends[0]["reply_markup"]["inline_keyboard"]
+            assert [b["text"] for b in first] == ["Выполнено", "Через час", "Завтра"]
+            assert all(len(b["callback_data"].encode()) <= 64 for b in first)
+            assert [b["callback_data"][:2] for b in first] == ["d:", "h:", "t:"]
+            assert len({b["callback_data"][2:] for b in first}) == 1
+            assert [b["text"] for b in link] == ["Открыть напоминание"] and "&reminder=" in link[0]["url"]
+            button = first[0]
+            assert sends[0]["text"].startswith("Напоминание\n\nПозвонить\n\nИз заметки «")
+            assert "parse_mode" not in sends[0]
             bot = Bot(settings, core, telegram, OffsetStore(settings.state_file, settings.bot_id))
             await bot.handle({"update_id": 987, "callback_query": {
                 "id": "synthetic-callback", "data": button["callback_data"], "from": {"id": BASE["telegram_user_id"]},
@@ -181,7 +187,7 @@ def test_result_commit_then_lost_response_survives_restart_without_resend(remind
             assert not path.exists()
     asyncio.run(scenario())
     assert len(sends) == 1 and len(receipts) == 2 and receipts[0] == receipts[1]
-    assert len(sends[0]["reply_markup"]["inline_keyboard"]) == 1
+    assert len(sends[0]["reply_markup"]["inline_keyboard"]) == 2  # A note reminder has the same buttons.
 
 
 @pytest.mark.parametrize("stage", ["before_authorize", "authorize_response_lost"])

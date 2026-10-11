@@ -4,14 +4,20 @@ import hashlib
 import json
 import re
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from datetime import time as clock
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
-from app.models import Item, Outbox, Reminder
-from app.services import cancel_reminder_deliveries, lock_account, owned_note
+from app.models import Item, Outbox, Reminder, User
+from app.services import cancel_reminder_deliveries, item_view, lock_account, owned_note, reminder_proposals
+
+AUTO_KEY_PREFIX = "ai:"
+MAX_REMINDER_TEXT = 1000
 
 
 def reminder_view(db, reminder):
@@ -98,13 +104,81 @@ def edit_reminder(db, user_id, reminder_id, body):
     if row.generation != body.generation:
         raise HTTPException(409, "Напоминание уже изменено. Обновите его")
     validate_target(db, row.note_id, row.item_id, user_id)
-    scheduled_at = future_time(body.scheduled_at)
-    cancel_reminder_deliveries(db, user_id, [row.id])
-    row.scheduled_at, row.timezone, row.text = scheduled_at, body.timezone, body.text
+    reschedule(db, row, future_time(body.scheduled_at), body.timezone, body.text)
+    return row
+
+
+def reschedule(db, row, scheduled_at, timezone, text, channel="web"):
+    """The one way to move a reminder. The site edit and the Telegram snooze buttons both come here."""
+    cancel_reminder_deliveries(db, row.user_id, [row.id])
+    row.scheduled_at, row.timezone, row.text = scheduled_at, timezone, text
     row.status, row.confirmed_at = "confirmed", time.time()
     row.generation += 1
-    record_event(db, user_id, "reminder_confirmed", f"{row.id}:{row.generation}", subject_id=row.note_id)
-    return row
+    record_event(db, row.user_id, "reminder_confirmed", f"{row.id}:{row.generation}", channel, subject_id=row.note_id)
+
+
+def snooze_time(row, action, now):
+    """New UTC timestamp for a Telegram snooze button.
+
+    snooze_hour is now plus one hour. snooze_tomorrow is the next calendar day after today in the
+    reminder's own zone, at the wall-clock time of the current schedule. Zoneinfo keeps it right across DST;
+    a wall time that does not exist on that day moves forward with the clock.
+    """
+    if action == "snooze_hour":
+        return now + 3600
+    zone = ZoneInfo(row.timezone)
+    wall = datetime.fromtimestamp(row.scheduled_at, zone)
+    day = datetime.fromtimestamp(now, zone).date() + timedelta(days=1)
+    return datetime.combine(day, clock(wall.hour, wall.minute), tzinfo=zone).timestamp()
+
+
+def local_clock(row):
+    return datetime.fromtimestamp(row.scheduled_at, ZoneInfo(row.timezone)).strftime("%H:%M")
+
+
+def auto_reminders(db, note, settings=None, now=None):
+    """Set a confirmed reminder for every open task of a fresh note whose deadline can be read.
+
+    Same parser and zone as the proposals on the note screen. The reminder is tied to the task and
+    never made twice: its idempotency key is built from the task. A time in the past gives nothing.
+    The caller holds the account lock and owns the transaction. Returns the created reminders.
+    """
+    user = db.get(User, note.user_id)
+    if user is None or not user.ai_reminders_enabled:
+        return []
+    items = db.scalars(select(Item).where(
+        Item.note_id == note.id, Item.user_id == note.user_id, Item.kind == "task", Item.status == "open",
+    ).order_by(Item.position, Item.id)).all()
+    proposals = reminder_proposals(db, note.user_id, [item_view(item) for item in items], settings, now)
+    stamp = (now or datetime.now(UTC)).timestamp()
+    created = []
+    for item in items:
+        proposal = proposals.get(item.id)
+        text = " ".join(item.text.split())[:MAX_REMINDER_TEXT].strip()
+        if not proposal or not text:
+            continue
+        key = AUTO_KEY_PREFIX + item.id
+        if db.scalar(select(Reminder.id).where(Reminder.user_id == note.user_id, Reminder.idempotency_key == key)):
+            continue
+        local = datetime.fromisoformat(proposal["local_time"]).replace(tzinfo=ZoneInfo(proposal["timezone"]))
+        if local.timestamp() <= stamp:
+            continue
+        digest = hashlib.sha256(json.dumps(
+            {"note_id": note.id, "item_id": item.id, "scheduled_at": local.timestamp(),
+             "timezone": proposal["timezone"], "text": text, "auto": True}, sort_keys=True, ensure_ascii=False,
+        ).encode()).hexdigest()
+        row = Reminder(
+            user_id=note.user_id, note_id=note.id, item_id=item.id, scheduled_at=local.timestamp(),
+            timezone=proposal["timezone"], text=text, idempotency_key=key, creation_hash=digest,
+        )
+        try:
+            with db.begin_nested():
+                db.add(row)
+                db.flush()
+        except IntegrityError:
+            continue  # Another process made it first.
+        created.append(row)
+    return created
 
 
 def cancel_reminder(db, user_id, reminder_id, generation):

@@ -64,6 +64,11 @@ def seed_items(app, user_id, note_id, *specs):
     return ids
 
 
+def proposals_only(client):
+    """The AI does not set reminders itself, so the note screen and the Telegram reply only propose them."""
+    assert client.patch("/api/v1/assistant/settings", json={"ai_reminders_enabled": False}).status_code == 200
+
+
 def second_user(app, name="second"):
     other = TestClient(app)
     account = register(other, name)
@@ -282,6 +287,7 @@ def test_days_follow_the_configured_time_zone(app_factory):
 
 def test_note_detail_proposes_a_reminder_for_an_open_task_with_a_deadline(app, client):
     register(client)
+    proposals_only(client)
     note = ready_note(app, client)
     task = next(item for item in note["items"] if item["kind"] == "task")
     tomorrow = datetime.now(MOSCOW).date() + timedelta(days=1)
@@ -297,6 +303,7 @@ def test_note_detail_proposes_a_reminder_for_an_open_task_with_a_deadline(app, c
 
 def test_proposal_goes_away_with_a_reminder_and_returns_after_cancel(app, client):
     register(client)
+    proposals_only(client)
     note = ready_note(app, client)
     task = next(item for item in note["items"] if item["kind"] == "task")
     path = f"/api/v1/notes/{note['id']}"
@@ -332,6 +339,7 @@ def test_proposal_uses_the_configured_time_zone_and_is_private(app_factory):
     app = app_factory(limit_timezone="Asia/Vladivostok")
     with TestClient(app) as client:
         register(client)
+        proposals_only(client)
         note = ready_note(app, client)
         task = next(item for item in note["items"] if item["kind"] == "task")
         assert task["proposed_reminder"]["timezone"] == "Asia/Vladivostok"
@@ -345,6 +353,7 @@ def test_proposal_uses_the_configured_time_zone_and_is_private(app_factory):
 
 def test_processing_reply_offers_a_reminder_for_a_task_with_a_deadline(reminders):
     app, client, ids = reminders
+    proposals_only(client)
     processed(app, client)
     delivery = claim(client).json()["items"][0]
     text = delivery["text"]
@@ -359,6 +368,7 @@ def test_processing_reply_offers_a_reminder_for_a_task_with_a_deadline(reminders
 
 def test_processing_reply_has_no_hint_without_a_deadline_or_with_a_reminder(reminders):
     app, client, ids = reminders
+    proposals_only(client)
     assert message(client, update_id=300, text="Просто мысль без задач").status_code == 200
     assert Worker(app.state.sessions, app.state.settings, provider=MockProvider()).run_once()
     plain = claim(client).json()["items"][0]
@@ -376,6 +386,7 @@ def test_processing_reply_has_no_hint_without_a_deadline_or_with_a_reminder(remi
 
 def test_hint_keeps_the_telegram_length_limit(reminders):
     app, client, ids = reminders
+    proposals_only(client)
     saved = processed(app, client)
     with app.state.sessions.begin() as db:
         db.scalar(select(Note).where(Note.capture_id == saved["capture_id"])).markdown = "😀" * 6000

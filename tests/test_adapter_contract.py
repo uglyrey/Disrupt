@@ -211,7 +211,7 @@ def test_real_adapter_runs_task_callback(request, adapter, tmp_path):
             await bot.handle(update)
 
     asyncio.run(run())
-    assert replies == ["Задача выполнена."] * 2
+    assert replies == ["Готово, отметил выполненным"] * 2  # The same update is replayed.
     assert len(acknowledgements) == 2 and acknowledgements[0][0] == "answerCallbackQuery"
     from app.models import Note
 

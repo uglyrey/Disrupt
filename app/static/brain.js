@@ -574,11 +574,12 @@
     $('rec-disabled').hidden = enabled; $('rec-on').hidden = !enabled;
     syncButtons();
   }
+  function drawAiReminders(enabled) { $('airem-switch').checked = enabled; }
   async function loadSettings(force = false) {
     if (settingsKnown && !force) return;
     try {
       const data = await api('/api/v1/assistant/settings');
-      settingsKnown = true; drawSettings(Boolean(data.recommendations_enabled));
+      settingsKnown = true; drawSettings(Boolean(data.recommendations_enabled)); drawAiReminders(data.ai_reminders_enabled !== false);
     } catch (error) { say('recommend', `Не удалось узнать настройку. ${failure(error, '')}`.trim()); }
   }
   $('rec-switch').onchange = async () => {
@@ -592,6 +593,21 @@
       $('rec-switch').checked = !wanted;
       say('recommend', `Не удалось сохранить настройку. ${failure(error, '')}`.trim());
     } finally { $('rec-switch').disabled = false; syncButtons(); }
+  };
+
+  $('airem-switch').onchange = async () => {
+    const wanted = $('airem-switch').checked, status = $('airem-status');
+    $('airem-switch').disabled = true; status.textContent = '';
+    try {
+      const data = await api('/api/v1/assistant/settings', {method: 'PATCH', body: JSON.stringify({ai_reminders_enabled: wanted})});
+      drawAiReminders(data.ai_reminders_enabled !== false);
+      status.textContent = data.ai_reminders_enabled !== false
+        ? 'Включено. ИИ ставит напоминания к задачам со сроком в новых заметках.'
+        : 'Выключено. ИИ только предлагает напоминания, ставите их вы.';
+    } catch (error) {
+      $('airem-switch').checked = !wanted;
+      status.textContent = `Не удалось сохранить настройку. ${failure(error, '')}`.trim();
+    } finally { $('airem-switch').disabled = false; }
   };
 
   async function reopen(id) {

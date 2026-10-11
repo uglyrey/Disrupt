@@ -192,6 +192,13 @@
               <div id="rec-result" class="br-result"></div>
             </div>
           </section>
+          <section class="br-block" aria-labelledby="airem-title">
+            <div class="br-block-head"><h2 id="airem-title">Напоминания</h2>
+              <label class="switch" id="airem-switch-label" for="airem-switch"><input id="airem-switch" type="checkbox" role="switch" checked><span class="switch-track" aria-hidden="true"></span><span class="switch-text">ИИ сам ставит напоминания</span></label>
+            </div>
+            <p class="muted br-hint">Если в задаче есть срок, например «завтра в 10», ИИ сам поставит напоминание и пришлёт его в Telegram. Его можно изменить или отменить в заметке. Выключите переключатель, и ИИ будет только предлагать.</p>
+            <p id="airem-status" class="br-status" role="status" aria-live="polite"></p>
+          </section>
           <section class="br-block" aria-labelledby="digest-title">
             <h2 id="digest-title">Сводка за неделю</h2>
             <p class="muted br-hint">Главное из заметок за 7 дней, открытые задачи и темы.</p>

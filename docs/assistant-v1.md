@@ -89,8 +89,8 @@
 | `POST /api/v1/assistant/digest` | `days` (7 или 30), можно `{}` | 202 |
 | `GET /api/v1/assistant/requests/{id}` | | статус и результат, только владельцу |
 | `GET /api/v1/assistant/requests?limit=10` | | последние запросы, от новых к старым |
-| `GET /api/v1/assistant/settings` | | `{recommendations_enabled}` |
-| `PATCH /api/v1/assistant/settings` | `recommendations_enabled` | то же |
+| `GET /api/v1/assistant/settings` | | `{recommendations_enabled, ai_reminders_enabled}` |
+| `PATCH /api/v1/assistant/settings` | `recommendations_enabled` и/или `ai_reminders_enabled`, нужно хотя бы одно | то же |
 
 Ответ 429 по лимиту.
 
