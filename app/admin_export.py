@@ -3,7 +3,6 @@
 No usernames, no note text, no raw account IDs. Test accounts are excluded everywhere.
 """
 
-import csv
 import io
 import math
 import time
@@ -15,6 +14,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.admin_metrics import ACTIVE, calendar_day, completion, midnight, money, pseudonym, safe_cell, utc
+from app.csv_export import excel_csv_writer
 from app.models import AssistantRequest, Capture, Job, Note, ProductEvent, ProviderUsage, User
 
 MAX_DAYS = 92
@@ -44,7 +44,7 @@ def too_large():
 
 def make_csv(header, rows):
     out = io.StringIO(newline="")
-    writer = csv.writer(out, lineterminator="\n")
+    writer = excel_csv_writer(out)
     writer.writerow(header)
     for count, row in enumerate(rows, 1):
         if count > MAX_ROWS:
@@ -70,6 +70,8 @@ def readme(first, last, generated, stable_key):
         "",
         f"Период с {first.isoformat()} по {last.isoformat()} включительно, дни по Europe/Moscow.",
         f"Архив собран {generated} (UTC).",
+        "CSV используют UTF-8 с BOM и разделитель точку с запятой. Заголовки находятся в первой строке. "
+        "При импорте выберите разделитель ; и кодировку UTF-8. Значения и десятичная точка сохранены.",
         "",
         "ОПРЕДЕЛЕНИЯ",
         "",

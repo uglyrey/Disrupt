@@ -47,11 +47,14 @@ def archive(client, **params):
     response = client.get(URL, params={**FILTER, **params})
     assert response.status_code == 200, response.text
     with zipfile.ZipFile(io.BytesIO(response.content)) as bundle:
-        return response, {name: bundle.read(name).decode("utf-8") for name in bundle.namelist()}
+        for name in bundle.namelist():
+            if name.endswith(".csv"):
+                assert bundle.read(name).startswith(b"\xef\xbb\xbf")
+        return response, {name: bundle.read(name).decode("utf-8-sig") for name in bundle.namelist()}
 
 
 def table(files, name):
-    return list(csv.DictReader(io.StringIO(files[name])))
+    return list(csv.DictReader(io.StringIO(files[name]), delimiter=";"))
 
 
 def who(user_id):
@@ -65,14 +68,14 @@ def test_archive_contains_the_agreed_files_and_download_headers(client, populate
     assert response.headers["cache-control"] == "no-store"
     assert set(files) == FILES
     header = {name: files[name].splitlines()[0] for name in FILES if name.endswith(".csv")}
-    assert header["daily.csv"] == ("date,dau,new_users,captures_text,captures_audio,captures_web,captures_telegram,"
-                                   "ai_calls,ai_calls_per_dau,errors")
-    assert header["users.csv"] == "user_id,registered_date,first_target_scenario_date,active_days,channel_mix"
-    assert header["events.csv"] == "user_id,timestamp_utc,event,channel"
-    assert header["ai_calls.csv"] == ("timestamp_utc,user_id,kind,model,status,latency_ms,input_tokens,"
-                                      "output_tokens,cost")
-    assert header["errors.csv"] == "timestamp_utc,date_msk,source,error_code"
-    assert header["errors_by_day.csv"] == "date_msk,source,error_code,count"
+    assert header["daily.csv"] == ("date;dau;new_users;captures_text;captures_audio;captures_web;captures_telegram;"
+                                   "ai_calls;ai_calls_per_dau;errors")
+    assert header["users.csv"] == "user_id;registered_date;first_target_scenario_date;active_days;channel_mix"
+    assert header["events.csv"] == "user_id;timestamp_utc;event;channel"
+    assert header["ai_calls.csv"] == ("timestamp_utc;user_id;kind;model;status;latency_ms;input_tokens;"
+                                      "output_tokens;cost")
+    assert header["errors.csv"] == "timestamp_utc;date_msk;source;error_code"
+    assert header["errors_by_day.csv"] == "date_msk;source;error_code;count"
 
 
 def test_daily_counts_real_users_only_in_dau_and_matches_the_dashboard(client, populated):

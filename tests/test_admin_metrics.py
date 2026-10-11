@@ -179,7 +179,8 @@ def test_json_csv_same_aggregates_and_formula_guard(client, populated):
     response = client.get("/admin-api/v1/export", params=FILTER)
     assert summary.headers["cache-control"] == response.headers["cache-control"] == "no-store"
     assert response.status_code == 200 and response.headers["content-type"].startswith("text/csv")
-    rows = list(csv.DictReader(io.StringIO(response.text)))
+    assert response.content.startswith(b"\xef\xbb\xbf")
+    rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig")), delimiter=";"))
     table = {(row["section"], row["date_or_step"], row["metric"]): row["value"] for row in rows}
 
     def verify(section, identity, data, prefix=""):
