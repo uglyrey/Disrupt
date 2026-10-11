@@ -452,7 +452,8 @@ function watchSavedJob(job, generation, kind = 'text', draft = '') {
 }
 async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGeneration, draft = $('thought').value} = {}) {
   let lastStatus = 'queued';
-  for (let i=0; i<120 && currentEpoch===epoch && generation===viewGeneration; i++) {
+  // About five minutes: the model may answer in up to NOTES_LLM_READ_TIMEOUT_SECONDS plus queue time.
+  for (let i=0; i<300 && currentEpoch===epoch && generation===viewGeneration; i++) {
     const job = await api(`/api/v1/jobs/${id}`);
     if (currentEpoch!==epoch || generation!==viewGeneration) return;
     lastStatus = job.status;

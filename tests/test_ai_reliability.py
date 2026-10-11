@@ -309,14 +309,15 @@ def test_stream_repairs_quotes_like_the_plain_call():
     assert result.items[0].source_quote == "Купить хлеб завтра"
 
 
-def test_assistant_call_can_stream_too_and_is_still_strict():
+def test_assistant_call_can_stream_too_and_still_rejects_paraphrases():
     class Context:
         notes = [{"id": "n1", "title": "Т", "date": "2026-10-11", "text": "Купить хлеб", "items": []}]
         corpus = {"n1": ["Т", "Купить хлеб"]}
         open_task_ids = set()
 
     good = {"answer_markdown": "Хлеб.", "citations": [{"note_id": "n1", "quote": "Купить хлеб"}]}
-    bad = {"answer_markdown": "Хлеб.", "citations": [{"note_id": "n1", "quote": "купить хлеб"}]}
+    retyped = {"answer_markdown": "Хлеб.", "citations": [{"note_id": "n1", "quote": "купить хлеб"}]}
+    bad = {"answer_markdown": "Хлеб.", "citations": [{"note_id": "n1", "quote": "хлеб купить"}]}
 
     def run(answer):
         events = [*pieces(json.dumps(answer, ensure_ascii=False)),
@@ -325,5 +326,6 @@ def test_assistant_call_can_stream_too_and_is_still_strict():
             "ask", Context(), question="Что купить?")
 
     assert run(good)["citations"][0]["quote"] == "Купить хлеб"
+    assert run(retyped)["citations"][0]["quote"] == "Купить хлеб"  # stored as the note's own text
     with pytest.raises(ProviderError, match="ungrounded_quote"):
         run(bad)

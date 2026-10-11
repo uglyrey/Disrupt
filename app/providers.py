@@ -338,24 +338,38 @@ def validate_assistant(kind, result, context):
     corpus = context.corpus
 
     def grounded(note_ids, quote):
-        return bool(quote.strip()) and all(note_id in corpus for note_id in note_ids) and any(
-            quote in text for note_id in note_ids for text in corpus[note_id]
-        )
+        """Exact text from one of the notes that the model meant, or None.
+
+        Same normalisation as for notes (case, ё/е, quote and dash styles, spaces,
+        trailing punctuation). The stored quote is always replaced by the note's own text.
+        """
+        if not quote.strip() or not all(note_id in corpus for note_id in note_ids):
+            return None
+        for note_id in note_ids:
+            for text in corpus[note_id]:
+                span = _grounded_span(quote, text, 600)
+                if span is not None:
+                    return span
+        return None
+
+    def ground_all(rows):
+        for row in rows:
+            span = grounded(row.note_ids if hasattr(row, "note_ids") else [row.note_id], row.quote)
+            if span is None:
+                raise ProviderError("ungrounded_quote")
+            row.quote = span
 
     if kind == "ask":
         if not parsed.citations and parsed.answer_markdown.strip().rstrip(".") != NOT_FOUND_ANSWER:
             raise ProviderError("ungrounded_quote")
-        if not all(grounded([c.note_id], c.quote) for c in parsed.citations):
-            raise ProviderError("ungrounded_quote")
+        ground_all(parsed.citations)
     elif kind == "recommend":
-        if not all(grounded(s.note_ids, s.quote) for s in parsed.suggestions):
-            raise ProviderError("ungrounded_quote")
+        ground_all(parsed.suggestions)
         for suggestion in parsed.suggestions:
             if len(set(suggestion.note_ids)) != len(suggestion.note_ids):
                 raise ProviderError("ungrounded_quote")
     else:
-        if not all(grounded([c.note_id], c.quote) for c in parsed.highlights):
-            raise ProviderError("ungrounded_quote")
+        ground_all(parsed.highlights)
         if not set(parsed.open_tasks) <= context.open_task_ids or len(set(parsed.open_tasks)) != len(parsed.open_tasks):
             raise ProviderError("ungrounded_quote")
     return parsed.model_dump()
