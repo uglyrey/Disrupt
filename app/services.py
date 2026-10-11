@@ -450,6 +450,37 @@ def rename_category(db, category, name, version):
     return category
 
 
+def delete_category(db, category, version):
+    """Delete a category. Its notes and items stay and move to "no category".
+
+    Each note goes through advance_note, so its version and revision history stay consistent.
+    """
+    user_id = category.user_id
+    lock_account(db, user_id)
+    current = db.scalar(select(Category.version).where(Category.id == category.id, Category.user_id == user_id))
+    if current is None:
+        db.rollback()
+        raise HTTPException(404, "Категория не найдена")
+    if current != version:
+        db.rollback()
+        raise HTTPException(409, "Категория уже изменена. Обновите её перед удалением")
+    notes = db.scalars(
+        select(Note).where(Note.user_id == user_id, Note.category_id == category.id).order_by(Note.id)
+    ).all()
+    for note in notes:
+        advance_note(db, note, note.version, category_id=None)
+        record_event(db, user_id, "category_changed", f"{note.id}:{note.version}")
+        db.flush()
+        save_revision(db, note)
+    db.execute(
+        update(Item).where(Item.user_id == user_id, Item.category_id == category.id).values(category_id=None),
+        execution_options={"synchronize_session": False},
+    )
+    record_event(db, user_id, "category_deleted", f"{category.id}:{current}")
+    db.delete(category)
+    db.commit()
+
+
 def change_note_category(db, note, category_id, version):
     if category_id is not None:
         owned_category(db, category_id, note.user_id)
