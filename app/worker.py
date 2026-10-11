@@ -222,7 +222,8 @@ class Worker:
                 completed = db.execute(
                     update(Job)
                     .where(Job.id == job_id, Job.status == "running", Job.lease_until >= now)
-                    .values(status="succeeded", finished_at=now)
+                    .values(status="succeeded", finished_at=now,
+                            error_code="ungrounded_details_omitted" if result._grounding_details_omitted else None)
                 ).rowcount
                 if not completed:
                     db.rollback()

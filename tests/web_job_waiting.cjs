@@ -107,10 +107,13 @@ module.exports = async function checkJobWaiting() {
     assert.equal(s.calls.some(c => c.path === '/api/v1/notes/ai-note'),false);
   } finally { s?.dom.window.close(); }
   try {
-    s = await scenario(); s.job.status = 'succeeded'; s.job.note_id = 'ready-note'; s.finish();
+    s = await scenario(); s.job.status = 'succeeded'; s.job.note_id = 'ready-note';
+    s.job.error_code = 'ungrounded_details_omitted'; s.finish();
     await until(() => !s.$('note-card').hidden && !s.$('title').disabled);
     assert.equal(s.$('title').value,'Synthetic note','An untouched form may open its finished result');
     assert.equal(s.$('thought').value,'');
+    assert.match(s.$('message').textContent,/Неподтверждённые выводы, задачи или сроки не добавлены/);
+    assert.match(s.$('jobs').textContent,/Неподтверждённые выводы, задачи или сроки не добавлены/);
   } finally { s?.dom.window.close(); }
   for (const audio of [false,true]) {
     try {

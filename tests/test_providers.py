@@ -107,12 +107,7 @@ def test_cloud_errors_sanitized_and_not_retried(status, code):
         ({"choices": []}, "provider_invalid_response"),
         (completion({**RESULT, "user_id": "attacker"}), "provider_invalid_response"),
         (completion(finish="length"), "provider_incomplete_response"),
-        (
-            completion(
-                {**RESULT, "conclusions": [{"text": "Вывод", "source_quote": "не существующая цитата"}]}
-            ),
-            "ungrounded_quote",
-        ),
+        (completion({**RESULT, "_grounding_details_omitted": True}), "provider_invalid_response"),
     ],
 )
 def test_invalid_model_output(payload, code):

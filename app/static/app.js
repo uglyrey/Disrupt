@@ -366,6 +366,7 @@ async function loadJobs() {
     const row = element('div','','job');
     row.append(element('p',`${statusLabels[job.status]} · ${new Date(job.created_at*1000).toLocaleString('ru-RU')}`));
     if (job.status === 'failed') row.append(element('p',errors[job.error_code] || `Не удалось обработать запись. Она сохранена. Код: ${job.error_code}.`));
+    if (job.status === 'succeeded' && job.error_code === 'ungrounded_details_omitted') row.append(element('p','Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.'));
     if (job.note_id) {
       const button = element('button','Открыть заметку','quiet');
       button.onclick = () => openNote(job.note_id,{userAction:true}).catch(e => message(e.message)); row.append(button);
@@ -404,10 +405,17 @@ async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGenera
     $('job-status').textContent = job.status === 'queued'
       ? 'В очереди. Исходник сохранён. Можно продолжить работу.' : statusLabels[job.status];
     if (job.status === 'succeeded') {
+      if (job.error_code === 'ungrounded_details_omitted') $('job-status').textContent = 'Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.';
       await loadNotes(); await loadJobs(); await loadProviderUsage();
       if (currentEpoch!==epoch || generation!==viewGeneration) return;
-      if (canShowJobResult(generation,draft)) await openNote(job.note_id,{backgroundDraft:draft});
-      else message('Запись обработана. Она доступна в списке заметок.');
+      if (canShowJobResult(generation,draft)) {
+        await openNote(job.note_id,{backgroundDraft:draft});
+        if (job.error_code === 'ungrounded_details_omitted' && currentEpoch === epoch &&
+            viewGeneration === generation + 1 && currentNote?.id === job.note_id) {
+          message('Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.');
+        }
+      } else message('Запись обработана. Она доступна в списке заметок.' +
+        (job.error_code === 'ungrounded_details_omitted' ? ' Неподтверждённые выводы, задачи или сроки не добавлены.' : ''));
       return;
     }
     if (job.status === 'failed') {
