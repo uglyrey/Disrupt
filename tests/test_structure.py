@@ -1,6 +1,7 @@
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -76,7 +77,7 @@ def test_invalid_model_items_do_not_save_partial_structure(app, client, change):
 
             return StructuredNote.model_validate(result)
 
-    assert Worker(app.state.sessions, app.state.settings, BadProvider()).run_once()
+    assert Worker(app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), BadProvider()).run_once()
     after = client.get("/api/v1/jobs/" + job["id"]).json()
     assert after["status"] == "failed" and after["original_text"] == DEMO_TEXT
     with app.state.sessions() as db:

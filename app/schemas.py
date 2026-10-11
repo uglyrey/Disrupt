@@ -125,6 +125,8 @@ class AudioJobResponse(StrictModel):
     original_text: str
     created_at: float
     finished_at: float | None
+    attempts: int
+    retry_at: float | None
 
 
 class AudioMetadata(StrictModel):

@@ -238,7 +238,7 @@ def test_llm_failure_keeps_durable_transcript(app, client):
     job_id, capture_id, key = enqueue(app, client)
     storage = Reader(key)
     worker = Worker(
-        app.state.sessions, app.state.settings, SpyLLM("provider_timeout_unknown"),
+        app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), SpyLLM("provider_timeout_unknown"),
         audio_storage=storage, speech_provider=MockSpeechProvider(DEMO_TEXT),
     )
     assert worker.run_once() and not worker.run_once()
@@ -265,7 +265,7 @@ def test_stt_failure_never_sends_empty_text_to_llm_or_removes_audio(app, client,
     actual_storage = {"missing_storage": None, "missing_file": Missing()}.get(mode, storage)
     speech = {"unconfigured": None, "failed": Failing()}.get(mode, MockSpeechProvider(DEMO_TEXT))
     worker = Worker(
-        app.state.sessions, app.state.settings, llm, audio_storage=actual_storage, speech_provider=speech,
+        app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), llm, audio_storage=actual_storage, speech_provider=speech,
     )
     assert worker.run_once() and not worker.run_once()
     with app.state.sessions() as db:
@@ -306,7 +306,7 @@ def test_late_stt_cannot_save_transcript_or_start_llm(app, client):
 
     llm = SpyLLM()
     Worker(
-        app.state.sessions, app.state.settings, llm, audio_storage=Reader(key), speech_provider=Late(),
+        app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), llm, audio_storage=Reader(key), speech_provider=Late(),
     ).run_once()
     with app.state.sessions() as db:
         assert db.get(Job, job_id).error_code == "execution_unknown"

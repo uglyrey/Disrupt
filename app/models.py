@@ -117,6 +117,11 @@ class Job(Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[float] = mapped_column(Float, default=time.time)
     finished_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Автоповторы. attempts считает уже назначенные повторы. Пока not_before в будущем, воркер задание не берёт.
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    not_before: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    last_failed_at: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
 
 
 class Note(Base):
