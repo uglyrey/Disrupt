@@ -1,6 +1,5 @@
 """Moscow calendar aggregates over content-free events and provider receipts."""
 
-import csv
 import hashlib
 import hmac
 import io
@@ -18,6 +17,7 @@ from sqlalchemy import and_, or_, select
 
 from app.analytics import BACKGROUND_EVENTS
 from app.contracts import AdminSummary
+from app.csv_export import excel_csv_writer
 from app.models import Capture, Job, Note, ProductEvent, ProviderUsage, TranscriptRevision, User
 from app.reference_pricing import DATE as REFERENCE_DATE
 from app.reference_pricing import SOURCE as REFERENCE_SOURCE
@@ -401,7 +401,7 @@ def safe_cell(value):
 
 def export_csv(summary, filters=None):
     buffer = io.StringIO(newline="")
-    writer = csv.writer(buffer)
+    writer = excel_csv_writer(buffer)
     writer.writerow(("section", "date_or_step", "metric", "value"))
 
     def flatten(section, identity, data, prefix=""):
