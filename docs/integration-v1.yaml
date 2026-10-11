@@ -471,7 +471,9 @@
                       "stt_seconds": null,
                       "cost": null,
                       "estimated_cost": null,
-                      "latency_ms": 200
+                      "latency_ms": 200,
+                      "reference_cost": null,
+                      "reference_pricing_date": null
                     },
                     {
                       "id": "receipt_462e7e61102b66ef8714574790980143",
@@ -490,7 +492,9 @@
                       "stt_seconds": null,
                       "cost": "0.25000000",
                       "estimated_cost": null,
-                      "latency_ms": 100
+                      "latency_ms": 100,
+                      "reference_cost": null,
+                      "reference_pricing_date": null
                     }
                   ],
                   "quality": {
@@ -526,7 +530,29 @@
                       "dau_sum": 3,
                       "cost_per_user": null,
                       "cost_per_session": null,
-                      "llm_cost_per_dau": null
+                      "llm_cost_per_dau": null,
+                      "known_output_tokens": 50,
+                      "stt_cost_calls": 0,
+                      "llm_cost_calls": 1,
+                      "known_cache_tokens": 0,
+                      "known_input_tokens": 100,
+                      "known_stt_minutes": "0.00000000",
+                      "input_tokens_calls": 1,
+                      "legacy_calls": 0,
+                      "cost_missing_calls": 1,
+                      "output_tokens_calls": 1,
+                      "token_usage_missing_calls": 1,
+                      "stt_seconds_calls": 0,
+                      "cache_tokens_calls": 1,
+                      "reference_stt_calls": 0,
+                      "reference_pricing_source": "https://cloud.ru/products/evolution-ai-factory/catalog-foundation-models",
+                      "reference_cost_per_session": null,
+                      "reference_llm_calls": 0,
+                      "reference_stt_cost": "0.00000000",
+                      "reference_llm_cost": null,
+                      "reference_llm_cost_per_dau": null,
+                      "reference_pricing_date": "2026-10-11",
+                      "reference_cost_per_user": null
                     }
                   },
                   "generated_at": "2026-10-07T09:00:00+00:00"
@@ -6109,6 +6135,157 @@
               }
             ],
             "title": "Llm Cost Per Dau"
+          },
+          "llm_cost_calls": {
+            "type": "integer",
+            "title": "Llm Cost Calls"
+          },
+          "stt_cost_calls": {
+            "type": "integer",
+            "title": "Stt Cost Calls"
+          },
+          "input_tokens_calls": {
+            "type": "integer",
+            "title": "Input Tokens Calls"
+          },
+          "output_tokens_calls": {
+            "type": "integer",
+            "title": "Output Tokens Calls"
+          },
+          "cache_tokens_calls": {
+            "type": "integer",
+            "title": "Cache Tokens Calls"
+          },
+          "known_input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known Input Tokens"
+          },
+          "known_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known Output Tokens"
+          },
+          "known_cache_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known Cache Tokens"
+          },
+          "known_stt_minutes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Known Stt Minutes"
+          },
+          "stt_seconds_calls": {
+            "type": "integer",
+            "title": "Stt Seconds Calls"
+          },
+          "cost_missing_calls": {
+            "type": "integer",
+            "title": "Cost Missing Calls"
+          },
+          "token_usage_missing_calls": {
+            "type": "integer",
+            "title": "Token Usage Missing Calls"
+          },
+          "legacy_calls": {
+            "type": "integer",
+            "title": "Legacy Calls"
+          },
+          "reference_llm_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Llm Cost"
+          },
+          "reference_stt_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Stt Cost"
+          },
+          "reference_llm_calls": {
+            "type": "integer",
+            "title": "Reference Llm Calls"
+          },
+          "reference_stt_calls": {
+            "type": "integer",
+            "title": "Reference Stt Calls"
+          },
+          "reference_cost_per_user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Cost Per User"
+          },
+          "reference_cost_per_session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Cost Per Session"
+          },
+          "reference_llm_cost_per_dau": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Llm Cost Per Dau"
+          },
+          "reference_pricing_date": {
+            "type": "string",
+            "title": "Reference Pricing Date"
+          },
+          "reference_pricing_source": {
+            "type": "string",
+            "title": "Reference Pricing Source"
           }
         },
         "additionalProperties": false,
@@ -6131,7 +6308,29 @@
           "dau_sum",
           "cost_per_user",
           "cost_per_session",
-          "llm_cost_per_dau"
+          "llm_cost_per_dau",
+          "llm_cost_calls",
+          "stt_cost_calls",
+          "input_tokens_calls",
+          "output_tokens_calls",
+          "cache_tokens_calls",
+          "known_input_tokens",
+          "known_output_tokens",
+          "known_cache_tokens",
+          "known_stt_minutes",
+          "stt_seconds_calls",
+          "cost_missing_calls",
+          "token_usage_missing_calls",
+          "legacy_calls",
+          "reference_llm_cost",
+          "reference_stt_cost",
+          "reference_llm_calls",
+          "reference_stt_calls",
+          "reference_cost_per_user",
+          "reference_cost_per_session",
+          "reference_llm_cost_per_dau",
+          "reference_pricing_date",
+          "reference_pricing_source"
         ],
         "title": "Costs"
       },
@@ -8279,6 +8478,28 @@
             ],
             "title": "Estimated Cost"
           },
+          "reference_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Cost"
+          },
+          "reference_pricing_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Pricing Date"
+          },
           "latency_ms": {
             "anyOf": [
               {
@@ -8310,6 +8531,8 @@
           "stt_seconds",
           "cost",
           "estimated_cost",
+          "reference_cost",
+          "reference_pricing_date",
           "latency_ms"
         ],
         "title": "UsageRow"

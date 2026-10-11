@@ -19,6 +19,9 @@ from sqlalchemy import and_, or_, select
 from app.analytics import BACKGROUND_EVENTS
 from app.contracts import AdminSummary
 from app.models import Capture, Job, Note, ProductEvent, ProviderUsage, TranscriptRevision, User
+from app.reference_pricing import DATE as REFERENCE_DATE
+from app.reference_pricing import SOURCE as REFERENCE_SOURCE
+from app.reference_pricing import estimate
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 ACTIVE = {"capture_saved", "note_opened", "note_edited", "reminder_confirmed", "task_completed"}
@@ -81,6 +84,19 @@ def costs(rows, users, sessions, dau_sum):
     llm, stt = ([row for row in rows if row.kind == kind] for kind in ("llm", "stt"))
     llm_cost, stt_cost = known_sum(llm, "cost"), known_sum(stt, "cost")
     total = llm_cost + stt_cost if llm_cost is not None and stt_cost is not None else None
+    def coverage(group, field):
+        return sum(getattr(row, field) is not None for row in group)
+
+    def partial(group, field):
+        values = [Decimal(str(getattr(row, field))) for row in group if getattr(row, field) is not None]
+        return sum(values, Decimal(0)) if values or not group else None
+
+    reference = {kind: [value for row in group if (value := estimate(row)) is not None]
+                 for kind, group in (("llm", llm), ("stt", stt))}
+    reference_llm = sum(reference["llm"], Decimal(0)) if reference["llm"] or not llm else None
+    reference_stt = sum(reference["stt"], Decimal(0)) if reference["stt"] or not stt else None
+    reference_total = (reference_llm or Decimal(0)) + (reference_stt or Decimal(0)) if any(reference.values()) or not rows else None
+
     return {
         "currency": "RUB", "llm_cost": money(llm_cost), "stt_cost": money(stt_cost),
         "known_llm_cost": money(sum((r.cost for r in llm if r.cost is not None), Decimal(0))),
@@ -92,6 +108,23 @@ def costs(rows, users, sessions, dau_sum):
         "user_count": users, "session_count": sessions, "dau_sum": dau_sum,
         "cost_per_user": divide(total, users), "cost_per_session": divide(total, sessions),
         "llm_cost_per_dau": divide(llm_cost, dau_sum),
+        "llm_cost_calls": coverage(llm, "cost"), "stt_cost_calls": coverage(stt, "cost"),
+        **{f"{name}_calls": coverage(llm, name) for name in ("input_tokens", "output_tokens", "cache_tokens")},
+        **{f"known_{name}": None if (value := partial(llm, name)) is None else int(value)
+           for name in ("input_tokens", "output_tokens", "cache_tokens")},
+        "known_stt_minutes": divide(partial(stt, "stt_seconds"), 60),
+        "stt_seconds_calls": coverage(stt, "stt_seconds"),
+        "cost_missing_calls": sum(row.cost is None for row in rows),
+        "token_usage_missing_calls": sum(any(getattr(row, field) is None
+                                             for field in ("input_tokens", "output_tokens", "cache_tokens"))
+                                         for row in llm),
+        "legacy_calls": sum(row.model == "legacy-untracked" for row in rows),
+        "reference_llm_cost": money(reference_llm), "reference_stt_cost": money(reference_stt),
+        "reference_llm_calls": len(reference["llm"]), "reference_stt_calls": len(reference["stt"]),
+        "reference_cost_per_user": divide(reference_total, users),
+        "reference_cost_per_session": divide(reference_total, sessions),
+        "reference_llm_cost_per_dau": divide(reference_llm, dau_sum),
+        "reference_pricing_date": REFERENCE_DATE, "reference_pricing_source": REFERENCE_SOURCE,
     }
 
 
@@ -341,7 +374,9 @@ def aggregate(db, start, end, channel, source, key, *, usage_limit=50, usage_off
                    "occurred_at": utc(row.occurred_at), **{name: getattr(row, name) for name in (
                        "channel", "kind", "model", "tariff_version", "status", "input_tokens", "output_tokens", "cache_tokens", "latency_ms")},
                    "stt_seconds": float(row.stt_seconds) if row.stt_seconds is not None else None,
-                   "cost": money(row.cost), "estimated_cost": money(row.estimated_cost)}
+                   "cost": money(row.cost), "estimated_cost": money(row.estimated_cost),
+                   "reference_cost": money(value := estimate(row)),
+                   "reference_pricing_date": REFERENCE_DATE if value is not None else None}
                   for row in usage[usage_offset:usage_offset + usage_limit]],
         "quality": {"ai_succeeded": len(quality_success), "ai_failed": len(quality_fail),
                     "ai_success_rate": percentage(len(quality_success), len(quality_success) + len(quality_fail)),

@@ -42,9 +42,10 @@ async function reload(fn){if(fn)nextResponse=fn;$('filters').dispatchEvent(new w
   assert.equal($('to').value,'2026-10-06');
   assert.equal(calls[0].url.searchParams.get('usage_limit'),'50');
   assert.match($('cards').textContent,/DAU за 2026-10-06/);
-  assert.match($('costs').textContent,/LLM · полная стоимостьНет данных/);
-  assert.match($('costs').textContent,/LLM · известная часть0,25/);
-  assert.match($('retention').textContent,/D7Нет данных0 из 0/);
+  assert.match($('costs').textContent,/Текстовая модель0,25 ₽Учтено 1 из 2 запросов · неполная сумма/);
+  assert.match($('token-costs').textContent,/Входные токены100Учтено 1 из 2/);
+  assert.match($('accounting-status').textContent,/Стоимость не получена для 1 операций/);
+  assert.match($('retention').textContent,/D7Пока раноОкно наблюдения ещё не завершилось/);
   assert.match($('retention-pending').textContent,/D7 — 2/);
   const initialCards=$('cards').textContent;
   $('next').click();await settled();
@@ -62,6 +63,25 @@ async function reload(fn){if(fn)nextResponse=fn;$('filters').dispatchEvent(new w
   await reload(()=>reply(malicious));
   assert.equal($('usage').querySelector('img'),null);
   assert.match($('usage').textContent,/<img src=x/);
+  const missing=structuredClone(fixture);
+  Object.assign(missing.quality.costs,{known_llm_cost:'0.00000000',llm_cost_calls:0});
+  await reload(()=>reply(missing));
+  assert.match($('costs').textContent,/Текстовая модельНе рассчитаноУчтено 0 из 2/);
+  assert.doesNotMatch($('costs').textContent,/Текстовая модель0 ₽/);
+  const reference=structuredClone(missing);
+  Object.assign(reference.quality.costs,{reference_llm_cost:'0.15000000',reference_llm_calls:1,
+    reference_cost_per_user:'0.07500000',reference_cost_per_session:'0.05000000',reference_llm_cost_per_dau:'0.05000000'});
+  await reload(()=>reply(reference));
+  assert.match($('costs').textContent,/Текстовая модель · оценка≈ 0,15 ₽/);
+  assert.match($('accounting-status').textContent,/Это не баланс ключа и не подтверждённое списание/);
+  assert.equal($('accounting-status').querySelector('a').hostname,'cloud.ru');
+  const invalidCoverage=structuredClone(fixture);invalidCoverage.quality.costs.input_tokens_calls=3;
+  await reload(()=>reply(invalidCoverage));
+  assert.equal($('dashboard').hidden,true,'invalid coverage hides all data');
+  w.document.querySelector('[data-period="today"]').click();await settled();
+  assert.equal(calls.at(-1).url.searchParams.get('from'),'2026-10-07');
+  assert.equal(calls.at(-1).url.searchParams.get('to'),'2026-10-07');
+  $('from').value='2026-09-30';$('to').value='2026-10-06';await reload();
 
   for (const code of [401,403,404,503]) {
     await reload(()=>reply(null,code));
