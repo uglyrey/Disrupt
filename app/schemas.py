@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StringConstraints, field_validator
 
 NonBlank = Annotated[str, StringConstraints(min_length=1)]
 
@@ -163,6 +163,8 @@ class ProposedItem(ProposedConclusion):
 
 
 class StructuredNote(StrictModel):
+    # Server-only processing metadata, never accepted from model JSON or exported to the contract.
+    _grounding_details_omitted: bool = PrivateAttr(default=False)
     title: str = Field(min_length=1, max_length=200)
     markdown: str = Field(min_length=1, max_length=24000)
     conclusions: list[ProposedConclusion] = Field(max_length=5)
