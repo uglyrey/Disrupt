@@ -23,7 +23,11 @@
   header:has(#main-nav:not([hidden])) .brand{order:1}
   header:has(#main-nav:not([hidden])) .header-actions{order:2}
   .main-nav{order:3;flex:1 0 100%;margin:0;padding-bottom:2px;gap:5px}
-  .main-nav-item{min-height:40px;padding:0 10px;font-size:13.5px;border-color:#d5dfcf;background:#fff}
+  .main-nav-item{flex:1 1 auto;min-height:40px;padding:0 10px;font-size:13.5px;border-color:#d5dfcf;background:#fff}
+}
+@media(max-width:400px){
+  .main-nav{gap:4px}
+  .main-nav-item{flex:1 1 auto;min-width:0;padding:0 6px;font-size:12.5px;white-space:nowrap}
 }
 
 /* Task list */
