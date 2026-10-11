@@ -134,7 +134,9 @@
       "stt_seconds": null,
       "cost": null,
       "estimated_cost": null,
-      "latency_ms": 200
+      "latency_ms": 200,
+      "reference_cost": null,
+      "reference_pricing_date": null
     },
     {
       "id": "receipt_462e7e61102b66ef8714574790980143",
@@ -153,7 +155,9 @@
       "stt_seconds": null,
       "cost": "0.25000000",
       "estimated_cost": null,
-      "latency_ms": 100
+      "latency_ms": 100,
+      "reference_cost": null,
+      "reference_pricing_date": null
     }
   ],
   "quality": {
@@ -189,7 +193,29 @@
       "dau_sum": 3,
       "cost_per_user": null,
       "cost_per_session": null,
-      "llm_cost_per_dau": null
+      "llm_cost_per_dau": null,
+      "known_output_tokens": 50,
+      "stt_cost_calls": 0,
+      "llm_cost_calls": 1,
+      "known_cache_tokens": 0,
+      "known_input_tokens": 100,
+      "known_stt_minutes": "0.00000000",
+      "input_tokens_calls": 1,
+      "legacy_calls": 0,
+      "cost_missing_calls": 1,
+      "output_tokens_calls": 1,
+      "token_usage_missing_calls": 1,
+      "stt_seconds_calls": 0,
+      "cache_tokens_calls": 1,
+      "reference_stt_calls": 0,
+      "reference_pricing_source": "https://cloud.ru/products/evolution-ai-factory/catalog-foundation-models",
+      "reference_cost_per_session": null,
+      "reference_llm_calls": 0,
+      "reference_stt_cost": "0.00000000",
+      "reference_llm_cost": null,
+      "reference_llm_cost_per_dau": null,
+      "reference_pricing_date": "2026-10-11",
+      "reference_cost_per_user": null
     }
   },
   "generated_at": "2026-10-07T09:00:00+00:00"

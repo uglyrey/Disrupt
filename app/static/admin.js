@@ -1,7 +1,7 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
-  const nf = new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 8});
+  const nf = new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 2});
   const moscowDay = date => new Intl.DateTimeFormat('sv-SE', {timeZone: 'Europe/Moscow'}).format(date);
   const shiftDay = (day, delta) => new Date(Date.parse(day + 'T12:00:00Z') + delta * 86400000).toISOString().slice(0, 10);
   const timestamp = value => {
@@ -13,25 +13,25 @@
     return nf.format(value);
   };
   const number = value => {
-    if (value === null) return 'Нет данных';
+    if (value === null) return 'Не измерено';
     if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new Error('schema');
     return nf.format(value);
   };
   const text = value => {
-    if (value === null) return 'Нет данных';
+    if (value === null) return '—';
     if (typeof value !== 'string') throw new Error('schema');
     return value;
   };
   const money = value => {
-    if (value === null) return 'Нет данных';
+    if (value === null) return 'Не рассчитано';
     if (typeof value !== 'string' || !/^\d+(\.\d+)?$/.test(value) || !Number.isFinite(Number(value))) throw new Error('schema');
-    return nf.format(Number(value)) + ' ₽';
+    return (Number(value) > 0 && Number(value) < 0.01 ? '< 0,01' : nf.format(Number(value))) + ' ₽';
   };
   const percent = value => {
     count(value.numerator); count(value.denominator);
     if (value.numerator > value.denominator || (value.denominator === 0) !== (value.value === null)) throw new Error('schema');
     if (value.value !== null && (value.value > 100 || Math.abs(value.value - 100 * value.numerator / value.denominator) > 0.000001)) throw new Error('schema');
-    return value.value === null ? 'Нет данных' : number(value.value) + '%';
+    return value.value === null ? 'Нет наблюдений' : number(value.value) + '%';
   };
   const node = (tag, content, className) => {
     const el = document.createElement(tag);
@@ -40,8 +40,8 @@
     return el;
   };
   function cards(id, items) {
-    const nodes = items.map(([label, value, hint]) => {
-      const el = node('article', undefined, 'metric');
+    const nodes = items.map(([label, value, hint, state]) => {
+      const el = node('article', undefined, 'metric' + (state ? ' metric--' + state : ''));
       el.append(node('h3', label), node('p', value));
       if (hint) el.append(node('small', hint));
       return el;
@@ -62,7 +62,7 @@
   function clear() {
     applied = null; next = null;
     $('dashboard').hidden = true;
-    for (const id of ['cards','daily','funnel','retention','costs','quality','usage']) $(id).replaceChildren();
+    for (const id of ['cards','daily','funnel','retention','costs','token-costs','accounting-status','cost-context','quality','usage']) $(id).replaceChildren();
     $('export').disabled = true; $('next').disabled = true; $('previous').disabled = true;
   }
   function status(message, error = false) { $('status').textContent = message; $('status').className = error ? 'error' : ''; }
@@ -90,24 +90,65 @@
     table('daily', ['Дата','Регистрации','DAU','Новые','Вернувшиеся','Сессии','LLM','STT','LLM / DAU','Вызовы без полного usage'], data.daily.map(d => [text(d.date), count(d.registrations), count(d.dau), count(d.new_users), count(d.returning_users), count(d.session_count), money(d.llm_cost), money(d.stt_cost), money(d.llm_cost_per_dau), count(d.unknown_usage_calls)]));
     const labels = {registered:'Зарегистрировались',capture_saved:'Сохранили запись',note_opened:'Открыли результат',structure_checked:'Проверили структуру',returned:'Вернулись'};
     table('funnel', ['Шаг','Пользователи','Конверсия'], data.funnel.map(f => [labels[f.step] || text(f.step), count(f.users), percent(f.conversion) + ' · ' + ratio(f.conversion)]));
-    cards('retention', [['D1',percent(r.d1),ratio(r.d1)],['D7',percent(r.d7),ratio(r.d7)]]);
+    cards('retention', ['d1','d7'].map(key => [key.toUpperCase(), r[key].value === null ? 'Пока рано' : percent(r[key]),
+      r[key].value === null ? (r['pending_' + key] ? 'Окно наблюдения ещё не завершилось' : 'Нет подходящих регистраций') : ratio(r[key])]));
     $('retention-pending').textContent = `Окно ещё не завершилось: D1 — ${count(r.pending_d1)}, D7 — ${count(r.pending_d7)}.`;
-    cards('costs', [
-      ['LLM · полная стоимость',money(costs.llm_cost)], ['STT · полная стоимость',money(costs.stt_cost)],
-      ['LLM · известная часть',money(costs.known_llm_cost)], ['STT · известная часть',money(costs.known_stt_cost)],
-      ['Вызовы без полного usage',count(costs.unknown_usage_calls)], ['Вызовы LLM',count(costs.llm_calls)], ['Вызовы STT',count(costs.stt_calls)],
-      ['Входные токены',number(costs.input_tokens)], ['Выходные токены',number(costs.output_tokens)], ['Кэшированные токены',number(costs.cache_tokens)],
-      ['STT · минуты', costs.stt_minutes === null ? 'Нет данных' : text(costs.stt_minutes)], ['Пользователи в расчёте',count(costs.user_count)],
-      ['Сессии',count(costs.session_count)], ['Сумма дневных DAU',count(costs.dau_sum)],
-      ['Расход на пользователя',money(costs.cost_per_user)], ['Расход на сессию',money(costs.cost_per_session)], ['LLM cost/DAU',money(costs.llm_cost_per_dau)],
-    ]);
+    const measured = (label, full, known, covered, total, format) => {
+      count(covered); count(total);
+      if (covered > total || (covered === 0 && total > 0 && known !== null)) throw new Error('schema');
+      const incomplete = covered < total;
+      return [label, format(full === null ? known : full), total === 0 ? 'За период запросов не было' :
+        `Учтено ${count(covered)} из ${count(total)} запросов${incomplete && covered ? ' · неполная сумма' : ''}`,
+        incomplete ? 'incomplete' : 'complete'];
+    };
+    const costCard = (kind, label) => {
+      const covered = costs[kind + '_cost_calls'], total = costs[kind + '_calls'];
+      if (!covered && total && costs['reference_' + kind + '_cost'] !== null) {
+        const referenceCount = costs['reference_' + kind + '_calls']; count(referenceCount);
+        if (referenceCount > total) throw new Error('schema');
+        return [label + ' · оценка', '≈ ' + money(costs['reference_' + kind + '_cost']),
+          `Тариф Cloud.ru · ${count(referenceCount)} из ${count(total)} запросов · списание шлюза не подтверждено`, 'estimate'];
+      }
+      return measured(label, costs[kind + '_cost'], covered || !total ? costs['known_' + kind + '_cost'] : null, covered, total, money);
+    };
+    const per = (label, field, denominator, hint) => costs[field] !== null
+      ? [label,money(costs[field]),hint]
+      : costs['reference_' + field] !== null ? [label + ' · оценка','≈ ' + money(costs['reference_' + field]),'По учтённой части · тариф Cloud.ru','estimate']
+      : [label,'Не рассчитано',denominator ? 'Не хватает измерений стоимости' : 'Нет наблюдений для расчёта'];
+    const tokenCards = ['input_tokens','output_tokens','cache_tokens'].map((key, index) => measured(
+      ['Входные токены','Выходные токены','Из кэша'][index], costs[key], costs['known_' + key], costs[key + '_calls'], costs.llm_calls, number));
+    cards('costs', [costCard('llm','Текстовая модель'), costCard('stt','Распознавание речи'),
+      per('На пользователя','cost_per_user',costs.user_count,'Все расходы / активные пользователи'),
+      per('На сессию','cost_per_session',costs.session_count,'Все расходы / сессии'),
+      per('LLM на DAU','llm_cost_per_dau',costs.dau_sum,'Стоимость LLM / сумма дневных DAU')]);
+    cards('token-costs', [...tokenCards,
+      measured('Минуты аудио',costs.stt_minutes,costs.known_stt_minutes,costs.stt_seconds_calls,costs.stt_calls,
+        value => value === null ? 'Не измерено' : number(Number(text(value)))),
+      ['Запросы LLM',count(costs.llm_calls)],['Запросы STT',count(costs.stt_calls)]]);
+    const missingCosts = count(costs.cost_missing_calls), missingTokens = count(costs.token_usage_missing_calls);
+    const billing = costs.cost_missing_calls
+      ? `Стоимость не получена для ${missingCosts} операций. Для расхода в рублях нужен подтверждённый тариф нашего шлюза. Неизвестные списания не считаются нулевыми.`
+      : costs.llm_calls + costs.stt_calls ? 'Стоимость учтена для всех операций за период.' : 'За этот период обращений к модели не было.';
+    const usageNote = costs.token_usage_missing_calls ? ` Неполные данные о токенах у ${missingTokens} запросов LLM. Ниже показана сохранённая часть.` : '';
+    const legacyNote = costs.legacy_calls ? ` До включения учёта выполнено ${count(costs.legacy_calls)} операций; их токены задним числом не восстановить.` : '';
+    const referenceCount = costs.reference_llm_calls + costs.reference_stt_calls; count(referenceCount);
+    const comparison = referenceCount ? ' Карточки со знаком ≈ показывают справочную оценку по тарифам Cloud.ru на ' + text(costs.reference_pricing_date) + '. Входные токены оценены без скидки за кэш. Это не баланс ключа и не подтверждённое списание.' : '';
+    $('accounting-status').replaceChildren(node('strong', costs.cost_missing_calls ? 'Измерения и справочная оценка' : 'Учёт за выбранный период'), node('p', billing + usageNote + legacyNote + comparison));
+    if (referenceCount) {
+      const link = node('a','Публичные тарифы Cloud.ru');
+      link.href = 'https://cloud.ru/products/evolution-ai-factory/catalog-foundation-models';
+      link.target = '_blank'; link.rel = 'noopener noreferrer';
+      $('accounting-status').append(link);
+    }
+    $('accounting-status').classList.toggle('is-incomplete',costs.cost_missing_calls > 0 || costs.token_usage_missing_calls > 0);
+    $('cost-context').textContent = `В расчёте ${count(costs.user_count)} пользователей · ${count(costs.session_count)} сессий · сумма дневных DAU ${count(costs.dau_sum)}.`;
     cards('quality', [
       ['Успешные обработки ИИ',count(q.ai_succeeded)], ['Ошибки ИИ',count(q.ai_failed)], ['Успешность ИИ',percent(q.ai_success_rate),ratio(q.ai_success_rate)],
       ['Исправленные заметки',count(q.edited_notes)], ['Обработка p95 · мс',number(q.processing_p95_ms)],
       ['Напоминания отправлены',count(q.reminder_sent)], ['Доставка заблокирована',count(q.reminder_blocked)],
       ['Ошибки доставки',count(q.reminder_failed)], ['Неизвестный исход доставки',count(q.reminder_unknown)], ['Напоминания открыты',count(q.reminder_opened)],
     ]);
-    table('usage', ['Время МСК','Пользователь','Сессия','Операция','Канал','Тип','Модель','Статус','Входные токены','Выходные','Кэш','STT · с','Стоимость','Оценка стоимости','Тариф','Задержка · мс'], data.usage.map(u => [timestamp(u.occurred_at),text(u.user_pseudonym),text(u.session_pseudonym),text(u.operation_pseudonym),text(u.channel),text(u.kind),text(u.model),text(u.status),number(u.input_tokens),number(u.output_tokens),number(u.cache_tokens),number(u.stt_seconds),money(u.cost),money(u.estimated_cost),text(u.tariff_version),number(u.latency_ms)]));
+    table('usage', ['Время МСК','Пользователь','Сессия','Операция','Канал','Тип','Модель','Статус','Входные токены','Выходные','Кэш','Аудио · с','Списание · ₽','Оценка Cloud.ru','Тариф списания','Задержка · мс'], data.usage.map(u => [timestamp(u.occurred_at),text(u.user_pseudonym),text(u.session_pseudonym),text(u.operation_pseudonym),text(u.channel),text(u.kind),text(u.model),text(u.status),u.kind === 'llm' ? number(u.input_tokens) : '—',u.kind === 'llm' ? number(u.output_tokens) : '—',u.kind === 'llm' ? number(u.cache_tokens) : '—',u.kind === 'stt' ? number(u.stt_seconds) : '—',u.cost === null ? 'Не передано' : money(u.cost),u.reference_cost === null ? '—' : '≈ ' + money(u.reference_cost),text(u.tariff_version),number(u.latency_ms)]));
     $('snapshot').textContent = `${slice.from} — ${slice.to} · ${slice.channel === 'all' ? 'Все каналы' : slice.channel} · Источник ${slice.source} · Сформировано ${stamp}`;
     $('page').textContent = data.usage.length ? `Операции ${currentOffset + 1}–${currentOffset + data.usage.length}` : 'Нет операций';
   }
@@ -141,6 +182,12 @@
     }
   }
   $('filters').addEventListener('submit', event => {event.preventDefault(); load();});
+  for (const button of document.querySelectorAll('[data-period]')) button.addEventListener('click', () => {
+    const today = moscowDay(new Date());
+    $('to').value = today;
+    $('from').value = button.dataset.period === 'today' ? today : shiftDay(today, 1 - Number(button.dataset.period));
+    load();
+  });
   $('filters').addEventListener('input', () => {
     generation++; if (controller) controller.abort(); clear(); $('apply').disabled = false;
     status('Фильтры изменены. Нажми «Показать».');

@@ -135,6 +135,10 @@ def test_controlled_aggregate_with_two_channels_duplicate_test_and_pending(app, 
     assert costs["unknown_usage_calls"] == 1 and costs["llm_calls"] == 2
     assert costs["llm_cost"] is None and costs["known_llm_cost"] == "0.25000000"
     assert costs["input_tokens"] is None and costs["llm_cost_per_dau"] is None
+    assert costs["known_input_tokens"] == 100 and costs["known_output_tokens"] == 50
+    assert costs["known_cache_tokens"] == 0
+    assert costs["input_tokens_calls"] == costs["output_tokens_calls"] == costs["cache_tokens_calls"] == 1
+    assert costs["llm_cost_calls"] == costs["cost_missing_calls"] == costs["token_usage_missing_calls"] == 1
     extended = client.get("/admin-api/v1/summary", params={**FILTER, "to": "2026-10-07"}).json()
     assert extended["cards"]["activation_pending"] == 1
     assert extended["cards"]["ai_activation"]["denominator"] == 2

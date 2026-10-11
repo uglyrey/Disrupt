@@ -10,7 +10,7 @@
   <script src="/static/admin.tools.js" defer></script>
 </head>
 <body>
-  <header><span class="brand">beresta<span>Бизнес-статистика</span></span><div class="session"><span id="admin-user"></span><button id="logout" type="button" class="secondary" hidden>Выйти</button></div></header>
+  <header><span class="brand">beresta<span>Панель команды</span></span><div class="session"><span id="admin-user"></span><button id="logout" type="button" class="secondary" hidden>Выйти</button></div></header>
   <main>
     <p class="network-note">Доступ только из приватной сети</p>
     <section id="login-view" hidden>
@@ -24,12 +24,14 @@
       </form>
       <p id="login-message" role="alert" aria-live="assertive" hidden></p>
     </section>
-    <div id="admin-app" hidden>
-    <nav class="admin-sections"><button id="show-statistics" type="button" data-view="statistics" aria-pressed="true">Статистика</button><button id="show-feedback" type="button" data-view="feedback" class="secondary" aria-pressed="false">Обращения</button><button id="show-archive" type="button" data-view="archive" class="secondary" aria-pressed="false">Архив метрик</button><button id="show-audit" type="button" data-view="audit" class="secondary" aria-pressed="false">Журнал действий</button></nav>
+    <div id="admin-app" class="admin-shell" hidden>
+    <nav class="admin-sections" aria-label="Разделы админки"><span class="nav-caption">Рабочее пространство</span><button id="show-statistics" type="button" data-view="statistics" aria-pressed="true">Статистика</button><button id="show-feedback" type="button" data-view="feedback" class="secondary" aria-pressed="false">Обращения</button><button id="show-archive" type="button" data-view="archive" class="secondary" aria-pressed="false">Архив метрик</button><button id="show-audit" type="button" data-view="audit" class="secondary" aria-pressed="false">Журнал действий</button><p class="nav-note">Только для команды.<br>Данные пользователей защищены.</p></nav>
+    <div class="admin-content">
     <div id="statistics-view">
     <h1>Как используют beresta</h1>
     <p class="intro">Пользователи, целевые действия и расходы. Дни считаются по Москве. Тестовые аккаунты и фоновая активность исключаются сервером.</p>
     <form id="filters" class="panel filters">
+      <div class="period-shortcuts" aria-label="Быстрый выбор периода"><button type="button" class="secondary" data-period="today">Сегодня</button><button type="button" class="secondary" data-period="7">7 дней</button><button type="button" class="secondary" data-period="30">30 дней</button><span>Сегодняшние показатели предварительные</span></div>
       <label>С даты<input id="from" name="from" type="date" required=""></label>
       <label>По дату включительно<input id="to" name="to" type="date" required=""></label>
       <label>Канал<select id="channel" name="channel"><option value="all">Все каналы</option><option value="web">Веб</option><option value="telegram">Telegram</option></select></label>
@@ -47,7 +49,7 @@
         <section class="panel" aria-labelledby="funnel-title"><h2 id="funnel-title">Воронка новых пользователей</h2><p class="muted">Доли и порядок событий рассчитаны сервером.</p><div id="funnel" class="table-wrap" tabindex="0" role="region" aria-label="Воронка"></div></section>
         <section class="panel" aria-labelledby="retention-title"><h2 id="retention-title">Удержание</h2><div id="retention" class="cards compact"></div><p id="retention-pending" class="muted"></p><p class="muted">D1 и D7 учитывают только созревшие когорты. Если окно наблюдения ещё не завершилось, результат не считается нулём.</p></section>
       </div>
-      <section class="panel" aria-labelledby="costs-title"><h2 id="costs-title">Расходы и токены</h2><p class="muted">Неизвестные расходы показаны отдельно от известной части. Оценка не заменяет измеренную стоимость. LLM cost/DAU использует сумму дневных DAU за период.</p><div id="costs" class="cards compact"></div></section>
+      <section class="panel" aria-labelledby="costs-title"><h2 id="costs-title">ИИ и расходы</h2><div id="accounting-status" class="accounting-note" role="status"></div><div id="costs" class="cards compact"></div><h3 class="section-caption">Токены и аудио</h3><div id="token-costs" class="cards compact"></div><p id="cost-context" class="muted"></p><p class="muted">Суммы относятся ко всему выбранному периоду. Неполные измерения показаны с числом учтённых запросов. Расход LLM на DAU использует сумму дневных DAU.</p></section>
       <section class="panel" aria-labelledby="quality-title"><h2 id="quality-title">Обработка и напоминания</h2><div id="quality" class="cards compact"></div><p class="muted">Неизвестный результат отправки не означает доставку. Такая попытка не повторяется автоматически.</p></section>
       <section class="panel" aria-labelledby="usage-title"><h2 id="usage-title">Модельные операции</h2><p class="muted">Только технические идентификаторы, без текстов, аудио, имён и контактов. На странице до 50 операций; расходы выше относятся ко всему выбранному периоду.</p><div id="usage" class="table-wrap" tabindex="0" role="region" aria-label="Расходы по операциям"></div><nav class="pagination" aria-label="Страницы операций"><button id="previous" type="button" class="secondary" disabled="">Назад</button><span id="page"></span><button id="next" type="button" class="secondary" disabled="">Далее</button></nav></section>
     </div>
@@ -70,5 +72,5 @@
       <p id="audit-status" role="status" aria-live="polite"></p>
       <div id="audit-list" class="table-wrap" tabindex="0" role="region" aria-label="Журнал действий"></div>
     </section>
-    </div></main>
+    </div></div></main>
 </body></html>

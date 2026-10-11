@@ -157,6 +157,8 @@ class UsageRow(StrictModel):
     stt_seconds: float | None
     cost: str | None
     estimated_cost: str | None
+    reference_cost: str | None
+    reference_pricing_date: str | None
     latency_ms: int | None
 
 
@@ -179,6 +181,28 @@ class Costs(StrictModel):
     cost_per_user: str | None
     cost_per_session: str | None
     llm_cost_per_dau: str | None
+    llm_cost_calls: int
+    stt_cost_calls: int
+    input_tokens_calls: int
+    output_tokens_calls: int
+    cache_tokens_calls: int
+    known_input_tokens: int | None
+    known_output_tokens: int | None
+    known_cache_tokens: int | None
+    known_stt_minutes: str | None
+    stt_seconds_calls: int
+    cost_missing_calls: int
+    token_usage_missing_calls: int
+    legacy_calls: int
+    reference_llm_cost: str | None
+    reference_stt_cost: str | None
+    reference_llm_calls: int
+    reference_stt_calls: int
+    reference_cost_per_user: str | None
+    reference_cost_per_session: str | None
+    reference_llm_cost_per_dau: str | None
+    reference_pricing_date: str
+    reference_pricing_source: str
 
 
 class Quality(StrictModel):
