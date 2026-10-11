@@ -4,7 +4,6 @@
 (() => {
   const $ = id => document.getElementById(id);
   const PAGE = 50;
-  const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const EMPTY = {
     open: ['Открытых задач нет', 'Новые задачи появятся из ваших записей. Можно добавить их и вручную в самой заметке.'],
     completed: ['Выполненных задач пока нет', 'Когда вы отметите задачу, она окажется здесь.'],
@@ -24,16 +23,21 @@
     if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return forms[1];
     return forms[2];
   }
+  const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const startOfDay = date => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  // Only a clear moment is shown, never the quote from the note. No moment means no label.
   function dueLabel(row) {
-    if (typeof row.due_at === 'number') {
-      const date = new Date(row.due_at * 1000), now = new Date();
-      const text = `${date.getDate()} ${MONTHS[date.getMonth()]}${date.getFullYear() === now.getFullYear() ? '' : ` ${date.getFullYear()}`}, ` +
-        `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-      const late = row.status === 'open' && date.getTime() < now.getTime();
-      return {text: late ? `Просрочено, срок ${text}` : `Срок ${text}`, late};
-    }
-    if (row.due_text) return {text: `Срок из записи: «${row.due_text}»`, late: false};
-    return null;
+    const stamp = typeof row.due_resolved_at === 'number' ? row.due_resolved_at : row.due_at;
+    if (typeof stamp !== 'number') return null;
+    const date = new Date(stamp * 1000), now = new Date();
+    const hasTime = row.due_has_time !== false;
+    const days = Math.round((startOfDay(date) - startOfDay(now)) / 86400000);
+    let day = {'-1': 'вчера', 0: 'сегодня', 1: 'завтра'}[days];
+    if (!day) day = `${date.getDate()} ${MONTHS_GEN[date.getMonth()]}${date.getFullYear() === now.getFullYear() ? '' : ` ${date.getFullYear()}`}`;
+    const time = `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    const text = hasTime ? `${day}, ${time}` : day;
+    const late = row.status === 'open' && (hasTime ? date.getTime() < now.getTime() : days < 0);
+    return {text: late ? `Просрочено, срок ${text}` : `Срок ${text}`, late};
   }
   function say(text) { $('tasks-status').textContent = text || ''; }
   function failure(error) {

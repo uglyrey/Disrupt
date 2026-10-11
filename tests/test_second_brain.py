@@ -535,3 +535,40 @@ def test_tasks_list_pages_and_validates_arguments(app, client):
     for params in ({"limit": 0}, {"limit": 201}, {"offset": -1}, {"status": "weird"}):
         assert client.get("/api/v1/tasks", params=params).status_code == 422
     assert TestClient(app).get("/api/v1/tasks").status_code == 401
+
+
+def test_tasks_list_resolves_the_quoted_deadline_from_the_note_time(app, client):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    owner = register(client)["id"]
+    zone = ZoneInfo("Europe/Moscow")
+    written = datetime(2026, 10, 5, 12, 0, tzinfo=zone).timestamp()  # Monday
+    note = seed_note(app, owner, written)
+    with app.state.sessions.begin() as db:
+        for position, (text, due_text, due_at) in enumerate([
+            ("Дата со временем", "12 октября в 15:00", None),
+            ("Завтра без времени", "завтра", None),
+            ("Через два часа", "через 2 часа", None),
+            ("Не разобрать", "когда-нибудь потом", None),
+            ("Без цитаты", None, None),
+            ("Дата в поле", "до пятницы", 1790000000.0),
+        ]):
+            db.add(Item(user_id=owner, note_id=note, kind="task", status="open", text=text, due_text=due_text,
+                        due_at=due_at, position=position))
+    rows = {row["text"]: row for row in client.get("/api/v1/tasks").json()["items"]}
+
+    def moment(*args):
+        return datetime(*args, tzinfo=zone).timestamp()
+
+    exact = rows["Дата со временем"]
+    assert exact["due_resolved_at"] == moment(2026, 10, 12, 15) and exact["due_has_time"] is True
+    tomorrow = rows["Завтра без времени"]
+    assert tomorrow["due_resolved_at"] == moment(2026, 10, 6, 9) and tomorrow["due_has_time"] is False
+    soon = rows["Через два часа"]
+    assert soon["due_resolved_at"] == moment(2026, 10, 5, 14) and soon["due_has_time"] is True
+    for name in ("Не разобрать", "Без цитаты"):
+        assert rows[name]["due_resolved_at"] is None and rows[name]["due_has_time"] is False
+    assert rows["Не разобрать"]["due_text"] == "когда-нибудь потом"
+    stored = rows["Дата в поле"]
+    assert stored["due_resolved_at"] == 1790000000.0 and stored["due_has_time"] is True
