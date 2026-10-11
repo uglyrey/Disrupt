@@ -9,7 +9,7 @@
   let pendingCreate = null, uncertainEdit = null, rows = [], more = false, timer = null;
   let resolveTimer = null, pick = '', rememberedZone = '', telegram = {linked:null,error:false};
   const labels = {confirmed:'Подтверждено',sent:'Отправлено',blocked:'Telegram недоступен',
-    unknown:'Результат отправки неизвестен',cancelled:'Отменено'};
+    unknown:'Результат отправки неизвестен',cancelled:'Отменено',completed:'Выполнено'};
   const deliveryLabels = {pending:'Ожидает отправки',leased:'Готовится к отправке',authorized:'Отправляется',
     retryable:'Ожидает повтора после отказа Telegram',sent:'Отправлено',blocked:'Telegram недоступен',
     unknown:'Результат отправки неизвестен',cancelled:'Попытка отменена'};
@@ -20,6 +20,8 @@
   const zoneNames = {'Europe/Moscow':'Москва','Europe/Berlin':'Берлин','Asia/Yekaterinburg':'Екатеринбург',
     'Asia/Novosibirsk':'Новосибирск','Asia/Vladivostok':'Владивосток',UTC:'UTC'};
   const zoneKey = 'beresta.reminderZone';
+  // A link from Telegram ends with ?reminder=<id>. The list opens on that reminder once, for its own note.
+  let linked = new URLSearchParams(location.search).get('reminder'), highlighted = null;
   function validZone(zone) {
     try { new Intl.DateTimeFormat('en-CA',{timeZone:zone}); return Boolean(zone); } catch (_) { return false; }
   }
@@ -203,7 +205,8 @@
     if (!rows.length) $('reminders-list').append(node('p','Напоминаний нет','muted reminders-empty'));
     for (const row of rows) {
       const card = node('article','','reminder-row'); card.dataset.id = row.id;
-      if (row.status === 'cancelled') card.classList.add('is-cancelled');
+      if (row.status === 'cancelled' || row.status === 'completed') card.classList.add('is-cancelled');
+      if (row.id === highlighted) card.classList.add('is-linked');
       const task = note.items.find(item => item.id === row.item_id);
       const head = node('div','','reminder-line');
       head.append(node('strong',rowTime(row),'reminder-when'),node('span',
@@ -215,13 +218,27 @@
       }
       const actions = node('div','','reminder-actions');
       const edit = node('button','Изменить','quiet reminder-small'); edit.type = 'button'; edit.dataset.action = 'edit';
-      edit.disabled = Boolean(row.item_id && (!task || task.kind !== 'task' || task.status !== 'open'));
+      edit.disabled = row.status === 'completed' || Boolean(row.item_id && (!task || task.kind !== 'task' || task.status !== 'open'));
       edit.onclick = () => startForm(row);
       const cancel = node('button','Отменить','quiet reminder-small'); cancel.type = 'button'; cancel.dataset.action = 'cancel';
-      cancel.disabled = row.status === 'cancelled'; cancel.onclick = () => cancelReminder(row);
+      cancel.disabled = row.status === 'cancelled' || row.status === 'completed'; cancel.onclick = () => cancelReminder(row);
       actions.append(edit,cancel); card.append(actions); $('reminders-list').append(card);
     }
     drawTelegram(); controls();
+  }
+  function revealLinked() {
+    if (!linked || !note) return;
+    const query = new URLSearchParams(location.search);
+    // Only the note the link was made for takes it, and only once.
+    if (note.capture_id !== query.get('capture')) return;
+    const id = linked; linked = null;
+    query.delete('reminder');
+    try { history.replaceState(null,'',location.pathname + (query.toString() ? '?' + query : '') + location.hash); } catch (_) { /* the address stays */ }
+    const card = [...$('reminders-list').children].find(item => item.dataset && item.dataset.id === id);
+    if (!card) return;
+    highlighted = id; card.classList.add('is-linked');
+    if (window.BerestaFocus) window.BerestaFocus.open('reminders',{focus:false});
+    if (card.scrollIntoView) card.scrollIntoView({block:'nearest'});
   }
   // The Telegram line shows only when something needs the person's attention.
   function drawTelegram() {
@@ -249,6 +266,7 @@
       rows = append ? [...new Map([...rows,...data].map(row => [row.id,row])).values()] : data;
       more = page.length === limit;
       drawRows(); if (!silent) say();
+      if (!silent && !append) revealLinked();
     } catch (_) {
       if (view === generation && request === listRequest) say('Не удалось обновить напоминания. Попробуйте ещё раз.');
     }
@@ -368,7 +386,7 @@
     } finally { setWork(false); }
   }
   function hide() {
-    generation++; listRequest++; timeRequest++; note = null; rows = [];
+    generation++; listRequest++; timeRequest++; note = null; rows = []; highlighted = null;
     clearInterval(timer); timer = null; clearForm();
   }
   function show(value, callbacks) {
