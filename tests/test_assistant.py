@@ -217,7 +217,7 @@ def test_validation_rules_for_every_kind():
     for bad in (
         {"answer_markdown": "Оплаты нет.", "citations": []},
         {"answer_markdown": "Оплаты нет.", "citations": [{"note_id": "n2", "quote": "Оплату ещё"}]},
-        {"answer_markdown": "Оплаты нет.", "citations": [{"note_id": "n1", "quote": "оплату ещё"}]},
+        {"answer_markdown": "Оплаты нет.", "citations": [{"note_id": "n1", "quote": "ещё оплату"}]},
         {"answer_markdown": "Оплаты нет.", "citations": [{"note_id": "n1", "quote": "  "}]},
     ):
         with pytest.raises(ProviderError) as error:
@@ -250,6 +250,25 @@ def test_validation_rules_for_every_kind():
                 {**digest, "highlights": [{"note_id": "n1", "quote": "Нет такого"}]}):
         with pytest.raises(ProviderError) as error:
             validate_assistant("digest", bad, context)
+        assert error.value.code == "ungrounded_quote"
+
+
+def test_assistant_quotes_retyped_by_the_model_are_replaced_with_the_note_text():
+    note = {**NOTE, "text": "Решили: «Оплату» сделаем в пятницу — после звонка.\nЁлка в офисе."}
+    context = context_of(note)
+    ask = validate_assistant("ask", {"answer_markdown": "Да.", "citations": [
+        {"note_id": "n1", "quote": "\"оплату\" сделаем в пятницу - после звонка."},
+        {"note_id": "n1", "quote": "елка в офисе"},
+    ]}, context)
+    assert [c["quote"] for c in ask["citations"]] == ["«Оплату» сделаем в пятницу — после звонка.", "Ёлка в офисе"]
+    suggestion = {"kind": "task", "title": "Оплата", "text": "Сделать", "note_ids": ["n1"], "quote": "сделать  оплату"}
+    assert validate_assistant("recommend", {"suggestions": [suggestion]}, context)["suggestions"][0]["quote"] == "Сделать оплату"
+    digest = {"summary_markdown": "Итоги", "highlights": [{"note_id": "n1", "quote": "ЁЛКА В ОФИСЕ."}],
+              "open_tasks": [], "themes": []}
+    assert validate_assistant("digest", digest, context)["highlights"][0]["quote"] == "Ёлка в офисе."
+    for quote in ("в пятницу сделаем оплату", "Оплату сделаем после звонка", "Ёлка в пятницу"):
+        with pytest.raises(ProviderError) as error:
+            validate_assistant("ask", {"answer_markdown": "Да.", "citations": [{"note_id": "n1", "quote": quote}]}, context)
         assert error.value.code == "ungrounded_quote"
 
 

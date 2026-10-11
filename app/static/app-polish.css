@@ -109,7 +109,7 @@
 @media(hover:none){#items .item-tools{opacity:1}}
 #item-form{display:flex;align-items:center;gap:8px;margin:6px 0 0;padding:4px 8px;border:0}
 #item-form .kind-toggle{display:inline-flex;flex:none;padding:2px;border-radius:999px;background:#e9eee3}
-#item-form .kind-toggle button{min-height:26px;padding:0 11px;border:0;border-radius:999px;background:transparent;color:#5a7060;font-size:12px;font-weight:600}
+#item-form .kind-toggle button{margin:0;min-height:30px;line-height:1.2;padding:0 11px;border:0;border-radius:999px;background:transparent;color:#5a7060;font-size:12px;font-weight:600}
 #item-form .kind-toggle button[aria-pressed=true]{background:#fff;color:var(--note-ink);box-shadow:0 1px 2px #24372d1f}
 #item-form #item-text{flex:1;min-width:0;height:34px;padding:0 6px;border:0;border-bottom:1px solid transparent;border-radius:0;background:transparent;font-size:15px}
 #item-form #item-text:hover{border-bottom-color:var(--line)}
@@ -163,3 +163,5 @@
   .nav-menu .nav-action{display:block;width:100%;min-height:40px;padding:0 12px;border-radius:8px;font-size:14px;text-align:left}
   .nav-menu .nav-bottom{flex-direction:column;gap:2px;padding:0}
 }
+/* Sidebar actions: the hover text stays above 4.5:1 on the hover fill */
+.nav-action:hover:not(:disabled),a.nav-action:hover{background:#e3eadc;color:#2f4636}

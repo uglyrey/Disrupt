@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import time
 from collections import Counter
 from typing import Literal, Protocol
 
@@ -14,8 +15,10 @@ from app.config import (
     ALLOWED_MODEL_BASE_URLS,
     LLM_READ_TIMEOUT_SECONDS,
     PROGRAM_BASE_URL,
+    RESPONSE_BYTE_LIMIT,
     Settings,
     read_secret_file,
+    stream_deadline_seconds,
 )
 from app.schemas import ProposedItem, StrictModel, StructuredNote
 
@@ -85,20 +88,93 @@ def validate_result(result: StructuredNote, original: str) -> StructuredNote:
     return result
 
 
+_QUOTE_CHARS = frozenset("«»„“”‘’‚\"'`")
+_DASH_CHARS = frozenset("\u2010\u2011\u2012\u2013\u2014\u2015\u2212-")
+_TRAILING_PUNCTUATION = ".,;:!?"
+
+
+def _normalized_with_map(text):
+    """Comparison copy of text and, for every copied char, the span it came from.
+
+    The copy ignores case, ё/е, quote and dash styles and whitespace runs, so a model
+    that retyped a quote slightly differently can still be matched. The map lets us
+    return the exact original substring, never the model's own wording.
+    """
+    chars, starts, ends = [], [], []
+    for index, char in enumerate(text):
+        if char.isspace():
+            if chars and chars[-1] == " " and ends[-1] == index:
+                ends[-1] = index + 1  # one space for the whole run of whitespace
+                continue
+            pieces = " "
+        elif char in _QUOTE_CHARS:
+            pieces = '"'
+        elif char in _DASH_CHARS:
+            pieces = "-"
+        elif char == "\u2026":
+            pieces = "..."
+        else:
+            pieces = char.casefold().replace("ё", "е")
+        for piece in pieces:
+            chars.append(piece)
+            starts.append(index)
+            ends.append(index + 1)
+    return "".join(chars), starts, ends
+
+
+def _quote_candidates(value):
+    normalized = _normalized_with_map(value)[0].strip()
+    if not normalized:
+        return []
+    candidates = [normalized]
+    stripped = normalized.lstrip(' "').rstrip(' "' + _TRAILING_PUNCTUATION)
+    stripped = stripped.rstrip(' "' + _TRAILING_PUNCTUATION)  # punctuation inside closing quotes
+    if stripped and stripped not in candidates:
+        candidates.append(stripped)
+    return candidates
+
+
+def _grounded_span(value, source, maximum, cache=None):
+    """Exact substring of source that the model meant by value, or None.
+
+    Strict by design: the whole quote must appear in one place of source after
+    normalisation. Paraphrases, reordered words and fragments glued from two
+    places never match.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    if value in source and len(value) <= maximum:
+        return value
+    candidates = _quote_candidates(value)
+    if not candidates:
+        return None
+    if cache is not None and "map" in cache:
+        normalized, starts, ends = cache["map"]
+    else:
+        normalized, starts, ends = _normalized_with_map(source)
+        if cache is not None:
+            cache["map"] = (normalized, starts, ends)
+    for candidate in candidates:
+        found = normalized.find(candidate)
+        if found < 0:
+            continue
+        span = source[starts[found]:ends[found + len(candidate) - 1]]
+        if span.strip() and len(span) <= maximum:
+            return span
+    return None
+
+
 def repair_structure_quotes(result: StructuredNote, original: str) -> StructuredNote:
     """Keep only supported optional details, without another provider call.
 
-    Formatting-only whitespace is matched to a contiguous original span. We
-    never turn a paraphrase into a quote, invent evidence or relax strict validation.
+    A quote that differs from the original only in case, ё/е, quote or dash style,
+    whitespace, ellipsis or trailing punctuation is replaced by the exact original span.
+    We never turn a paraphrase into a quote, invent evidence or relax strict validation.
     """
+    cache = {}
+
     def quote_span(value, source, maximum=3000):
-        if value and value in source:
-            return value
-        parts = value.split()
-        if not parts:
-            return None
-        match = re.search(r"\s+".join(re.escape(part) for part in parts), source)
-        return match.group(0) if match and len(match.group(0)) <= maximum else None
+        return _grounded_span(value, source, maximum, cache if source is original else None)
 
     conclusions, items = [], []
     dropped_conclusions = dropped_items = dropped_due = normalized = 0
@@ -262,24 +338,38 @@ def validate_assistant(kind, result, context):
     corpus = context.corpus
 
     def grounded(note_ids, quote):
-        return bool(quote.strip()) and all(note_id in corpus for note_id in note_ids) and any(
-            quote in text for note_id in note_ids for text in corpus[note_id]
-        )
+        """Exact text from one of the notes that the model meant, or None.
+
+        Same normalisation as for notes (case, ё/е, quote and dash styles, spaces,
+        trailing punctuation). The stored quote is always replaced by the note's own text.
+        """
+        if not quote.strip() or not all(note_id in corpus for note_id in note_ids):
+            return None
+        for note_id in note_ids:
+            for text in corpus[note_id]:
+                span = _grounded_span(quote, text, 600)
+                if span is not None:
+                    return span
+        return None
+
+    def ground_all(rows):
+        for row in rows:
+            span = grounded(row.note_ids if hasattr(row, "note_ids") else [row.note_id], row.quote)
+            if span is None:
+                raise ProviderError("ungrounded_quote")
+            row.quote = span
 
     if kind == "ask":
         if not parsed.citations and parsed.answer_markdown.strip().rstrip(".") != NOT_FOUND_ANSWER:
             raise ProviderError("ungrounded_quote")
-        if not all(grounded([c.note_id], c.quote) for c in parsed.citations):
-            raise ProviderError("ungrounded_quote")
+        ground_all(parsed.citations)
     elif kind == "recommend":
-        if not all(grounded(s.note_ids, s.quote) for s in parsed.suggestions):
-            raise ProviderError("ungrounded_quote")
+        ground_all(parsed.suggestions)
         for suggestion in parsed.suggestions:
             if len(set(suggestion.note_ids)) != len(suggestion.note_ids):
                 raise ProviderError("ungrounded_quote")
     else:
-        if not all(grounded([c.note_id], c.quote) for c in parsed.highlights):
-            raise ProviderError("ungrounded_quote")
+        ground_all(parsed.highlights)
         if not set(parsed.open_tasks) <= context.open_task_ids or len(set(parsed.open_tasks)) != len(parsed.open_tasks):
             raise ProviderError("ungrounded_quote")
     return parsed.model_dump()
@@ -348,6 +438,8 @@ class CloudRuProvider:
         *,
         base_url: str = PROGRAM_BASE_URL,
         transport: httpx.BaseTransport | None = None,
+        read_timeout: int = LLM_READ_TIMEOUT_SECONDS,
+        stream: bool = False,
     ):
         base_url = base_url.rstrip("/")
         if base_url not in ALLOWED_MODEL_BASE_URLS:
@@ -356,6 +448,8 @@ class CloudRuProvider:
         self._model = model
         self.model_name = model
         self._transport = transport
+        self._read_timeout = read_timeout
+        self._stream = stream
         self.endpoint = base_url + "/chat/completions"
 
     def structure(self, text, *, categories=()):
@@ -402,73 +496,149 @@ class CloudRuProvider:
             logging.getLogger(__name__).warning("provider_output_invalid stage=schema types=%s", ",".join(types))
             raise ProviderError("provider_invalid_response") from None
 
-    def structure_with_usage(self, text, *, categories=(), on_usage):
+    @staticmethod
+    def _status_code(status):
+        return {
+            400: "provider_bad_request",
+            401: "provider_auth",
+            403: "provider_auth",
+            404: "provider_model_not_found",
+            408: "provider_timeout_unknown",
+            409: "provider_conflict",
+            422: "provider_bad_request",
+            429: "provider_rate_limit",
+            500: "provider_unavailable",
+            502: "provider_unavailable",
+            503: "provider_unavailable",
+            504: "provider_timeout_unknown",
+        }.get(status, f"provider_http_{status}")
+
+    def _chat(self, payload, on_usage):
+        """One chat call. Returns (message content, finish_reason). Never retries."""
         from app.usage import response_tokens
 
+        if self._stream:
+            payload = {**payload, "stream": True, "stream_options": {"include_usage": True}}
+        # No SDK retries, redirects, discovery, telemetry, or alternate endpoints.
+        with httpx.Client(
+            timeout=httpx.Timeout(self._read_timeout, connect=10, write=10, pool=10),
+            follow_redirects=False,
+            trust_env=False,
+            transport=self._transport,
+        ) as client:
+            with client.stream(
+                "POST",
+                self.endpoint,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+                json=payload,
+            ) as response:
+                if response.status_code != 200:
+                    # Persist the status class/code only. The provider response may contain
+                    # user text or infrastructure details and is deliberately discarded.
+                    raise ProviderError(self._status_code(response.status_code), http_status=response.status_code)
+                if self._stream:
+                    content, finish_reason, usage = self._read_stream(response)
+                    on_usage(response_tokens(usage))
+                    return content, finish_reason
+                content = bytearray()
+                for chunk in response.iter_bytes():
+                    content.extend(chunk)
+                    if len(content) > RESPONSE_BYTE_LIMIT:
+                        raise ProviderError("provider_response_too_large")
+        data = json.loads(content)
+        on_usage(response_tokens(data))
+        choice = data["choices"][0]
+        return choice["message"]["content"], choice.get("finish_reason")
+
+    def _read_stream(self, response):
+        """Collect an OpenAI-style SSE answer. Same byte cap, plus a total wall-clock deadline."""
+        deadline = time.monotonic() + stream_deadline_seconds(self._read_timeout)
+        parts, finish_reason, usage, seen_choice = [], None, None, False
+        buffer, total = bytearray(), 0
+
+        def handle(raw):
+            nonlocal finish_reason, usage, seen_choice
+            line = raw.decode("utf-8").rstrip("\r")
+            if not line.strip() or line.startswith((":", "event:", "id:", "retry:")):
+                return False
+            if not line.startswith("data:"):
+                raise ProviderError("provider_invalid_response")
+            body = line[5:].strip()
+            if body == "[DONE]":
+                return True
+            chunk = json.loads(body)
+            if not isinstance(chunk, dict) or "error" in chunk:
+                raise ProviderError("provider_invalid_response")
+            if isinstance(chunk.get("usage"), dict):
+                usage = chunk
+            choices = chunk.get("choices")
+            if choices is None:
+                return False
+            if not isinstance(choices, list):
+                raise ProviderError("provider_invalid_response")
+            if choices:
+                choice = choices[0]
+                if not isinstance(choice, dict):
+                    raise ProviderError("provider_invalid_response")
+                seen_choice = True
+                delta = choice.get("delta")
+                piece = delta.get("content") if isinstance(delta, dict) else None
+                if piece is not None:
+                    if not isinstance(piece, str):
+                        raise ProviderError("provider_invalid_response")
+                    parts.append(piece)
+                if choice.get("finish_reason") is not None:
+                    finish_reason = choice["finish_reason"]
+            return False
+
+        finished = False
+        for chunk in response.iter_bytes():
+            total += len(chunk)
+            if total > RESPONSE_BYTE_LIMIT:
+                raise ProviderError("provider_response_too_large")
+            if time.monotonic() > deadline:
+                raise ProviderError("provider_timeout_unknown")
+            buffer.extend(chunk)
+            while not finished and (newline := buffer.find(b"\n")) >= 0:
+                line = bytes(buffer[:newline])
+                del buffer[: newline + 1]
+                finished = handle(line)
+            if finished:
+                break
+        if not finished and buffer:
+            handle(bytes(buffer))
+        if not seen_choice:
+            raise ProviderError("provider_invalid_response")
+        return "".join(parts), finish_reason, usage
+
+    def structure_with_usage(self, text, *, categories=(), on_usage):
         try:
-            # No SDK retries, redirects, discovery, telemetry, or alternate endpoints.
-            with httpx.Client(
-                timeout=httpx.Timeout(LLM_READ_TIMEOUT_SECONDS, connect=10, write=10, pool=10),
-                follow_redirects=False,
-                trust_env=False,
-                transport=self._transport,
-            ) as client:
-                with client.stream(
-                    "POST",
-                    self.endpoint,
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    json={
-                        "model": self._model,
-                        "temperature": 0.2,
-                        "max_tokens": 4000,
-                        "response_format": {"type": "json_object"},
-                        "messages": [
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            *(
-                                [
-                                    {
-                                        "role": "user",
-                                        "content": json.dumps(
-                                            {"existing_categories": categories}, ensure_ascii=False
-                                        ),
-                                    }
-                                ]
-                                if categories
-                                else []
-                            ),
-                            {"role": "user", "content": text},
-                        ],
-                    },
-                ) as response:
-                    if response.status_code != 200:
-                        code = {
-                            400: "provider_bad_request",
-                            401: "provider_auth",
-                            403: "provider_auth",
-                            404: "provider_model_not_found",
-                            408: "provider_timeout_unknown",
-                            409: "provider_conflict",
-                            422: "provider_bad_request",
-                            429: "provider_rate_limit",
-                            500: "provider_unavailable",
-                            502: "provider_unavailable",
-                            503: "provider_unavailable",
-                            504: "provider_timeout_unknown",
-                        }.get(response.status_code, f"provider_http_{response.status_code}")
-                        # Persist the status class/code only. The provider response may contain
-                        # user text or infrastructure details and is deliberately discarded.
-                        raise ProviderError(code, http_status=response.status_code)
-                    content = bytearray()
-                    for chunk in response.iter_bytes():
-                        content.extend(chunk)
-                        if len(content) > 256000:
-                            raise ProviderError("provider_response_too_large")
-            data = json.loads(content)
-            on_usage(response_tokens(data))
-            choice = data["choices"][0]
-            if choice.get("finish_reason") != "stop":
+            content, finish_reason = self._chat(
+                {
+                    "model": self._model,
+                    "temperature": 0.2,
+                    "max_tokens": 4000,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        *(
+                            [
+                                {
+                                    "role": "user",
+                                    "content": json.dumps({"existing_categories": categories}, ensure_ascii=False),
+                                }
+                            ]
+                            if categories
+                            else []
+                        ),
+                        {"role": "user", "content": text},
+                    ],
+                },
+                on_usage,
+            )
+            if finish_reason != "stop":
                 raise ProviderError("provider_incomplete_response")
-            result = self.parse_content(choice["message"]["content"])
+            result = self.parse_content(content)
             return repair_structure_quotes(result, text)
         except httpx.TimeoutException:
             raise ProviderError("provider_timeout_unknown") from None
@@ -477,65 +647,30 @@ class CloudRuProvider:
         except (ValidationError, ValueError, KeyError, IndexError, TypeError):
             raise ProviderError("provider_invalid_response") from None
 
-
     def assistant(self, kind, context, *, question=None):
         return self.assistant_with_usage(kind, context, question=question, on_usage=lambda _: None)
 
     def assistant_with_usage(self, kind, context, *, question=None, on_usage):
         """One strict JSON call for the assistant. Same gateway, timeout and no retries as structuring."""
-        from app.usage import response_tokens
-
         if kind not in ASSISTANT_PROMPTS:
             raise ProviderError("provider_bad_request")
         try:
-            with httpx.Client(
-                timeout=httpx.Timeout(LLM_READ_TIMEOUT_SECONDS, connect=10, write=10, pool=10),
-                follow_redirects=False,
-                trust_env=False,
-                transport=self._transport,
-            ) as client:
-                with client.stream(
-                    "POST",
-                    self.endpoint,
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    json={
-                        "model": self._model,
-                        "temperature": 0.2,
-                        "max_tokens": ASSISTANT_MAX_TOKENS[kind],
-                        "response_format": {"type": "json_object"},
-                        "messages": [
-                            {"role": "system", "content": ASSISTANT_PROMPTS[kind]},
-                            {"role": "user", "content": assistant_input(kind, context, question)},
-                        ],
-                    },
-                ) as response:
-                    if response.status_code != 200:
-                        code = {
-                            400: "provider_bad_request",
-                            401: "provider_auth",
-                            403: "provider_auth",
-                            404: "provider_model_not_found",
-                            408: "provider_timeout_unknown",
-                            409: "provider_conflict",
-                            422: "provider_bad_request",
-                            429: "provider_rate_limit",
-                            500: "provider_unavailable",
-                            502: "provider_unavailable",
-                            503: "provider_unavailable",
-                            504: "provider_timeout_unknown",
-                        }.get(response.status_code, f"provider_http_{response.status_code}")
-                        raise ProviderError(code, http_status=response.status_code)
-                    content = bytearray()
-                    for chunk in response.iter_bytes():
-                        content.extend(chunk)
-                        if len(content) > 256000:
-                            raise ProviderError("provider_response_too_large")
-            data = json.loads(content)
-            on_usage(response_tokens(data))
-            choice = data["choices"][0]
-            if choice.get("finish_reason") != "stop":
+            content, finish_reason = self._chat(
+                {
+                    "model": self._model,
+                    "temperature": 0.2,
+                    "max_tokens": ASSISTANT_MAX_TOKENS[kind],
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": ASSISTANT_PROMPTS[kind]},
+                        {"role": "user", "content": assistant_input(kind, context, question)},
+                    ],
+                },
+                on_usage,
+            )
+            if finish_reason != "stop":
                 raise ProviderError("provider_incomplete_response")
-            result = self.unwrap_content(choice["message"]["content"])
+            result = self.unwrap_content(content)
             return validate_assistant(kind, result, context)
         except httpx.TimeoutException:
             raise ProviderError("provider_timeout_unknown") from None
@@ -559,4 +694,7 @@ def make_provider(settings: Settings) -> LLMProvider:
         key = read_secret_file(key_file)
     if not key:
         raise ValueError("Live worker requires NOTES_CLOUDRU_API_KEY or NOTES_CLOUDRU_API_KEY_FILE")
-    return CloudRuProvider(key, settings.cloudru_model, base_url=settings.cloudru_base_url)
+    return CloudRuProvider(
+        key, settings.cloudru_model, base_url=settings.cloudru_base_url,
+        read_timeout=settings.llm_read_timeout_seconds, stream=settings.llm_stream,
+    )

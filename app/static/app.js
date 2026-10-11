@@ -25,22 +25,26 @@ const itemLabels = {note:'Заметка', idea:'Идея', task:'Задача',
 const statusLabels = {queued:'В очереди', running:'Разбираем запись', succeeded:'Готово', failed:'Не получилось'};
 const conclusionLabels = {proposed:'Предложен', accepted:'Принят', rejected:'Отклонён'};
 const errors = {
-  provider_bad_request:'Cloud.ru отклонил запрос. Проверьте выбранную модель.',
+  provider_bad_request:'Сервис ИИ отклонил запрос. Исходник сохранён. Его можно сохранить без ИИ.',
   provider_auth:'Нет доступа к модели. Проверьте настройки сервера.',
   provider_model_not_found:'Модель не найдена. Проверьте её название и доступ команды.',
-  provider_invalid_response:'ИИ ответил, но формат результата не удалось принять. Исходник сохранён.',
-  ungrounded_quote:'ИИ вернул неточную цитату. Исходник сохранён. Можно проверить текст и отправить его как новую запись.',
-  provider_rate_limit:'Cloud.ru ограничил запросы. Повтора не было.',
-  provider_unavailable:'Cloud.ru сейчас недоступен. Запись сохранена, повтора не было.',
-  provider_conflict:'Cloud.ru отклонил запрос. Повтора не было.',
+  provider_invalid_response:'ИИ ответил, но результат не удалось принять. Исходник сохранён. %RETRY%',
+  provider_incomplete_response:'ИИ не успел закончить ответ. Исходник сохранён. %RETRY%',
+  provider_response_too_large:'Ответ ИИ получился слишком большим. Исходник сохранён. Его можно сохранить без ИИ.',
+  provider_connection_unknown:'Не удалось связаться с сервисом ИИ. Запрос мог быть учтён. Исходник сохранён. %RETRY%',
+  ungrounded_quote:'ИИ вернул неточную цитату. Исходник сохранён. %RETRY%',
+  provider_rate_limit:'Сервис ИИ ограничил запросы. Подождите немного. Исходник сохранён. %RETRY%',
+  provider_unavailable:'Сервис ИИ сейчас недоступен. Исходник сохранён. %RETRY%',
+  provider_conflict:'Сервис ИИ отклонил запрос. Исходник сохранён. Его можно сохранить без ИИ.',
   budget_exhausted:'Лимит приложения исчерпан. Запись сохранена. Для нового запроса увеличьте лимит при запуске.',
-  execution_unknown:'Обработка прервалась. Запись сохранена, повтора не было.',
-  provider_timeout_unknown:'Модель не ответила вовремя. Запрос мог быть учтён. Повтора не было.',
+  execution_unknown:'Обработка прервалась. Запись сохранена. %RETRY%',
+  provider_timeout_unknown:'Сервис ИИ не ответил вовремя. Запрос мог быть учтён. Исходник сохранён. %RETRY%',
   stt_not_configured:'Распознавание пока не подключено. Аудио сохранено, можно вписать расшифровку вручную.',
   stt_invalid_response:'Не удалось получить расшифровку. Аудио сохранено, можно вписать текст вручную.',
   stt_failed:'Не удалось распознать запись. Оригинал сохранён.',
   audio_storage_unavailable:'Не удалось прочитать аудио. Попробуйте открыть оригинал позже.',
 };
+for (const code of Object.keys(errors)) errors[code] = errors[code].replace('%RETRY%','Нажмите «Отправить ещё раз с ИИ» или сохраните без ИИ.');
 function message(text = '') { $('message').textContent = text; }
 function authMessage(text = '') {
   $('auth-message').textContent = text;
@@ -365,7 +369,19 @@ async function loadJobs() {
   for (const job of jobs) {
     const row = element('div','','job');
     row.append(element('p',`${statusLabels[job.status]} · ${new Date(job.created_at*1000).toLocaleString('ru-RU')}`));
-    if (job.status === 'failed') row.append(element('p',errors[job.error_code] || `Не удалось обработать запись. Она сохранена. Код: ${job.error_code}.`));
+    if (job.status === 'failed') {
+      row.append(element('p',errors[job.error_code] || `Не удалось обработать запись. Она сохранена. Код: ${job.error_code}.`));
+      if (job.original_text && job.original_text.trim()) {
+        const actions = element('div','','actions');
+        const again = element('button','Отправить ещё раз с ИИ'), manual = element('button','Сохранить без ИИ','quiet');
+        again.type = manual.type = 'button'; again.dataset.retry = 'ai'; manual.dataset.retry = 'manual';
+        again.onclick = () => resendFailedJob(job,'ai').catch(e => message(e.message));
+        manual.onclick = () => resendFailedJob(job,'manual').catch(e => message(e.message));
+        // A spent app limit is not fixed by sending again. Saving without AI still works.
+        if (job.error_code !== 'budget_exhausted') actions.append(again);
+        actions.append(manual); row.append(actions);
+      }
+    }
     if (job.status === 'succeeded' && job.error_code === 'ungrounded_details_omitted') row.append(element('p','Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.'));
     if (job.note_id) {
       const button = element('button','Открыть заметку','quiet');
@@ -377,6 +393,44 @@ async function loadJobs() {
     $('jobs').append(row);
   }
   return jobs;
+}
+// A failed text job can be sent again, only by a click. The text goes back into the new-note form
+// and is submitted by the same handler as a typed note, as a new capture with a new key.
+let retryBusy = false;
+async function resendFailedJob(job, mode) {
+  if (retryBusy) return;
+  if (noteBusy || captureBusy || recorder || microphonePending || pendingCapture || pendingAudio || selectedAudio) {
+    return message('Сначала завершите текущую запись или проверьте её сохранение.');
+  }
+  retryBusy = true;
+  try {
+    const capture = await api(`/api/v1/captures/${encodeURIComponent(job.capture_id)}`);
+    if (capture.input_kind === 'audio') {
+      await openCapture(job.capture_id,{userAction:true});
+      if (currentCapture?.capture_id === job.capture_id) {
+        message('Проверьте расшифровку и нажмите «Создать заметку из расшифровки».');
+      }
+      return;
+    }
+    const text = capture.original_text;
+    if (typeof text !== 'string' || !text.trim()) return message('В этой записи нет текста. Откройте исходник.');
+    const draft = $('thought').value;
+    if (draft.trim() && draft !== text && !confirm('В форме новой записи есть текст. Заменить его текстом этой записи?')) return;
+    $('new-note').click();
+    if ($('capture-card').hidden) return;
+    $('thought').value = text;
+    $('capture-form').hidden = false;
+    window.BerestaFocus?.closeAll();
+    const select = $('processing-mode'), aiOff = select.querySelector('option[value="ai"]').disabled;
+    select.value = mode === 'ai' && !aiOff ? 'ai' : 'manual';
+    syncModeSwitch();
+    $('thought').dispatchEvent(new Event('input',{bubbles:true}));
+    if (mode === 'ai' && aiOff) {
+      message('ИИ сейчас недоступен. Текст в форме, его можно сохранить без ИИ.');
+      $('thought').focus(); return;
+    }
+    $('capture-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+  } finally { retryBusy = false; }
 }
 function jobDraftUnchanged(draft) {
   return !captureBusy && !recorder && !microphonePending &&
@@ -398,7 +452,8 @@ function watchSavedJob(job, generation, kind = 'text', draft = '') {
 }
 async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGeneration, draft = $('thought').value} = {}) {
   let lastStatus = 'queued';
-  for (let i=0; i<120 && currentEpoch===epoch && generation===viewGeneration; i++) {
+  // About five minutes: the model may answer in up to NOTES_LLM_READ_TIMEOUT_SECONDS plus queue time.
+  for (let i=0; i<300 && currentEpoch===epoch && generation===viewGeneration; i++) {
     const job = await api(`/api/v1/jobs/${id}`);
     if (currentEpoch!==epoch || generation!==viewGeneration) return;
     lastStatus = job.status;

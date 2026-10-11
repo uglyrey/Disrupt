@@ -32,6 +32,24 @@ from app.services import ensure_category, lock_account, save_revision
 from app.speech import CloudRuSpeechProvider, make_speech_provider
 from app.usage import UsageRecorder
 
+PROCESSING_FAILED_TEXT = (
+    "Не получилось разобрать запись с ИИ. Исходник сохранён. "
+    "Откройте beresta, в истории его можно отправить ещё раз или сохранить без ИИ."
+)
+
+
+def cancel_processing_reply(db, job_id):
+    """The note reply will never come. Cancel it and tell the Telegram chat once, in the existing message outbox."""
+    rows = db.scalars(select(Outbox).where(
+        Outbox.job_id == job_id, Outbox.status.in_({"pending", "leased", "retryable"}),
+    )).all()
+    for row in rows:
+        row.status, row.error_code = "cancelled", "processing_failed"
+        db.add(Outbox(
+            user_id=row.user_id, bot_id=row.bot_id, chat_id=row.chat_id, generation=1, status="pending",
+            message_kind="processing_failed", message_text=PROCESSING_FAILED_TEXT,
+        ))
+
 
 class Worker:
     def __init__(
@@ -124,9 +142,7 @@ class Worker:
                 for expired_id, user_id, capture_id in expired:
                     capture = db.get(Capture, capture_id)
                     record_event(db, user_id, "processing_failed", expired_id, capture.channel)
-                    db.execute(update(Outbox).where(
-                        Outbox.job_id == expired_id, Outbox.status.in_({"pending", "leased", "retryable"}),
-                    ).values(status="cancelled", error_code="processing_failed"))
+                    cancel_processing_reply(db, expired_id)
             job_id = db.scalar(
                 select(Job.id)
                 .where(Job.status == "queued", Job.provider == self.settings.provider)
@@ -185,9 +201,7 @@ class Worker:
                 job = db.get(Job, job_id)
                 capture = db.get(Capture, job.capture_id)
                 record_event(db, job.user_id, "processing_failed", job_id, capture.channel)
-                db.execute(update(Outbox).where(
-                    Outbox.job_id == job_id, Outbox.status.in_({"pending", "leased", "retryable"}),
-                ).values(status="cancelled", error_code="processing_failed"))
+                cancel_processing_reply(db, job_id)
             db.commit()
 
     def run_once(self):

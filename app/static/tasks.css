@@ -1,0 +1,57 @@
+/* The «Задачи» screen and the section row in the header. Loaded after brain.css. */
+
+/* Header navigation */
+.main-nav{position:relative;display:flex;align-items:center;gap:4px;flex:1 1 auto;min-width:0;margin:0 8px 0 4px;overflow-x:auto;scrollbar-width:none}
+.main-nav::-webkit-scrollbar{display:none}
+.main-nav[hidden]{display:none}
+.main-nav-item{flex:0 0 auto;width:auto;margin:0;display:inline-flex;align-items:center;justify-content:center;min-height:38px;padding:0 14px;border:1px solid transparent;border-radius:999px;background:transparent;color:#3f5646;font-size:14px;font-weight:600;line-height:1.2;white-space:nowrap;cursor:pointer}
+/* The ids beat the shared dark hover of polish.css, which would hide this text. */
+#main-nav .main-nav-item:hover:not(:disabled){background:#eaf0e2;color:#1f3328;border-color:#d5dfcf}
+#main-nav .main-nav-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#main-nav .main-nav-item[aria-current],#main-nav .main-nav-item[aria-current]:hover:not(:disabled){background:var(--accent);border-color:var(--accent);color:#fff}
+@media(max-width:1000px){
+  header:has(#main-nav:not([hidden])) .brand span{display:none}
+  header:has(#main-nav:not([hidden])) .telegram-channel-link{width:38px;padding:0}
+  header:has(#main-nav:not([hidden])) .telegram-channel-link span{display:none}
+}
+@media(max-width:760px){
+  header:has(#main-nav:not([hidden])) #account{flex-basis:auto}
+  header:has(#main-nav:not([hidden])) .header-actions{flex:0 0 auto}
+}
+@media(max-width:640px){
+  header:has(#main-nav:not([hidden])){flex-wrap:wrap;row-gap:8px}
+  header:has(#main-nav:not([hidden])) .brand{order:1}
+  header:has(#main-nav:not([hidden])) .header-actions{order:2}
+  .main-nav{order:3;flex:1 0 100%;margin:0;padding-bottom:2px;gap:5px}
+  .main-nav-item{flex:1 1 auto;min-height:40px;padding:0 10px;font-size:13.5px;border-color:#d5dfcf;background:#fff}
+}
+@media(max-width:400px){
+  .main-nav{gap:4px}
+  .main-nav-item{flex:1 1 auto;min-width:0;padding:0 6px;font-size:12.5px;white-space:nowrap}
+}
+
+/* Task list */
+.tk-status{margin:10px 0 0;min-height:1.4em}
+.tk-status:empty{display:none}
+.tk-list{list-style:none;margin:14px 0 0;padding:0;border-top:1px solid var(--line)}
+.tk-list:empty{display:none}
+.tk-row{display:grid;grid-template-columns:24px minmax(0,1fr);gap:0 12px;align-items:start;padding:12px 4px;border-bottom:1px solid var(--line)}
+.tk-check{width:20px;height:20px;margin:2px 0 0;padding:0;accent-color:var(--accent);cursor:pointer}
+.tk-check:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tk-check:disabled{cursor:progress;opacity:.6}
+.tk-main{min-width:0}
+.tk-text{display:block;font-size:16px;line-height:1.45;color:var(--br-ink,#1f3328);overflow-wrap:anywhere}
+.tk-row.is-done .tk-text{color:#5c6f62;text-decoration:line-through}
+.tk-meta{display:flex;flex-wrap:wrap;align-items:center;gap:2px 14px;margin-top:4px;font-size:13px;color:#5c6f62}
+.tk-due.is-late{color:#8a3b2e;font-weight:600}
+.tk-note{width:auto;min-height:28px;margin:0;padding:0 2px;border:0;border-radius:6px;background:transparent;color:#2f5c3d;font-size:13px;font-weight:600;text-align:left;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere;cursor:pointer}
+#tasks-list .tk-note:hover:not(:disabled){background:#eef2e8;color:#1f3328}
+.tk-note:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+#tasks-card .br-empty{margin-top:22px}
+#tasks-card .br-empty p{margin-bottom:0}
+#tasks-card .actions{margin-top:16px}
+@media(max-width:640px){
+  .tk-row{padding:14px 2px}
+  .tk-check{width:22px;height:22px}
+  .tk-note{min-height:36px}
+}

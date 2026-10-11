@@ -436,3 +436,102 @@ def test_ai_category_at_the_limit_leaves_the_note_uncategorized_without_failing(
     note = process(app, client, Named())
     assert note["category_id"] is None and note["category_name"] is None
     assert len(client.get("/api/v1/categories").json()) == 100
+
+
+# Tasks across notes and the done counter
+
+def test_dashboard_done_count_follows_a_reopened_task(client):
+    register(client)
+    note = manual(client, "Дела на день")
+    added = client.post(
+        f"/api/v1/notes/{note['id']}/items", json={"version": note["version"], "kind": "task", "text": "Позвонить"},
+    ).json()
+    item = added["items"][0]
+
+    def toggle(note_data, status):
+        reply = client.patch(
+            f"/api/v1/notes/{note['id']}/items/{item['id']}",
+            json={"version": note_data["version"], "kind": "task", "text": "Позвонить", "status": status},
+        )
+        assert reply.status_code == 200, reply.text
+        return reply.json()
+
+    def done():
+        return client.get("/api/v1/dashboard", params={"days": 7}).json()["tasks"]["completed_in_period"]
+
+    assert done() == 0
+    current = toggle(added, "completed")
+    assert done() == 1
+    current = toggle(current, "open")
+    assert done() == 0
+    current = toggle(current, "completed")
+    assert done() == 1
+    toggle(current, "open")
+    assert done() == 0
+
+
+def seed_task(app, user_id, note_id, text, *, status="open", due_at=None, position=0):
+    with app.state.sessions.begin() as db:
+        item = Item(user_id=user_id, note_id=note_id, kind="task", status=status, text=text, due_at=due_at,
+                    position=position, due_text="завтра" if due_at else None)
+        db.add(item)
+        db.flush()
+        return item.id
+
+
+def test_tasks_list_filters_orders_and_isolates_owners(app, client):
+    owner = register(client)["id"]
+    old = seed_note(app, owner, local_stamp(5, 10))
+    fresh = seed_note(app, owner, local_stamp(1, 10))
+    soon, later = time.time() + 3600, time.time() + 7200
+    no_date_fresh = seed_task(app, owner, fresh, "Без срока, свежая")
+    no_date_old = seed_task(app, owner, old, "Без срока, старая")
+    due_later = seed_task(app, owner, old, "Позже", due_at=later)
+    due_soon = seed_task(app, owner, fresh, "Скоро", due_at=soon)
+    done_old = seed_task(app, owner, old, "Сделано давно", status="completed")
+    done_fresh = seed_task(app, owner, fresh, "Сделано недавно", status="completed")
+    seed_items(app, owner, fresh, ("idea", "open"), ("note", "open"))
+    other, account = second_user(app)
+    foreign = seed_note(app, account["id"], local_stamp(0, 9))
+    seed_task(app, account["id"], foreign, "Чужая задача", due_at=soon - 100)
+
+    opened = client.get("/api/v1/tasks")
+    assert opened.status_code == 200, opened.text
+    data = opened.json()
+    assert data["status"] == "open" and data["limit"] == 100 and data["offset"] == 0 and not data["has_more"]
+    assert data["counts"] == {"open": 4, "completed": 2}
+    assert [row["id"] for row in data["items"]] == [due_soon, due_later, no_date_fresh, no_date_old]
+    first = data["items"][0]
+    assert first["text"] == "Скоро" and first["due_text"] == "завтра" and first["due_at"] == soon
+    assert first["note_id"] == fresh and first["note_title"] == "Секретная заметка"
+    assert first["note_version"] == 1 and first["version"] == 1 and first["status"] == "open"
+    assert set(first) >= {"category_id", "position", "note_updated_at"}
+
+    completed = client.get("/api/v1/tasks", params={"status": "completed"}).json()
+    assert [row["id"] for row in completed["items"]] == [done_fresh, done_old]
+    everything = client.get("/api/v1/tasks", params={"status": "all"}).json()
+    assert [row["id"] for row in everything["items"]] == [
+        due_soon, due_later, no_date_fresh, no_date_old, done_fresh, done_old,
+    ]
+    assert "Чужая задача" not in opened.text and "Чужая задача" not in str(everything)
+
+    theirs = other.get("/api/v1/tasks", params={"status": "all"}).json()
+    assert [row["text"] for row in theirs["items"]] == ["Чужая задача"]
+    assert theirs["counts"] == {"open": 1, "completed": 0}
+
+
+def test_tasks_list_pages_and_validates_arguments(app, client):
+    owner = register(client)["id"]
+    note = seed_note(app, owner, local_stamp(0, 10))
+    ids = [seed_task(app, owner, note, f"Задача {i}", position=i) for i in range(5)]
+    first = client.get("/api/v1/tasks", params={"limit": 2}).json()
+    assert len(first["items"]) == 2 and first["has_more"] is True
+    second = client.get("/api/v1/tasks", params={"limit": 2, "offset": 2}).json()
+    last = client.get("/api/v1/tasks", params={"limit": 2, "offset": 4}).json()
+    assert last["has_more"] is False and len(last["items"]) == 1
+    paged = [row["id"] for page in (first, second, last) for row in page["items"]]
+    assert paged == [row["id"] for row in client.get("/api/v1/tasks").json()["items"]]
+    assert sorted(paged) == sorted(ids)
+    for params in ({"limit": 0}, {"limit": 201}, {"offset": -1}, {"status": "weird"}):
+        assert client.get("/api/v1/tasks", params=params).status_code == 422
+    assert TestClient(app).get("/api/v1/tasks").status_code == 401

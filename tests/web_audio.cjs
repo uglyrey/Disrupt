@@ -183,7 +183,7 @@ function choose(file) {
     assert.equal($('processing-mode').value,'ai');
     assert.equal(calls.filter(c => c.url === '/api/v1/captures/text').length,0,'Preparation must not spend an AI slot');
     submit('capture-form');
-    await until(() => $('message').textContent.includes('Cloud.ru сейчас недоступен'));
+    await until(() => $('message').textContent.includes('Сервис ИИ сейчас недоступен'));
     const textCalls = calls.filter(c => c.url === '/api/v1/captures/text');
     assert.equal(textCalls.length,1);
     assert.deepEqual(textCalls[0].body,{text:'Исправленный текст для новой заметки',processing_mode:'ai'});

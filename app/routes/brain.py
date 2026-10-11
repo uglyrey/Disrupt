@@ -1,7 +1,9 @@
 """Second brain reads without AI: related notes, the note graph and the dashboard. Read-only."""
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 
 from app.dashboard import build_dashboard
 from app.models import Item, Note
@@ -74,5 +76,46 @@ def build_router(database, settings):
     def dashboard(request: Request, days: int = Query(30, ge=1, le=366), db=Depends(database)):
         session = get_login_session(request, db)
         return build_dashboard(db, settings, session.user_id, days)
+
+    @router.get("/tasks")
+    def tasks(
+        request: Request, status: Literal["open", "completed", "all"] = "open",
+        limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0, le=100000), db=Depends(database),
+    ):
+        """Every task of the user across notes. Text columns are encrypted, so nothing is filtered on them."""
+        session = get_login_session(request, db)
+        mine = (Item.user_id == session.user_id, Item.kind == "task")
+        counts = dict(db.execute(
+            select(Item.status, func.count()).where(*mine).group_by(Item.status)
+        ).all())
+        statement = (
+            select(Item, Note.title, Note.version, Note.updated_at)
+            .join(Note, (Note.id == Item.note_id) & (Note.user_id == Item.user_id))
+            .where(*mine)
+        )
+        if status != "all":
+            statement = statement.where(Item.status == status)
+        # Open tasks go by deadline, undated last. Done ones go by the latest change of their note.
+        # Open first when both are shown. Position and id keep paging stable.
+        statement = statement.order_by(
+            (Item.status == "completed").asc(),
+            (Item.due_at.is_(None) | (Item.status == "completed")).asc(),
+            case((Item.status == "open", Item.due_at), else_=None).asc(),
+            Note.updated_at.desc(), Item.position, Item.id,
+        ).limit(limit + 1).offset(offset)
+        rows = db.execute(statement).all()
+        return {
+            "status": status, "limit": limit, "offset": offset, "has_more": len(rows) > limit,
+            "counts": {"open": counts.get("open", 0), "completed": counts.get("completed", 0)},
+            "items": [
+                {
+                    "id": item.id, "text": item.text, "status": item.status, "version": item.version,
+                    "due_at": item.due_at, "due_text": item.due_text, "position": item.position,
+                    "category_id": item.category_id, "note_id": item.note_id,
+                    "note_title": title, "note_version": note_version, "note_updated_at": updated_at,
+                }
+                for item, title, note_version, updated_at in rows[:limit]
+            ],
+        }
 
     return router
