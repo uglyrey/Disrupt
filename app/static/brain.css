@@ -2,11 +2,6 @@
    Chart color #5f8f6e on the paper #fffefa is 3.7:1, enough for marks. Text keeps the ink tokens. */
 :root{--br-bar:#5f8f6e;--br-bar-soft:#d5dfcf;--br-panel:#fbfcf8;--br-ink:#1f3328;--br-soft:#5c6f62}
 
-/* Navigation entries */
-.nav-views{display:flex;flex-direction:column;gap:2px;margin-top:10px}
-.nav-views .category-button{display:flex;align-items:center;min-height:38px;font-size:14px;width:100%}
-.nav-views .category-button[aria-pressed=true]{background:#dfe7d7;color:#274632;font-weight:650;box-shadow:inset 3px 0 0 var(--accent)}
-.nav-views+.nav-row .category-navigation{margin-top:6px;padding-top:10px;border-top:1px solid #dbe3d4}
 .workspace.has-view .category-navigation .category-button[aria-pressed=true]{background:transparent;color:#526353;font-weight:500}
 
 /* Views live in the editor column next to the capture and note screens */
@@ -159,12 +154,8 @@ button.br-chip:hover:not(:disabled){background:#eef2e8;filter:none}
   .br-lower{grid-template-columns:minmax(0,1fr);gap:30px}
 }
 
-/* Phone: the two entries sit in a row, and the library hides behind the toggle while a view is open */
+/* Phone: the library hides behind the toggle while a view is open */
 @media(max-width:640px){
-  .nav-views{flex-direction:row;gap:6px;margin-top:0}
-  .nav-views .category-button{flex:1 1 0;justify-content:center;min-height:38px;border:1px solid #d5dfcf;border-radius:999px;background:#fff;font-size:13.5px;box-shadow:none}
-  .nav-views .category-button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:none}
-  .nav-views+.nav-row .category-navigation{margin-top:0;padding-top:0;border-top:0}
   .workspace.has-view .category-navigation .category-button[aria-pressed=true]{background:#fff;border-color:#d5dfcf;color:#526353}
   .workspace.has-view>#mobile-library-toggle{display:flex;align-items:center;gap:8px;width:auto;min-height:40px;margin:12px 16px 0;padding:0 14px;border:1px solid #d5dfcf;background:#fff;color:var(--ink);font-size:13px}
   .workspace.has-view>#mobile-library-toggle::after{content:'';width:7px;height:7px;border-right:2px solid #58705e;border-bottom:2px solid #58705e;transform:rotate(45deg) translate(-2px,-2px)}

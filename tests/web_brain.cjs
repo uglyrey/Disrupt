@@ -54,6 +54,17 @@ const digestRow = {
     open_tasks: [{id: 'i1', text: 'Позвонить маме', note_id: 'n1', note_title: 'План'}], themes: ['запуск', 'отзывы']},
 };
 
+function taskRows() {
+  const row = (id, text, extra = {}) => ({id, text, status: 'open', version: 1, due_at: null, due_text: null, position: 0, category_id: null,
+    note_id: 'n1', note_title: 'План', note_version: 3, note_updated_at: 1791220000, ...extra});
+  return [
+    row('t1', 'Позвонить <b>маме</b>', {due_at: 1700000000}),
+    row('t2', 'Купить молоко', {due_text: 'завтра'}),
+    row('t3', 'Отправить макет', {note_id: 'n2', note_title: 'Другая'}),
+    row('t4', 'Старое дело', {status: 'completed'}),
+  ];
+}
+
 function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, days = dashboard, related = null} = {}) {
   const dom = new JSDOM(read('index.html'), {url, runScripts: 'outside-only'}), w = dom.window;
   const $ = id => w.document.getElementById(id);
@@ -70,6 +81,7 @@ function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, da
       limit_resets_at: new Date(Date.now() + 3 * 3600000).toISOString(), ...usage},
     related: related || [{note_id: 'n2', title: 'Другая', category_id: null, updated_at: 1791220000, score: 0.3, shared_terms: ['макет', 'запуск']}],
     dashboard: {fn: days, empty: false},
+    tasks: taskRows(), taskConflict: false, noteVersion: 3,
   };
   const note = id => ({id, capture_id: `k-${id}`, channel: 'web', input_kind: 'text', title: id === 'n1' ? 'План' : 'Другая',
     markdown: '## Текст', original_text: 'Исходник', items: id === 'n1' ? [state.task] : [], conclusions: [], version: 1,
@@ -93,6 +105,23 @@ function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, da
       return reply({local_time: body.local_time, timezone: body.timezone, ambiguous: false, choices: [
         {scheduled_at: '2090-10-11T07:00:00+00:00', local_at: '2090-10-11T10:00:00+03:00', utc_offset: '+03:00', is_future: true}]});
     }
+    if (p === '/api/v1/tasks') {
+      const status = u.searchParams.get('status'), limit = Number(u.searchParams.get('limit')), offset = Number(u.searchParams.get('offset'));
+      const all = state.tasks.filter(row => status === 'all' || row.status === status);
+      return reply({status, limit, offset, has_more: all.length > offset + limit,
+        counts: {open: state.tasks.filter(r => r.status === 'open').length, completed: state.tasks.filter(r => r.status === 'completed').length},
+        items: all.slice(offset, offset + limit)});
+    }
+    const toggled = p.match(/^\/api\/v1\/notes\/(n[12])\/items\/(t\d+)$/);
+    if (toggled && method === 'PATCH') {
+      if (state.taskConflict) return reply({detail: 'Заметка уже изменена. Обновите её перед сохранением'}, 409);
+      const row = state.tasks.find(r => r.id === toggled[2]);
+      row.status = body.status; state.noteVersion++;
+      for (const other of state.tasks) if (other.note_id === row.note_id) { other.note_version = state.noteVersion; }
+      row.version++;
+      return reply({...note(toggled[1]), version: state.noteVersion,
+        items: state.tasks.filter(r => r.note_id === toggled[1]).map(r => ({id: r.id, kind: 'task', text: r.text, status: r.status, version: r.version}))});
+    }
     if (p === '/api/v1/dashboard') return reply(state.dashboard.fn(Number(u.searchParams.get('days')), {empty: state.dashboard.empty}));
     if (p === '/api/v1/assistant/settings') {
       if (method === 'PATCH') { state.settings = body.recommendations_enabled; }
@@ -115,7 +144,7 @@ function boot({url = 'https://beresta.invalid/', usage = {}, settings = true, da
     }
     throw new Error(`Unexpected ${method} ${p}`);
   };
-  w.eval(read('reminders.js') + '\n' + read('app.js') + '\n' + read('workspace.js') + '\n' + read('brain.js') + '\n' + read('focus.js'));
+  w.eval(read('reminders.js') + '\n' + read('app.js') + '\n' + read('workspace.js') + '\n' + read('brain.js') + '\n' + read('tasks.js') + '\n' + read('focus.js'));
   return {dom, w, $, state};
 }
 const posts = (state, suffix) => state.calls.filter(c => c.method === 'POST' && c.url.pathname.endsWith(suffix));
@@ -126,18 +155,30 @@ async function navigationAndHashes() {
     await until(() => !$('workspace').hidden && state.calls.some(c => c.url.pathname === '/api/v1/notes'), 'workspace');
     assert.equal($('overview-card').hidden, true); assert.equal($('assistant-card').hidden, true);
     assert.equal($('capture-card').hidden, false);
+    assert.equal($('main-nav').hidden, false, 'The header navigation shows once a person is in');
+    assert.deepEqual([...$('main-nav').querySelectorAll('button')].map(b => b.id), ['nav-notes', 'nav-overview', 'nav-assistant', 'nav-tasks']);
+    assert.equal(w.document.querySelector('.workspace-nav #nav-overview'), null, 'The sidebar no longer holds the sections');
     $('nav-overview').click();
     assert.equal($('overview-card').hidden, false); assert.equal($('capture-card').hidden, true);
     assert.equal(w.location.hash, '#overview');
-    assert.equal($('nav-overview').getAttribute('aria-pressed'), 'true');
+    assert.equal($('nav-overview').getAttribute('aria-current'), 'page');
+    assert.equal($('nav-notes').hasAttribute('aria-current'), false);
     assert.equal($('workspace').classList.contains('has-view'), true);
     $('nav-assistant').click();
     assert.equal($('assistant-card').hidden, false); assert.equal($('overview-card').hidden, true);
     assert.equal(w.location.hash, '#assistant');
-    assert.equal($('nav-overview').getAttribute('aria-pressed'), 'false');
+    assert.equal($('nav-overview').hasAttribute('aria-current'), false);
+    assert.equal($('nav-assistant').getAttribute('aria-current'), 'page');
     $('new-note').click();
     await until(() => $('assistant-card').hidden, 'assistant closes');
     assert.equal($('capture-card').hidden, false); assert.equal(w.location.hash, '');
+    assert.equal($('nav-notes').getAttribute('aria-current'), 'page');
+    // «Все заметки» in the header leaves a screen too.
+    $('nav-assistant').click();
+    assert.equal($('assistant-card').hidden, false);
+    $('nav-notes').click();
+    assert.equal($('assistant-card').hidden, true); assert.equal($('capture-card').hidden, false);
+    assert.equal(w.location.hash, ''); assert.equal($('nav-assistant').hasAttribute('aria-current'), false);
     // Deep link by hash, as the browser would send it.
     w.location.hash = '#overview';
     w.dispatchEvent(new w.HashChangeEvent('hashchange'));
@@ -154,6 +195,79 @@ async function navigationAndHashes() {
   try {
     await until(() => !deep.$('assistant-card').hidden, 'deep link opens the assistant');
     assert.equal(deep.$('capture-card').hidden, true);
+  } finally { deep.dom.window.close(); }
+}
+
+async function tasksView() {
+  const {dom, w, $, state} = boot();
+  try {
+    await until(() => !$('workspace').hidden && $('notes').querySelector('button'), 'workspace');
+    $('nav-tasks').click();
+    assert.equal(w.location.hash, '#tasks');
+    assert.equal($('tasks-card').hidden, false); assert.equal($('capture-card').hidden, true);
+    assert.equal($('nav-tasks').getAttribute('aria-current'), 'page');
+    await until(() => $('tasks-list').querySelectorAll('.tk-row').length === 3, 'open tasks');
+    const call = state.calls.filter(c => c.url.pathname === '/api/v1/tasks').at(-1);
+    assert.equal(call.url.searchParams.get('status'), 'open');
+    const rowsText = () => [...$('tasks-list').querySelectorAll('.tk-text')].map(n => n.textContent);
+    assert.deepEqual(rowsText(), ['Позвонить <b>маме</b>', 'Купить молоко', 'Отправить макет']);
+    assert.equal($('tasks-list').querySelector('b'), null, 'Task text is never markup');
+    const first = $('tasks-list').querySelector('.tk-row');
+    assert.match(first.querySelector('.tk-due').textContent, /^Просрочено, срок /);
+    assert.equal($('tasks-list').querySelectorAll('.tk-row')[1].querySelector('.tk-due').textContent, 'Срок из записи: «завтра»');
+    const box = first.querySelector('input[type=checkbox]');
+    assert.equal(w.document.getElementById(box.getAttribute('aria-labelledby')).textContent, 'Позвонить <b>маме</b>');
+    assert.equal(first.querySelector('.tk-note').textContent, 'План');
+    assert.equal($('tasks-filter').querySelector('[data-status=open]').textContent, 'Открытые 3');
+    // Complete one task: the note version goes with the request and the row leaves the open list.
+    box.checked = true; box.dispatchEvent(new w.Event('change', {bubbles: true}));
+    await until(() => $('tasks-list').querySelectorAll('.tk-row').length === 2, 'row leaves');
+    const patch = state.calls.find(c => c.method === 'PATCH' && c.url.pathname === '/api/v1/notes/n1/items/t1');
+    assert.deepEqual(patch.body, {version: 3, kind: 'task', text: 'Позвонить <b>маме</b>', status: 'completed'});
+    assert.equal($('tasks-status').textContent, 'Задача выполнена.');
+    assert.equal($('tasks-filter').querySelector('[data-status=open]').textContent, 'Открытые 2');
+    // A second task of the same note uses the version the first change produced.
+    $('tasks-list').querySelectorAll('.tk-row')[0].querySelector('input').click();
+    await until(() => $('tasks-list').querySelectorAll('.tk-row').length === 1, 'second row leaves');
+    assert.equal(state.calls.filter(c => c.method === 'PATCH').at(-1).body.version, 4);
+    // Done and all.
+    $('tasks-filter').querySelector('[data-status=completed]').click();
+    await until(() => $('tasks-list').querySelectorAll('.tk-row').length === 3, 'completed list');
+    assert.equal($('tasks-filter').querySelector('[data-status=completed]').getAttribute('aria-pressed'), 'true');
+    assert.ok([...$('tasks-list').querySelectorAll('.tk-check')].every(item => item.checked));
+    $('tasks-filter').querySelector('[data-status=all]').click();
+    await until(() => $('tasks-list').querySelectorAll('.tk-row').length === 4, 'all list');
+    // A conflict reloads the list and says so.
+    state.taskConflict = true;
+    const open = [...$('tasks-list').querySelectorAll('.tk-check')].find(item => !item.checked);
+    open.checked = true; open.dispatchEvent(new w.Event('change', {bubbles: true}));
+    await until(() => /уже изменилась/.test($('tasks-status').textContent), 'conflict message');
+    assert.equal(state.tasks.find(r => r.id === 't3').status, 'open', 'Nothing changed on a conflict');
+    await until(() => $('tasks-list').querySelectorAll('.tk-row').length === 4 && !$('tasks-list').querySelector('input:disabled'), 'reloaded');
+    state.taskConflict = false;
+    // The note title opens the note.
+    $('tasks-list').querySelector('.tk-note').click();
+    await until(() => !$('note-card').hidden && $('title').value === 'План', 'note from a task');
+    await until(() => $('tasks-card').hidden, 'tasks step aside');
+    assert.equal($('nav-tasks').hasAttribute('aria-current'), false);
+  } finally { dom.window.close(); }
+
+  const empty = boot();
+  try {
+    empty.state.tasks = [];
+    await until(() => !empty.$('workspace').hidden, 'workspace');
+    empty.$('nav-tasks').click();
+    await until(() => !empty.$('tasks-empty').hidden, 'empty state');
+    assert.equal(empty.$('tasks-empty-title').textContent, 'Открытых задач нет');
+    assert.equal(empty.$('tasks-list').children.length, 0);
+    empty.$('tasks-filter').querySelector('[data-status=completed]').click();
+    await until(() => empty.$('tasks-empty-title').textContent === 'Выполненных задач пока нет', 'completed empty');
+  } finally { empty.dom.window.close(); }
+
+  const deep = boot({url: 'https://beresta.invalid/#tasks'});
+  try {
+    await until(() => !deep.$('tasks-card').hidden, 'deep link opens tasks');
+    await until(() => deep.$('tasks-list').querySelectorAll('.tk-row').length === 3, 'deep tasks');
   } finally { deep.dom.window.close(); }
 }
 
@@ -388,12 +502,13 @@ async function relatedAndReminders() {
 
 module.exports = async () => {
   await navigationAndHashes();
+  await tasksView();
   await overview();
   await askFlow();
   await limitMessage();
   await recommendations();
   await digest();
   await relatedAndReminders();
-  console.log('Brain checks passed: navigation and hashes, overview, ask with polling, 429, recommendations, digest, related notes, suggested reminders.');
+  console.log('Brain checks passed: navigation and hashes, tasks view, overview, ask with polling, 429, recommendations, digest, related notes, suggested reminders.');
 };
 if (require.main === module) module.exports().catch(error => { console.error(error); process.exitCode = 1; });
