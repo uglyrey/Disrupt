@@ -102,6 +102,13 @@ class Settings:
     retry_breaker_window_seconds: int = 300
     retry_breaker_pause_seconds: int = 600
     delivery_lease_seconds: int = 60
+    # История версий заметки. Подробности в docs/note-revisions-v1.md.
+    # Правки текста в паузе до этого срока попадают в одну версию. 0 отключает объединение.
+    revision_coalesce_seconds: int = 600
+    # Одна сессия правок не длится дольше этого времени.
+    revision_session_max_seconds: int = 3600
+    # Сколько версий хранить у одной заметки. Первая версия не удаляется. 0 отключает чистку.
+    revision_keep: int = 50
     # WebSocket для входа и привязки Telegram. Подробности в docs/telegram-live-v1.md. Лимиты считаются на процесс.
     ws_poll_seconds: float = 1.0
     ws_max_seconds: float = 360.0
@@ -171,6 +178,10 @@ class Settings:
             raise ValueError("NOTES_RETRY_JITTER_PERCENT must be between 0 and 50")
         if not 0 <= self.retry_after_max_seconds <= 3600:
             raise ValueError("NOTES_RETRY_AFTER_MAX_SECONDS must be between 0 and 3600")
+        if not 0 <= self.revision_coalesce_seconds <= 86400 or not 60 <= self.revision_session_max_seconds <= 86400:
+            raise ValueError("Revision coalesce and session seconds are out of range")
+        if self.revision_keep != 0 and not 5 <= self.revision_keep <= 1000:
+            raise ValueError("NOTES_REVISION_KEEP must be 0 or between 5 and 1000")
         if min(self.retry_user_per_hour, self.retry_global_per_hour) < 0:
             raise ValueError("Retry caps must not be negative")
         if self.retry_breaker_failures < 1 or not (
@@ -287,6 +298,9 @@ class Settings:
                 "NOTES_RETRY_BAD_OUTPUT_DELAYS", os.environ.get("NOTES_RETRY_BAD_OUTPUT_DELAYS", "60")),
             retry_jitter=int(os.environ.get("NOTES_RETRY_JITTER_PERCENT", "20")) / 100,
             retry_after_max_seconds=int(os.environ.get("NOTES_RETRY_AFTER_MAX_SECONDS", "900")),
+            revision_coalesce_seconds=int(os.environ.get("NOTES_REVISION_COALESCE_SECONDS", "600")),
+            revision_session_max_seconds=int(os.environ.get("NOTES_REVISION_SESSION_MAX_SECONDS", "3600")),
+            revision_keep=int(os.environ.get("NOTES_REVISION_KEEP", "50")),
             retry_user_per_hour=int(os.environ.get("NOTES_RETRY_USER_PER_HOUR", "10")),
             retry_global_per_hour=int(os.environ.get("NOTES_RETRY_GLOBAL_PER_HOUR", "60")),
             retry_breaker_failures=int(os.environ.get("NOTES_RETRY_BREAKER_FAILURES", "5")),
