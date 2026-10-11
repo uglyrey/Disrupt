@@ -77,3 +77,23 @@ def test_the_jobs_list_does_not_query_per_job(app, client):
     assert len(rows) == 8
     assert many == one, "a longer list must not cost more queries"
     assert {row["original_text"] for row in rows} >= {"Запись 1", "Запись 7"}
+
+
+def test_a_nul_character_in_the_address_is_answered_before_any_query(app, client):
+    """PostgreSQL refuses NUL inside a string, so such ids must never reach a query (a 500 there)."""
+    register(client)
+    counted = []
+
+    def count(*args, **kwargs):
+        counted.append(1)
+
+    event.listen(app.state.engine, "before_cursor_execute", count)
+    try:
+        for path in ("/api/v1/jobs/%00", "/api/v1/captures/a%00b", "/api/v1/captures/%00/audio",
+                     "/api/v1/assistant/requests/%00", "/api/v1/telegram/links/%00/confirm"):
+            response = client.get(path) if "confirm" not in path else client.post(path)
+            assert response.status_code == 404, (path, response.text)
+            assert response.headers["x-content-type-options"] == "nosniff"
+    finally:
+        event.remove(app.state.engine, "before_cursor_execute", count)
+    assert counted == []

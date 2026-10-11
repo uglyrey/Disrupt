@@ -208,7 +208,11 @@ def create_app(
     @app.middleware("http")
     async def security_headers(request, call_next):
         try:
-            response = await call_next(request)
+            if "\x00" in request.url.path:
+                # No address has a NUL character, and PostgreSQL refuses it inside a string, so it never reaches a query.
+                response = JSONResponse(status_code=404, content={"detail": "Не найдено"})
+            else:
+                response = await call_next(request)
         except Exception as exc:
             request_id = secrets.token_hex(8)
             log_error(
