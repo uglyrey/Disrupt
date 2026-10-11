@@ -6,6 +6,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -205,6 +206,11 @@ def create_app(
     admin_networks = parse_networks(settings.admin_allowed_networks)
     app.add_middleware(AdminNetworkGate, networks=admin_networks)
 
+    # Some Safari versions do not let 'self' cover wss://, so the socket address is named in connect-src.
+    origin = urlsplit(settings.public_origin)
+    socket_scheme = "wss" if origin.scheme == "https" else "ws"
+    connect_sources = f"'self' {socket_scheme}://{origin.netloc}" if origin.netloc else "'self'"
+
     @app.middleware("http")
     async def security_headers(request, call_next):
         try:
@@ -236,6 +242,7 @@ def create_app(
         if request.url.path not in {"/docs", "/redoc", "/docs/oauth2-redirect"}:
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:; "
+                f"connect-src {connect_sources}; "
                 "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
             )
         return response

@@ -2,11 +2,12 @@ import secrets
 import time
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select, update
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
+from app.live import CLOSE_UNAUTHORIZED, Gone, Step, serve
 from app.models import LinkRequest, TelegramIdentity, new_id
 from app.schemas import LinkCodeResponse
 from app.security import get_login_session, hash_token, throttle
@@ -71,6 +72,29 @@ def build_router(database):
                 for p in pending
             ],
         }
+
+    @router.websocket("/links/ws")
+    async def links_socket(websocket: WebSocket):
+        """Tells the open dialog that a link request of this account appeared or was confirmed."""
+
+        def check(db):
+            try:
+                session = get_login_session(websocket, db)
+            except HTTPException:
+                raise Gone(CLOSE_UNAUTHORIZED) from None
+            linked = db.scalar(
+                select(func.count()).select_from(TelegramIdentity).where(TelegramIdentity.user_id == session.user_id)
+            )
+            pending = db.scalars(
+                select(LinkRequest.id).where(
+                    LinkRequest.user_id == session.user_id,
+                    LinkRequest.status == "pending",
+                    LinkRequest.expires_at > time.time(),
+                ).order_by(LinkRequest.id)
+            ).all()
+            return Step({"pending": list(pending), "linked": linked}, False, session.user_id)
+
+        await serve(websocket, check)
 
     @router.post("/links/{link_id}/confirm")
     def confirm(link_id: str, request: Request, db=Depends(database)):

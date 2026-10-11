@@ -102,6 +102,12 @@ class Settings:
     retry_breaker_window_seconds: int = 300
     retry_breaker_pause_seconds: int = 600
     delivery_lease_seconds: int = 60
+    # WebSocket для входа и привязки Telegram. Подробности в docs/telegram-live-v1.md. Лимиты считаются на процесс.
+    ws_poll_seconds: float = 1.0
+    ws_max_seconds: float = 360.0
+    ws_per_ip: int = 3
+    ws_per_account: int = 3
+    ws_handshakes_per_minute: int = 20
     error_log_file: str = "data/errors.log"
     audio_storage_path: str = "data/audio"
     audio_ffmpeg_path: str = "ffmpeg"
