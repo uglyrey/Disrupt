@@ -4,7 +4,11 @@ const root=path.join(__dirname,'..'),assets=path.join(root,'app/static');
 const fixture=JSON.parse(fs.readFileSync(path.join(root,'docs/fixtures/admin-summary.json'),'utf8'));
 const dom=new JSDOM(fs.readFileSync(path.join(assets,'review.html'),'utf8'),{url:'https://beresta.invalid/review',runScripts:'outside-only'});
 const w=dom.window,$=id=>w.document.getElementById(id),requests=[],downloads=[];
-let signedIn=false,expired=false;
+let signedIn=false,expired=false,pendingContest=null;
+const contest={method_version:"saved-and-viewed-v2",real_users:2,average_dau:1,average_calls_per_dau:0.5,
+  preliminary:true,component_method_pending:true,sources:[{source:"direct",registrations:3,real_users:2}],
+  daily:[{date:"2026-10-06",dau:1,model_calls:1,calls:1,recorded_calls:2,calls_per_dau:1}],
+  start:"2026-11-03",end:"2026-11-30",days:28,days_dau_1000:0,days_dau_2500:0};
 const reply=(status,data,headers={})=>({ok:status>=200&&status<300,status,headers:new Headers(headers),json:async()=>structuredClone(data),blob:async()=>new Blob(['synthetic export'])});
 w.URL.createObjectURL=()=> 'blob:synthetic';w.URL.revokeObjectURL=()=>{};
 w.HTMLAnchorElement.prototype.click=function(){downloads.push(this.download);};
@@ -16,7 +20,8 @@ w.fetch=async(input,options)=>{
   if(url.pathname.endsWith('/login')){signedIn=true;return reply(200,{username:'organizer',csrf_token:'csrf-1'});}
   if(url.pathname.endsWith('/logout')){assert.equal(options.headers['X-CSRF-Token'],'csrf-1');signedIn=false;return reply(204,{});}
   if(!signedIn||expired)return reply(401,{});
-  if(url.pathname.endsWith('/summary'))return reply(200,{...fixture,budget:null});
+  if(url.pathname.endsWith('/summary'))return reply(200,{...fixture,budget:null,contest});
+  if(url.pathname.endsWith('/contest'))return new Promise(resolve=>{pendingContest=resolve;});
   if(url.pathname.endsWith('/export.zip'))return reply(200,null,{'Content-Type':'application/zip'});
   if(url.pathname.endsWith('/export'))return reply(200,null,{'Content-Type':'text/csv'});
   throw new Error('Unexpected route '+url.pathname);
@@ -33,7 +38,9 @@ async function login(){
     for(const file of ['admin.auth.js','admin.js','admin.tools.js','review.navigation.js'])w.eval(fs.readFileSync(path.join(assets,file),'utf8'));
     await settle();assert.equal($('admin-app').hidden,true);assert.deepEqual(requests,['/review-api/v1/me']);
     await login();assert.equal($('admin-app').hidden,false);assert.equal($('dashboard').hidden,false);
-    assert.ok($('cards').textContent.length);assert.ok(w.document.querySelector('[aria-labelledby="budget-title"]').hidden);
+    assert.ok($('cards').textContent.includes('Попробовали основной функционал'));
+    assert.ok($('contest-method').textContent.includes('сохранить запись'));
+    assert.ok($('traffic-sources').textContent.includes('direct'));assert.ok(w.document.querySelector('[aria-labelledby="budget-title"]').hidden);
     assert.equal($('admin-password').value,'');assert.equal($('admin-code').value,'');
     $('export').click();await settle();assert.ok(downloads.some(name=>name.endsWith('.csv')));
     $('show-archive').click();assert.equal($('statistics-view').hidden,true);assert.equal($('archive-view').hidden,false);
@@ -41,7 +48,10 @@ async function login(){
     w.document.dispatchEvent(new w.CustomEvent('admin:view',{detail:'audit'}));await settle();assert.ok(!requests.some(url=>url.includes('/audit')));
     $('show-statistics').click();assert.equal($('archive-view').hidden,true);assert.equal($('statistics-view').hidden,false);
     expired=true;submit('filters');await settle();assert.equal($('admin-app').hidden,true);assert.equal($('cards').textContent,'');assert.equal($('export').disabled,true);
-    expired=false;await login();$('logout').click();await settle();assert.equal($('admin-app').hidden,true);assert.equal($('cards').textContent,'');
+    expired=false;await login();$('contest-period-load').click();await settle();
+    assert.ok(pendingContest);$('logout').click();await settle();
+    pendingContest(reply(200,contest));await settle();
+    assert.equal($('contest-period-cards').textContent,'','A late contest response cannot restore data after logout');assert.equal($('admin-app').hidden,true);assert.equal($('cards').textContent,'');
     assert.equal(w.localStorage.length,0);console.log('Observer DOM passed: login, aggregate data, read-only navigation, CSV/ZIP, expiry and logout.');
   }finally{dom.window.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

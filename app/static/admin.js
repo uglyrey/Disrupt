@@ -63,7 +63,7 @@
   function clear() {
     applied = null; next = null;
     $('dashboard').hidden = true;
-    for (const id of ['cards','daily','funnel','retention','costs','token-costs','accounting-status','cost-context','quality','usage','budget-cards','budget-status']) $(id).replaceChildren();
+    for (const id of ['cards','daily','funnel','retention','costs','token-costs','accounting-status','cost-context','quality','usage','budget-cards','budget-status','contest-cards','contest-method','contest-days','traffic-sources','contest-period-status','contest-period-cards']) $(id).replaceChildren();
     $('export').disabled = true; $('next').disabled = true; $('previous').disabled = true;
   }
   function status(message, error = false) { $('status').textContent = message; $('status').className = error ? 'error' : ''; }
@@ -74,6 +74,21 @@
     return {from, to, channel, source};
   }
   function render(data, slice, currentOffset) {
+    const contest = data.contest;
+    if (contest) {
+      cards('contest-cards', [['Реальных пользователей к концу периода',count(contest.real_users)],
+        ['Средний DAU за выбранные дни',number(contest.average_dau)],
+        ['Учтённые обращения на DAU · среднесуточно',number(contest.average_calls_per_dau)]]);
+      $('contest-method').textContent = 'Целевой сценарий: сохранить запись и просмотреть готовую заметку. Тестовые аккаунты исключены. ' +
+        'Числитель и знаменатель используют одну группу реальных пользователей. Нулевые дни входят в среднее. ' +
+        (contest.preliminary ? 'Период ещё не завершён, показатели предварительные. ' : '') +
+        (contest.component_method_pending ? 'Часть записанных этапов пока не включена в зачёт до согласования методики компонентов. ' : '') +
+        'Версия ' + text(contest.method_version) + '.';
+      table('contest-days',['Дата','DAU','Модельные вызовы','Учтённые обращения','Все записанные этапы','Обращения / DAU'],
+        contest.daily.map(day=>[text(day.date),count(day.dau),count(day.model_calls),count(day.calls),count(day.recorded_calls),number(day.calls_per_dau)]));
+      table('traffic-sources',['Источник','Регистрации к концу периода','Прошли основной сценарий к концу периода'],
+        contest.sources.map(row=>[text(row.source),count(row.registrations),count(row.real_users)]));
+    }
     const budget = data.budget;
     if (budget && budget.configured) {
       if (budget.currency !== 'RUB') throw new Error('schema');
@@ -99,7 +114,7 @@
       ['Новые пользователи', count(c.new_users)], ['Вернувшиеся пользователи', count(c.returning_users)],
       ['Активация с ИИ', percent(c.ai_activation), ratio(c.ai_activation)],
       ['Активация без ИИ', percent(c.manual_activation), ratio(c.manual_activation)],
-      ['Завершили целевой сценарий', count(c.completed_scenario)], ['Возвраты после активации', count(c.returns)],
+      ['Сохранили запись', count(c.saved_users ?? 0), 'Уникальные пользователи за выбранный период'], ['Получили готовую заметку', count(c.ready_users ?? 0), 'Заметка создана за выбранный период'], ['Попробовали основной функционал', count(c.completed_scenario), 'Сохранение и просмотр результата. Дополнительные функции не требуются.'], ['Возвраты после активации', count(c.returns)],
     ]);
     $('activation-pending').textContent = `Ожидают завершения окна активации: ${count(c.activation_pending)}.`;
     table('daily', ['Дата','Регистрации','DAU','Новые','Вернувшиеся','Сессии','LLM','STT','LLM / DAU','Вызовы без полного usage'], data.daily.map(d => [text(d.date), count(d.registrations), count(d.dau), count(d.new_users), count(d.returning_users), count(d.session_count), money(d.llm_cost), money(d.stt_cost), money(d.llm_cost_per_dau), count(d.unknown_usage_calls)]));
@@ -169,6 +184,27 @@
   }
   const errorMessage = error => ({401:'Сессия завершилась. Войдите снова.',403:'Доступ запрещён.',404:'API статистики недоступен. Данные не загружены.',503:'Статистика временно недоступна. Попробуйте позже.',filters:'Проверьте даты: начало периода не должно быть позже окончания.'})[error.status || error.message] || 'Не удалось загрузить данные. Повторите запрос.';
   const expire = error => { if (error.status === 401 && window.adminSession) window.adminSession.expired(); };
+  $('contest-period-load').addEventListener('click', async () => {
+    if (!window.adminSession?.ready) return;
+    const serial = generation, abort = new AbortController(), timer = setTimeout(() => abort.abort(), 15000);
+    $('contest-period-load').disabled = true;
+    try {
+      const response = await fetch(API + '/contest',{credentials:'same-origin',cache:'no-store',redirect:'error',signal:abort.signal,headers:{Accept:'application/json'}});
+      if (!response.ok) throw {status:response.status};
+      const value = await response.json();
+      if (serial !== generation) return;
+      if (serial !== generation || !window.adminSession?.ready) return;
+      cards('contest-period-cards',[['Средний DAU',number(value.average_dau)],['Обращения / DAU',number(value.average_calls_per_dau)],
+        ['Дней DAU ≥ 1000',count(value.days_dau_1000) + ' из ' + count(value.days)],
+        ['Дней DAU ≥ 2500',count(value.days_dau_2500) + ' из ' + count(value.days)]]);
+      $('contest-period-status').textContent = text(value.start) + ' - ' + text(value.end) + '. Все источники и каналы. ' +
+        (value.preliminary ? 'Период не завершён, итоговый результат ещё не подтверждён.' : 'Период завершён. Пороги проверяет организатор.');
+    } catch(error) {
+      if (serial !== generation) return;
+      if (error.status === 401 || error.status === 403) { clear(); expire(error); }
+      else if (serial === generation && window.adminSession?.ready) $('contest-period-status').textContent = 'Не удалось загрузить зачётный период. Повторите позже.';
+    } finally { clearTimeout(timer); $('contest-period-load').disabled = false; }
+  });
   async function load(targetOffset = 0, history = [], slice) {
     const serial = ++generation;
     if (controller) controller.abort();

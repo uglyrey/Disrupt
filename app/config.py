@@ -92,6 +92,9 @@ class Settings:
     admin_allowed_networks: str = DEFAULT_ADMIN_NETWORKS
     admin_cookie_secure: bool = True
     review_enabled: bool = False
+    contest_start: str = "2026-11-03"
+    contest_end: str = "2026-11-30"
+    contest_counted_components: str = "llm,stt"
     # Шифрование содержимого на диске. Подробности в docs/encryption-v1.md. Файлы ключей читает app.crypto.
     data_encryption: str = "off"
     data_key_file: str = ""
@@ -113,6 +116,18 @@ class Settings:
     def __post_init__(self):
         if self.review_enabled and (not self.public_origin.startswith("https://") or len(self.analytics_pseudonym_key) < 32):
             raise ValueError("Observer access requires HTTPS and a stable analytics pseudonym key")
+        from datetime import date
+        try:
+            first, last = date.fromisoformat(self.contest_start), date.fromisoformat(self.contest_end)
+            if first > last or (last - first).days != 27:
+                raise ValueError
+        except ValueError:
+            raise ValueError("Contest period must contain 28 calendar days") from None
+        allowed = {"llm", "stt", "structure_prompt", "assistant_ask_prompt", "assistant_recommend_prompt",
+                   "assistant_digest_prompt", "capture_worker", "assistant_worker", "telegram_send", "note_view"}
+        names = self.contest_counted_components.split(",")
+        if not names or len(set(names)) != len(names) or not set(names) <= allowed or not {"llm", "stt"} <= set(names):
+            raise ValueError("Contest components must include llm,stt and only supported unique names")
         if self.budget_reserve_rub < 0 or self.budget_attempt_reserve_rub <= 0:
             raise ValueError("Budget reserve must not be negative; attempt reserve must be positive")
         parse_networks(self.admin_allowed_networks)
@@ -219,6 +234,9 @@ class Settings:
             admin_allowed_networks=os.environ.get("NOTES_ADMIN_ALLOWED_NETWORKS", DEFAULT_ADMIN_NETWORKS),
             admin_cookie_secure=flag("NOTES_ADMIN_COOKIE_SECURE", True),
             review_enabled=flag("NOTES_REVIEW_ENABLED", False),
+            contest_start=os.environ.get("NOTES_CONTEST_START", cls.contest_start),
+            contest_end=os.environ.get("NOTES_CONTEST_END", cls.contest_end),
+            contest_counted_components=os.environ.get("NOTES_CONTEST_COUNTED_COMPONENTS", cls.contest_counted_components),
             data_encryption=os.environ.get("NOTES_DATA_ENCRYPTION", cls.data_encryption),
             data_key_file=os.environ.get("NOTES_DATA_KEY_FILE", ""),
             data_old_key_files=os.environ.get("NOTES_DATA_OLD_KEY_FILES", ""),

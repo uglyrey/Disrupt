@@ -350,7 +350,23 @@ function renderNote(note) {
     block.append(actions); $('conclusions').append(block);
   }
 }
-async function openNote(id, {userAction = false, search = null, reminder = null, backgroundDraft} = {}) {
+let pendingVisibleResult = null;
+async function recordVisibleResult() {
+  const pending = pendingVisibleResult;
+  if (!pending || pending.sending || document.visibilityState === 'hidden' ||
+      currentNote?.id !== pending.id || $('note-card').hidden || $('workspace').hidden) return;
+  pending.sending = true;
+  try {
+    await api(`/api/v1/notes/${pending.id}/opened`,{method:'POST',body:JSON.stringify(pending.body)});
+    if (pendingVisibleResult === pending) pendingVisibleResult = null;
+  } catch (_) {
+    // Keep the event ID after a lost acknowledgement. Analytics must not block the note.
+    pending.sending = false;
+  }
+}
+document.addEventListener('visibilitychange',() => { recordVisibleResult(); });
+window.addEventListener('focus',() => { recordVisibleResult(); });
+async function openNote(id, {userAction = false, visibleResult = false, search = null, reminder = null, backgroundDraft} = {}) {
   if (noteBusy) return message('Дождитесь сохранения.');
   if (recorder || microphonePending) return message('Сначала завершите запись голоса.');
   if (window.BerestaFocus?.pending()) { await window.BerestaFocus.flush(); if (noteBusy) return message('Дождитесь сохранения.'); }
@@ -364,9 +380,10 @@ async function openNote(id, {userAction = false, search = null, reminder = null,
     if (currentEpoch !== epoch || generation !== viewGeneration) return;
     if (backgroundDraft !== undefined && !jobDraftUnchanged(backgroundDraft)) return;
     renderNote(note); setNoteBusy(true); message();
-    if (userAction) await api(`/api/v1/notes/${id}/opened`,{
-      method:'POST',body:JSON.stringify({operation_id:window.berestaId(),search_operation_id:search,reminder_id:reminder}),
-    });
+    if (userAction || visibleResult) {
+      pendingVisibleResult = {id,body:{operation_id:window.berestaId(),search_operation_id:search,reminder_id:reminder},sending:false};
+      recordVisibleResult();
+    }
   } finally { setNoteBusy(false); }
 }
 async function loadJobs() {
@@ -469,7 +486,7 @@ async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGenera
       await loadNotes(); await loadJobs(); await loadProviderUsage();
       if (currentEpoch!==epoch || generation!==viewGeneration) return;
       if (canShowJobResult(generation,draft)) {
-        await openNote(job.note_id,{backgroundDraft:draft});
+        await openNote(job.note_id,{backgroundDraft:draft,visibleResult:true});
         if (job.error_code === 'ungrounded_details_omitted' && currentEpoch === epoch &&
             viewGeneration === generation + 1 && currentNote?.id === job.note_id) {
           message('Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.');
@@ -522,6 +539,7 @@ $('auth-form').onsubmit = async event => {
       age.focus(); return;
     }
     body.accept_policy = true; body.policy_version = consent.dataset.policyVersion; body.confirm_age = true;
+    if (document.body.dataset.sourceToken) body.source_token = document.body.dataset.sourceToken;
   }
   authMessage();
   const buttons = [...event.target.querySelectorAll('button')];
@@ -537,7 +555,7 @@ $('logout').onclick = async () => {
   if (window.BerestaFocus?.pending()) await window.BerestaFocus.flush();
   if (noteBusy || captureBusy || recorder || microphonePending) return message('Дождитесь завершения записи или сохранения.');
   if (dirty() && !confirm('Выйти без сохранения правок?')) return;
-  try { await api('/api/v1/auth/logout',{method:'POST'}); epoch++; location.reload(); }
+  try { await api('/api/v1/auth/logout',{method:'POST'}); pendingVisibleResult=null; epoch++; location.reload(); }
   catch(e) { message(e.message); }
 };
 $('example').onclick = async () => {
@@ -568,7 +586,7 @@ $('capture-form').onsubmit = async event => {
     } else { refreshUsage(); }
     if (processing_mode === 'manual' || downgraded) {
       $('thought').value = ''; pendingCapture = null;
-      await loadNotes(); await openNote(job.note_id);
+      await loadNotes(); await openNote(job.note_id,{visibleResult:true});
       if (downgraded) message(LIMIT_SPENT);
     } else {
       // The POST acknowledgement confirms storage; a later poll must never clear a new draft.
@@ -603,7 +621,7 @@ function leaveNote(question = 'Есть несохранённые правки.
     return false;
   }
   if (hasDrafts() && !confirm(question)) return false;
-  viewGeneration++; currentNote=null; currentCapture=null; hideSource();
+  viewGeneration++; pendingVisibleResult=null; currentNote=null; currentCapture=null; hideSource();
   window.BerestaReminders?.hide();
   $('note-card').hidden=true; return true;
 }

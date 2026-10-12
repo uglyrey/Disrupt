@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from app import admin_auth as auth
 from app.admin_export import build_archive
 from app.admin_metrics import aggregate, export_csv
+from app.contest_metrics import report
 from app.routes.admin import LoginBody
 
 COOKIE = "beresta_review"
@@ -78,9 +79,16 @@ def build_router(database, static, settings):
                 db=Depends(observer)):
         value, next_offset = aggregate(db, start, end, channel, source, key,
                                        usage_limit=usage_limit, usage_offset=usage_offset)
+        value.contest = report(db, start, end, channel=channel, source=source,
+                               counted_components=tuple(settings.contest_counted_components.split(",")))
         if next_offset is not None:
             response.headers["X-Next-Usage-Offset"] = str(next_offset)
         return value
+
+    @router.get("/review-api/v1/contest", include_in_schema=False)
+    def contest(db=Depends(observer)):
+        return report(db, settings.contest_start, settings.contest_end,
+                      counted_components=tuple(settings.contest_counted_components.split(",")))
 
     @router.get("/review-api/v1/export", include_in_schema=False)
     def csv(request: Request, start: str = Query(alias="from", pattern=DATE),
@@ -99,7 +107,9 @@ def build_router(database, static, settings):
                 end: str = Query(alias="to", pattern=DATE), db=Depends(observer)):
         if not key:
             raise HTTPException(503, "Стабильные идентификаторы выгрузки не настроены")
-        data, stats = build_archive(db, start, end, key, stable_key=True)
+        data, stats = build_archive(db, start, end, key, stable_key=True,
+                                    counted_components=tuple(settings.contest_counted_components.split(",")),
+                                    contest_period=(settings.contest_start, settings.contest_end))
         auth.audit(db, "export_zip", admin_id=request.state.review_id, ip=auth.client_ip(request), details=stats)
         db.commit()
         return Response(data, media_type="application/zip", headers={

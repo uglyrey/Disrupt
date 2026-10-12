@@ -93,6 +93,7 @@
     try {
       const start = await send('/api/v1/auth/telegram/start', {
         accept_policy: true, policy_version: box.dataset.policyVersion, confirm_age: true,
+        ...(document.body.dataset.sourceToken ? {source_token:document.body.dataset.sourceToken} : {}),
       });
       if (!botLink(start.deep_link)) throw new Error('Не удалось начать вход. Попробуйте ещё раз.');
       el('tg-login-link').href = start.deep_link;

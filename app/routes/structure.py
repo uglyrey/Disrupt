@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 
 from app.analytics import record_event
+from app.components import record as record_component
 from app.models import Category, Outbox, ProductEvent, Reminder
 from app.schemas import (
     CategoryCreate,
@@ -121,6 +122,13 @@ def build_router(database):
             if search is None:
                 raise HTTPException(422, "Поиск не найден. Повторите поиск")
         record_event(db, session.user_id, "note_opened", body.operation_id, subject_id=note_id)
+        viewed = db.scalar(select(ProductEvent).where(
+            ProductEvent.user_id == session.user_id, ProductEvent.name == "note_opened",
+            ProductEvent.operation_id == body.operation_id,
+        ))
+        if viewed.subject_id != note_id:
+            raise HTTPException(409, "Эта операция относится к другой заметке")
+        record_component(db, session.user_id, note_id + ":" + viewed.session_id, "note_view")
         if body.search_operation_id is not None:
             record_event(db, session.user_id, "search_result_opened", body.operation_id, subject_id=note_id)
         if body.reminder_id is not None:

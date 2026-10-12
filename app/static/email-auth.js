@@ -47,6 +47,7 @@
     if (mode === 'register' && !el('email-auth-age').checked) return say('Подтвердите, что вам исполнилось 18 лет.');
     const body = {email:el('email-auth-address').value,password:el('email-auth-password').value};
     if (mode === 'register') Object.assign(body, {accept_policy:true,policy_version:el('accept-policy').dataset.policyVersion,confirm_age:true});
+    if (mode === 'register' && document.body.dataset.sourceToken) body.source_token = document.body.dataset.sourceToken;
     lock(true); say('');
     try {
       const result = await post(mode === 'register' ? 'registration/start' : 'login', body);

@@ -11,6 +11,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
+from app.attribution import read as acquisition_source
 from app.mailer import MAIL_DISABLED_TEXT, MailError
 from app.models import EmailRegistrationPending as Pending
 from app.models import User
@@ -101,6 +102,7 @@ def build_router(database, settings):
         row = Pending(
             email=body.email, password_hash=hash_password(body.password), binding_hash=hash_token(binding),
             code_hash=digest(binding, code), policy_version=POLICY_VERSION, expires_at=now + LIFETIME,
+            source=acquisition_source(body.source_token, settings),
         )
         db.add(row)
         db.commit()
@@ -150,6 +152,7 @@ def build_router(database, settings):
             limit=settings.registrations_per_ip_per_day, window=86400,
         )
         user = User(username=available_name(db, row.email), email=row.email, email_verified_at=now,
+                    source=row.source,
                     password_hash=row.password_hash, policy_version=row.policy_version, policy_accepted_at=now)
         retire(row, now)
         db.add(user)

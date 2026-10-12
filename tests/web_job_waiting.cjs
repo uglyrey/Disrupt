@@ -14,7 +14,7 @@ async function until(condition) {
 }
 async function settle() { for (let i=0;i<20;i++) await new Promise(resolve => setImmediate(resolve)); }
 
-async function scenario({lostAck = false, audio = false, pauseResultRead = false} = {}) {
+async function scenario({lostAck = false, audio = false, pauseResultRead = false, lostOpenedAck = false, stuckOpened = false} = {}) {
   const root = path.join(__dirname,'../app/static');
   const dom = new JSDOM(fs.readFileSync(path.join(root,'index.html'),'utf8'),{
     url:'https://beresta.invalid/',runScripts:'outside-only',
@@ -41,6 +41,11 @@ async function scenario({lostAck = false, audio = false, pauseResultRead = false
     if (url.pathname === '/api/v1/categories') return reply([]);
     if (url.pathname === '/api/v1/jobs') return reply(saved ? [job] : []);
     if (url.pathname === '/api/v1/notes') return reply(manual ? [{id:'manual-note',title:'Manual note'}] : []);
+    if (url.pathname.endsWith('/opened') && method === 'POST') {
+      if (stuckOpened) return new Promise(() => {});
+      if (lostOpenedAck) {lostOpenedAck=false;throw new Error('Synthetic lost view acknowledgement');}
+      return reply(null,204);
+    }
     if (url.pathname.startsWith('/api/v1/notes/')) {
       const data = note(url.pathname.split('/').at(-1));
       if (pauseResultRead) return new Promise(resolve => {releaseResult = () => resolve(reply(data));});
@@ -165,6 +170,30 @@ module.exports = async function checkJobWaiting() {
     assert.equal(s.$('thought').value,'Draft during status outage');
     assert.equal(s.$('capture-submit').disabled,false);
     assert.equal(s.calls.filter(c => c.path === '/api/v1/captures/text').length,1);
+  } finally { s?.dom.window.close(); }
+  try {
+    s = await scenario();
+    Object.defineProperty(s.w.document,'visibilityState',{configurable:true,value:'hidden'});
+    s.job.status='succeeded';s.job.note_id='visible-ai';s.finish();
+    await until(() => !s.$('note-card').hidden && !s.$('title').disabled);
+    assert.equal(s.calls.some(c => c.path.endsWith('/opened')),false,'A hidden tab is not a result view');
+    Object.defineProperty(s.w.document,'visibilityState',{configurable:true,value:'visible'});
+    s.w.document.dispatchEvent(new s.w.Event('visibilitychange'));await settle();
+    assert.equal(s.calls.filter(c => c.path.endsWith('/opened')).length,1);
+  } finally { s?.dom.window.close(); }
+  try {
+    s = await scenario({lostOpenedAck:true});s.job.status='succeeded';s.job.note_id='ack-note';s.finish();
+    await until(() => !s.$('note-card').hidden && !s.$('title').disabled);await settle();
+    s.w.dispatchEvent(new s.w.Event('focus'));await settle();
+    const views=s.calls.filter(c=>c.path.endsWith('/opened'));
+    assert.equal(views.length,2);assert.equal(views[0].options.body,views[1].options.body,'Lost view ack retries the same event');
+    assert.equal(s.$('title').disabled,false,'Analytics failure does not lock a ready note');
+  } finally { s?.dom.window.close(); }
+  try {
+    s = await scenario({stuckOpened:true});s.job.status='succeeded';s.job.note_id='slow-analytics';s.finish();
+    await until(() => !s.$('note-card').hidden && !s.$('title').disabled);
+    assert.equal(s.calls.filter(c=>c.path.endsWith('/opened')).length,1);
+    assert.equal(s.$('title').disabled,false,'An unresolved analytics request does not block editing');
   } finally { s?.dom.window.close(); }
   console.log('Queued-job checks passed: unlocked form, lost-ack idempotency, manual saves, draft and navigation preservation.');
 };

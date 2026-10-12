@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from app.components import record as record_component
 from app.models import Capture, Job, ProductEvent, ProviderUsage, User, new_id
 from app.providers import CloudRuProvider, MockProvider, ProviderError
 from app.services import lock_account
@@ -69,6 +70,8 @@ class UsageRecorder:
                 stt_seconds=capture.audio_seconds if kind == "stt" else None, occurred_at=now,
             )
             db.add(row)
+            if kind == "llm" and isinstance(provider, CloudRuProvider):
+                record_component(db, job.user_id, job.id, "structure_prompt", capture.channel, is_test=mock)
             db.commit()  # Receipt exists before any provider dispatch, including a process crash.
             return row.id
 

@@ -17,7 +17,7 @@
     },
     "activation_pending": 0,
     "completed_scenario": 2,
-    "returns": 1,
+    "returns": 2,
     "d1": {
       "numerator": 1,
       "denominator": 1,
@@ -27,7 +27,9 @@
       "numerator": 0,
       "denominator": 0,
       "value": null
-    }
+    },
+    "saved_users": 2,
+    "ready_users": 2
   },
   "daily": [
     {

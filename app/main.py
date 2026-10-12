@@ -9,7 +9,7 @@ from typing import Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -17,6 +17,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app import crypto
 from app.admin_auth import AdminNetworkGate
 from app.analytics import record_event
+from app.attribution import page_token as acquisition_page_token
+from app.attribution import read as acquisition_source
 from app.audio_storage import AudioStorage
 from app.config import Settings, parse_networks
 from app.db import make_database
@@ -28,6 +30,7 @@ from app.mailer import build_mailer
 from app.models import Capture, Job, Note, ProviderBudget, Revision, User
 from app.policy import POLICY_VERSION, require_adult, require_consent
 from app.providers import DEMO_TEXT
+from app.request_metrics import RequestMetrics
 from app.routes.account import build_router as account_router
 from app.routes.admin import ProtectedStaticFiles
 from app.routes.admin import build_router as admin_router
@@ -284,9 +287,9 @@ def create_app(
             yield db
 
     app.include_router(account_router(database))
+    app.include_router(review_router(database, STATIC, settings))
     app.include_router(feedback_router(database))
     app.include_router(admin_router(database, STATIC, settings))
-    app.include_router(review_router(database, STATIC, settings))
     app.include_router(internal_router(database, settings))
     app.include_router(structure_router(database))
     app.include_router(reminders_router(database))
@@ -324,6 +327,7 @@ def create_app(
         throttle(db, "register-day:" + ip, limit=settings.registrations_per_ip_per_day, window=86400)
         user = User(
             username=body.username.lower(), password_hash=hash_password(body.password),
+            source=acquisition_source(body.source_token, settings),
             policy_version=POLICY_VERSION, policy_accepted_at=time.time(),
         )
         db.add(user)
@@ -501,8 +505,10 @@ def create_app(
     app.mount("/static", ProtectedStaticFiles(directory=STATIC, networks=admin_networks), name="static")
 
     @app.get("/", include_in_schema=False)
-    def index():
-        return FileResponse(STATIC / "index.html")
+    def index(request: Request):
+        token = acquisition_page_token(request, settings)
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        return HTMLResponse(html.replace("<body>", '<body data-source-token="' + token + '">', 1))
 
     @app.get("/privacy", include_in_schema=False)
     def privacy():
@@ -520,4 +526,5 @@ def create_app(
     def data_deletion():
         return FileResponse(STATIC / "data-deletion.html")
 
+    app.add_middleware(RequestMetrics, sessions=sessions, log_file=settings.error_log_file)
     return app
