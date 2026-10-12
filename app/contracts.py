@@ -247,3 +247,26 @@ class AdminSummary(StrictModel):
     usage: list[UsageRow]
     quality: Quality
     generated_at: str
+
+
+class ProviderStats(StrictModel):
+    provider: str
+    calls: int
+    input_tokens: int
+    output_tokens: int
+    stt_seconds: float
+    estimated_usd: str
+
+
+class AiProviders(StrictModel):
+    """Состояние основного ИИ-шлюза и расход резерва. Подробности в docs/ai-failover-v1.md."""
+
+    fallback_enabled: bool
+    primary_state: Literal["up", "down"]
+    primary_changed_at: str | None
+    next_probe_at: str | None
+    fallback_spent_today_usd: str
+    fallback_cap_usd: str
+    today: list[ProviderStats]
+    period: list[ProviderStats]
+    generated_at: str

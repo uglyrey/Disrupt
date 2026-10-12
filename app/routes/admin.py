@@ -18,7 +18,8 @@ from app import admin_auth as auth
 from app.admin_export import build_archive
 from app.admin_metrics import aggregate, export_csv
 from app.admin_models import AdminAccount, AdminAudit
-from app.contracts import AdminSummary, GatewayBudget
+from app.admin_providers import ai_providers
+from app.contracts import AdminSummary, AiProviders, GatewayBudget
 from app.feedback_models import Feedback
 from app.gateway_budget import view as budget_view
 from app.models import ProviderBudget
@@ -128,6 +129,14 @@ def build_router(database, static, settings):
         if next_offset is not None:
             response.headers["X-Next-Usage-Offset"] = str(next_offset)
         return result
+
+    @router.get("/admin-api/v1/ai-providers", response_model=AiProviders, responses=errors)
+    def providers(
+        db=Depends(admin_database),
+        start: str = Query(alias="from", pattern=DATE),
+        end: str = Query(alias="to", pattern=DATE),
+    ):
+        return ai_providers(db, settings, start, end)
 
     @router.get("/admin-api/v1/export", response_class=Response, responses={
         **errors, 200: {"description": "UTF-8 CSV of aggregates", "content": {"text/csv": {"schema": {"type": "string"}}}},

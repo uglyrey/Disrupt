@@ -34,9 +34,13 @@ class MockSpeechProvider:
 class CloudRuSpeechProvider:
     """No discovery, redirects or retries. Cloud.ru gateway protocol needs owner confirmation."""
 
-    def __init__(self, api_key, model, *, base_url, transport=None, normalize_audio=False, ffmpeg_path="ffmpeg"):
-        if base_url.rstrip("/") not in ALLOWED_MODEL_BASE_URLS or not model:
+    def __init__(
+        self, api_key, model, *, base_url, transport=None, normalize_audio=False, ffmpeg_path="ffmpeg",
+        allowed_base_urls=ALLOWED_MODEL_BASE_URLS, label="cloudru",
+    ):
+        if base_url.rstrip("/") not in allowed_base_urls or not model:
             raise ValueError("STT requires an approved HTTPS endpoint and model")
+        self.provider_label = label
         self._api_key, self.model_name = api_key, model
         self.endpoint = base_url.rstrip("/") + "/audio/transcriptions"
         self._transport = transport
@@ -167,3 +171,22 @@ def safe_error_stage(response):
     except (ValueError, TypeError):
         pass
     return "unclassified"
+
+
+def make_fallback_speech_provider(settings: Settings, *, transport=None):
+    """Резервное распознавание речи (whisper через посредника), или None.
+
+    Включается вместе с основным распознаванием речи. Если оно выключено, голосовые записи не принимаются совсем.
+    """
+    if (
+        not settings.fallback_enabled or settings.provider != "cloudru" or not settings.allow_live_requests
+        or os.environ.get("NOTES_STT_ENABLED", "false") != "true"
+    ):
+        return None
+    if not settings.fallback_token:
+        raise ValueError("Fallback is enabled but the relay token is missing (NOTES_FALLBACK_TOKEN_FILE)")
+    base_url = settings.fallback_base_url.rstrip("/")
+    return CloudRuSpeechProvider(
+        settings.fallback_token, settings.fallback_stt_model, base_url=base_url, transport=transport,
+        normalize_audio=True, ffmpeg_path=settings.audio_ffmpeg_path, allowed_base_urls={base_url}, label="openai",
+    )

@@ -63,6 +63,7 @@ category_name: если у записи ясная сфера жизни, выб
 "category_name":null}
 """
 
+STRUCTURE_MAX_TOKENS = 4000
 WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 
 
@@ -523,10 +524,14 @@ class CloudRuProvider:
         read_timeout: int = LLM_READ_TIMEOUT_SECONDS,
         stream: bool = False,
         timezone: str = "Europe/Moscow",
+        allowed_base_urls=ALLOWED_MODEL_BASE_URLS,
+        label: str = "cloudru",
     ):
         base_url = base_url.rstrip("/")
-        if base_url not in ALLOWED_MODEL_BASE_URLS:
+        if base_url not in allowed_base_urls:
             raise ValueError("Model base URL must be an approved HTTPS endpoint")
+        # Название сервиса для учёта вызовов: cloudru или openai (резерв через посредника).
+        self.provider_label = label
         self._api_key = api_key
         self._model = model
         self.model_name = model
@@ -711,7 +716,7 @@ class CloudRuProvider:
                 {
                     "model": self._model,
                     "temperature": 0.2,
-                    "max_tokens": 4000,
+                    "max_tokens": STRUCTURE_MAX_TOKENS,
                     "response_format": self.response_format(StructuredNote),
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
@@ -811,4 +816,21 @@ def make_provider(settings: Settings) -> LLMProvider:
         key, settings.cloudru_model, base_url=settings.cloudru_base_url,
         read_timeout=settings.llm_read_timeout_seconds, stream=settings.llm_stream,
         timezone=settings.limit_timezone,
+    )
+
+
+def make_fallback_provider(settings: Settings, *, transport: httpx.BaseTransport | None = None):
+    """Резервный ИИ через посредника в Хельсинки, или None. Не читает ключей, кроме токена посредника из настроек.
+
+    В имитации и без разрешения на живые запросы резерва нет, как и основного сервиса.
+    """
+    if not settings.fallback_enabled or settings.provider != "cloudru" or not settings.allow_live_requests:
+        return None
+    if not settings.fallback_token:
+        raise ValueError("Fallback is enabled but the relay token is missing (NOTES_FALLBACK_TOKEN_FILE)")
+    base_url = settings.fallback_base_url.rstrip("/")
+    return CloudRuProvider(
+        settings.fallback_token, settings.fallback_model, base_url=base_url, transport=transport,
+        read_timeout=settings.llm_read_timeout_seconds, stream=False, timezone=settings.limit_timezone,
+        allowed_base_urls={base_url}, label="openai",
     )

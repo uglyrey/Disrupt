@@ -321,6 +321,8 @@ def aggregate(db, start, end, channel, source, key, *, usage_limit=50, usage_off
     receipts_query = select(ProviderUsage).where(
         ProviderUsage.user_id.in_(users), ProviderUsage.is_test.is_(False),
         ProviderUsage.occurred_at >= low, ProviderUsage.occurred_at < high,
+        # Резервный ИИ считается в долларах отдельно (app/admin_providers.py), здесь только рублёвый учёт.
+        or_(ProviderUsage.provider.is_(None), ProviderUsage.provider != "openai"),
     )
     if channel != "all":
         receipts_query = receipts_query.where(ProviderUsage.channel == channel)

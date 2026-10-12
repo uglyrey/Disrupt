@@ -19,11 +19,18 @@ from app import crypto
 from app.ai_guard import BLOCKED_CODE, OutputGuard
 from app.analytics import record_event
 from app.assistant import run_assistant_once
-from app.audio_contracts import AUDIO_MEDIA_TYPES, AudioReader, SpeechProvider
+from app.audio_contracts import AUDIO_MEDIA_TYPES, MAX_AUDIO_SECONDS, AudioReader, SpeechProvider
 from app.audio_storage import AudioStorage
 from app.config import Settings
 from app.db import make_database
 from app.error_logging import log_error
+from app.fallback_budget import (
+    LONGEST_NOTE_CHARS,
+    PROMPT_OVERHEAD_CHARS,
+    AttemptSpend,
+    llm_max_cost,
+    stt_max_cost,
+)
 from app.gateway_budget import available as money_available
 from app.models import (
     Capture,
@@ -37,11 +44,19 @@ from app.models import (
     User,
     new_id,
 )
-from app.providers import ProviderError, make_provider, validate_result
+from app.provider_router import FALLBACK, PRIMARY, Attempt, ProviderRouter
+from app.providers import (
+    STRUCTURE_MAX_TOKENS,
+    SYSTEM_PROMPT,
+    ProviderError,
+    make_fallback_provider,
+    make_provider,
+    validate_result,
+)
 from app.reminders import auto_reminders
-from app.retry_policy import breaker_open, decide
+from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide
 from app.services import lock_account, resolve_ai_category, save_revision
-from app.speech import CloudRuSpeechProvider, make_speech_provider
+from app.speech import CloudRuSpeechProvider, make_fallback_speech_provider, make_speech_provider
 from app.usage import UsageRecorder
 
 PROCESSING_FAILED_TEXT = (
@@ -67,16 +82,80 @@ class Worker:
     def __init__(
         self, sessions, settings: Settings, provider=None, *,
         audio_storage: AudioReader | None = None, speech_provider: SpeechProvider | None = None,
+        fallback_provider=None, fallback_speech: SpeechProvider | None = None,
     ):
         self.sessions = sessions
         self.settings = settings
         self.provider = provider if provider is not None else make_provider(settings)
         self.audio_storage = audio_storage
         self.speech_provider = speech_provider
+        # Резерв (docs/ai-failover-v1.md). Без включённого резерва и его клиента маршрутизатора нет, всё как раньше.
+        self.fallback_provider = fallback_provider
+        self.fallback_speech = fallback_speech
+        self.router = (
+            ProviderRouter(sessions, settings) if settings.fallback_enabled and fallback_provider is not None else None
+        )
         self.usage = UsageRecorder(sessions, settings)
-        self.guard = OutputGuard.for_runtime(settings, self.provider)
+        self.guard = OutputGuard.for_runtime(settings, self.provider, fallback_provider)
 
-    def original_for_job(self, job_id):
+    def job_estimates(self, db, job):
+        """Наибольшая цена этапов следующей попытки на резерве и нужен ли ей этап распознавания речи."""
+        capture = db.get(Capture, job.capture_id)
+        needs_stt = capture.input_kind == "audio" and capture.transcript is None
+        if capture.input_kind == "audio":
+            chars = len(capture.transcript) if capture.transcript is not None else LONGEST_NOTE_CHARS
+        else:
+            chars = len(capture.original_text or "")
+        chars += PROMPT_OVERHEAD_CHARS + len(SYSTEM_PROMPT) + sum(
+            len(name) for name in db.scalars(select(Category.name).where(Category.user_id == job.user_id).limit(100))
+        )
+        estimates = {"llm": llm_max_cost(self.settings, chars, STRUCTURE_MAX_TOKENS)}
+        if needs_stt:
+            estimates["stt"] = stt_max_cost(self.settings, capture.audio_seconds, MAX_AUDIO_SECONDS)
+        return estimates, needs_stt
+
+    def begin_attempt(self, job_id):
+        """Выбрать, куда пойдёт эта попытка задания, и занять под неё место в дневном потолке резерва."""
+        if self.router is None:
+            return Attempt()
+        with self.sessions() as db:
+            job = db.get(Job, job_id)
+            next_route = job.next_route
+            estimates, needs_stt = self.job_estimates(db, job)
+        target, probe = self.router.choose(next_route)
+        spend = None
+        if target == FALLBACK:
+            reservation = None
+            if not (needs_stt and self.fallback_speech is None):
+                reservation = self.router.budget.reserve(sum(estimates.values()))
+                if reservation is None:
+                    self.router.note_cap_reached()
+            if reservation is None:
+                target = PRIMARY
+            else:
+                spend = AttemptSpend(self.router.budget, reservation, estimates)
+        with self.sessions() as db:
+            db.execute(update(Job).where(Job.id == job_id).values(provider_used=target, next_route=None))
+            db.commit()
+        return Attempt(target, probe and target == PRIMARY, spend)
+
+    def begin_assistant_attempt(self, estimate, *, force_fallback=False):
+        """То же для запроса помощника. Со force_fallback возвращает None, если резерв недоступен."""
+        if self.router is None:
+            return None if force_fallback else Attempt()
+        target, probe = (FALLBACK, False) if force_fallback else self.router.choose(None)
+        spend = None
+        if target == FALLBACK:
+            reservation = self.router.budget.reserve(estimate)
+            if reservation is None:
+                self.router.note_cap_reached()
+                if force_fallback:
+                    return None
+                return Attempt()
+            spend = AttemptSpend(self.router.budget, reservation, {"llm": estimate})
+        return Attempt(target, probe, spend)
+
+    def original_for_job(self, job_id, attempt=None):
         with self.sessions() as db:
             job = db.get(Job, job_id)
             if job.status != "running" or job.lease_until < time.time():
@@ -89,13 +168,15 @@ class Worker:
             if capture.transcript is not None:
                 return self.validate_transcript(capture.transcript)
             key, media_type = capture.audio_key, capture.audio_media_type
-        if self.speech_provider is None:
+        fallback = attempt is not None and attempt.fallback
+        speech = self.fallback_speech if fallback else self.speech_provider
+        if speech is None:
             raise ProviderError("stt_not_configured")
         if self.audio_storage is None:
             raise ProviderError("audio_storage_unavailable")
         if not key or media_type not in AUDIO_MEDIA_TYPES:
             raise ProviderError("audio_invalid")
-        if isinstance(self.speech_provider, CloudRuSpeechProvider):
+        if isinstance(speech, CloudRuSpeechProvider) and not fallback:
             if self.settings.provider != "cloudru" or not self.settings.allow_live_requests:
                 raise ProviderError("stt_not_configured")
             with self.sessions() as db:
@@ -104,8 +185,9 @@ class Worker:
         try:
             with self.audio_storage.open_original(key) as source:
                 transcript = self.usage.call(
-                    job_id, "stt", self.speech_provider,
-                    lambda _: self.validate_transcript(self.speech_provider.transcribe(source, media_type=media_type)),
+                    job_id, "stt", speech,
+                    lambda _: self.validate_transcript(speech.transcribe(source, media_type=media_type)),
+                    spend=attempt.spend if fallback else None,
                 )
         except OSError:
             raise ProviderError("audio_storage_unavailable") from None
@@ -151,11 +233,24 @@ class Worker:
             return None
         if expired_before is not None and (job.lease_until is None or job.lease_until >= expired_before):
             return None
-        delay = decide(db, self.settings, job, code, retry_after, now=now)
+        # Сбой основного шлюза при готовом резерве: следующая попытка сразу идёт на резерв, без обычной паузы.
+        failover = False
+        if self.router is not None and code in GATEWAY_CODES and job.provider_used == PRIMARY:
+            estimates, needs_stt = self.job_estimates(db, job)
+            failover = (
+                not (needs_stt and self.fallback_speech is None)
+                and self.router.failover_allowed(db, job, code, now, sum(estimates.values()))
+            )
+        delay = decide(db, self.settings, job, code, retry_after, now=now, failover=failover)
         job.last_error_code, job.last_failed_at = code, now
+        job.last_error_provider = job.provider_used
+        if self.router is not None:
+            self.router.on_failure(db, job.provider_used, code, now)
         if delay is not None:
             job.status, job.lease_until = "queued", None
             job.attempts, job.not_before, job.error_code = (job.attempts or 0) + 1, now + delay, None
+            # Плохой ответ повторяется у того же сервиса, остальное решает маршрутизатор.
+            job.next_route = FALLBACK if failover else (job.provider_used if classify(code) == BAD_OUTPUT else None)
             return "retry"
         job.status, job.error_code, job.finished_at, job.not_before = "failed", code, now, None
         capture = db.get(Capture, job.capture_id)
@@ -184,8 +279,11 @@ class Worker:
             ready = db.execute(
                 select(Job.id, Job.attempts).where(*waiting).order_by(Job.created_at, Job.id).limit(1)
             ).first()
-            if ready is not None and ready.attempts and breaker_open(db, self.settings, now):
-                # The gateway is struggling. Retries wait, fresh jobs may still try once.
+            if (
+                ready is not None and ready.attempts and breaker_open(db, self.settings, now)
+                and not (self.router is not None and self.router.fallback_open(db, now))
+            ):
+                # The gateway is struggling and there is no reserve. Retries wait, fresh jobs may still try once.
                 ready = db.execute(
                     select(Job.id, Job.attempts).where(*waiting, Job.attempts == 0)
                     .order_by(Job.created_at, Job.id).limit(1)
@@ -246,8 +344,10 @@ class Worker:
         job_id = self.claim()
         if job_id is None:
             return run_assistant_once(self)  # Capture jobs always go first.
+        attempt = None
         try:
-            original = self.original_for_job(job_id)
+            attempt = self.begin_attempt(job_id)
+            original = self.original_for_job(job_id, attempt)
             with self.sessions() as db:
                 job = db.get(Job, job_id)
                 capture_id, user_id = job.capture_id, job.user_id
@@ -257,13 +357,15 @@ class Worker:
                         select(Category).where(Category.user_id == user_id).order_by(Category.id).limit(100)
                     )
                 }
-                if self.settings.provider == "cloudru":
+                if self.settings.provider == "cloudru" and not attempt.fallback:
                     self.reserve_budget(db, user_id)
+            provider = self.fallback_provider if attempt.fallback else self.provider
+
             def structure(on_usage):
-                measured = getattr(self.provider, "structure_with_usage", None)
+                measured = getattr(provider, "structure_with_usage", None)
                 result = (
                     measured(original, categories=tuple(category_context), on_usage=on_usage)
-                    if measured else self.provider.structure(original, categories=tuple(category_context))
+                    if measured else provider.structure(original, categories=tuple(category_context))
                 )
                 checked = validate_result(result, original)
                 rule = self.guard.structured_violation(checked, original)
@@ -275,7 +377,9 @@ class Worker:
                 return self.guard.safe_note(original)
 
             blocked = []
-            result = self.usage.call(job_id, "llm", self.provider, structure)
+            result = self.usage.call(job_id, "llm", provider, structure, spend=attempt.spend)
+            if self.router is not None and not attempt.fallback:
+                self.router.on_success()
             now = time.time()
             with self.sessions() as db:
                 lock_account(db, user_id)
@@ -340,6 +444,9 @@ class Worker:
             self.fail(job_id, "provider_invalid_response", exception=exc)
         except Exception as exc:
             self.fail(job_id, "internal_error", exception=exc)
+        finally:
+            if attempt is not None:
+                attempt.finish()
         return True
 
     def budget_available(self):
@@ -362,7 +469,11 @@ def main():
     previous_handlers = {sig: signal.signal(sig, request_stop) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
         worker = Worker(sessions, settings, audio_storage=AudioStorage(settings.audio_storage_path, read_only=True),
-                        speech_provider=make_speech_provider(settings))
+                        speech_provider=make_speech_provider(settings),
+                        fallback_provider=make_fallback_provider(settings),
+                        fallback_speech=make_fallback_speech_provider(settings))
+        if settings.fallback_enabled and worker.router is None:
+            log_error("fallback_unavailable", "needs_live_mode", log_file=settings.error_log_file)
         while not stopping.is_set():
             if not worker.budget_available():
                 time.sleep(1)

@@ -593,6 +593,71 @@
         ]
       }
     },
+    "/admin-api/v1/ai-providers": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Providers",
+        "operationId": "providers_admin_api_v1_ai_providers_get",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiProviders"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No administrator session"
+          },
+          "404": {
+            "description": "Outside the private network"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented",
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ]
+      }
+    },
     "/admin-api/v1/export": {
       "get": {
         "tags": [
@@ -5626,6 +5691,85 @@
         ],
         "title": "AdminSummary"
       },
+      "AiProviders": {
+        "properties": {
+          "fallback_enabled": {
+            "type": "boolean",
+            "title": "Fallback Enabled"
+          },
+          "primary_state": {
+            "type": "string",
+            "enum": [
+              "up",
+              "down"
+            ],
+            "title": "Primary State"
+          },
+          "primary_changed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Changed At"
+          },
+          "next_probe_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Probe At"
+          },
+          "fallback_spent_today_usd": {
+            "type": "string",
+            "title": "Fallback Spent Today Usd"
+          },
+          "fallback_cap_usd": {
+            "type": "string",
+            "title": "Fallback Cap Usd"
+          },
+          "today": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderStats"
+            },
+            "type": "array",
+            "title": "Today"
+          },
+          "period": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderStats"
+            },
+            "type": "array",
+            "title": "Period"
+          },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "fallback_enabled",
+          "primary_state",
+          "primary_changed_at",
+          "next_probe_at",
+          "fallback_spent_today_usd",
+          "fallback_cap_usd",
+          "today",
+          "period",
+          "generated_at"
+        ],
+        "title": "AiProviders",
+        "description": "Состояние основного ИИ-шлюза и расход резерва. Подробности в docs/ai-failover-v1.md."
+      },
       "AssistantAsk": {
         "properties": {
           "question": {
@@ -7859,6 +8003,45 @@
           "label"
         ],
         "title": "ProposedReminder"
+      },
+      "ProviderStats": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          },
+          "stt_seconds": {
+            "type": "number",
+            "title": "Stt Seconds"
+          },
+          "estimated_usd": {
+            "type": "string",
+            "title": "Estimated Usd"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provider",
+          "calls",
+          "input_tokens",
+          "output_tokens",
+          "stt_seconds",
+          "estimated_usd"
+        ],
+        "title": "ProviderStats"
       },
       "Quality": {
         "properties": {
