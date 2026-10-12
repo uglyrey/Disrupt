@@ -29,7 +29,7 @@ BAD_OUTPUT_CODES = frozenset({"provider_invalid_response", "provider_incomplete_
 # Failures that show the gateway is unwell. They feed the circuit breaker.
 GATEWAY_CODES = CLEAR_CODES | AMBIGUOUS_CODES
 
-# Задание, чья последняя попытка шла на резерв (docs/ai-failover-v1.md), предохранитель основного шлюза не считает.
+# Сбои попыток на резерве (docs/ai-failover-v1.md) предохранитель основного шлюза не считает.
 FALLBACK_PROVIDER = "openai"
 
 HOUR = 3600
@@ -100,7 +100,7 @@ def breaker_open(db, settings, now):
         select(Job.last_failed_at)
         .where(
             Job.last_failed_at >= now - horizon, Job.last_error_code.in_(GATEWAY_CODES),
-            or_(Job.provider_used.is_(None), Job.provider_used != FALLBACK_PROVIDER),
+            or_(Job.last_error_provider.is_(None), Job.last_error_provider != FALLBACK_PROVIDER),
         )
         .order_by(Job.last_failed_at.desc()).limit(MAX_BREAKER_ROWS)
     ).all()

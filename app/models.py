@@ -126,6 +126,8 @@ class Job(Base):
     # для следующей: openai идти сразу к резерву, cloudru остаться на основном, пусто решает маршрутизатор.
     provider_used: Mapped[str | None] = mapped_column(String(16), nullable=True)
     next_route: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # Какой сервис дал последний сбой. Предохранитель основного шлюза не считает сбои резерва.
+    last_error_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class Note(Base):

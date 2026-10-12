@@ -19,9 +19,9 @@ from app.models import User
 from tests.conftest import ADMIN_ADDRESS, ADMIN_PASSWORD, admin_login, make_admin, register
 
 ADMIN_PAGES = ["/admin", "/static/admin.html", "/static/admin.js", "/static/admin.css", "/static/admin.auth.js",
-               "/static/admin.feedback.js", "/static/admin.tools.js"]
+               "/static/admin.feedback.js", "/static/admin.tools.js", "/static/admin.providers.js"]
 ADMIN_API = ["/admin-api/v1/me", "/admin-api/v1/summary", "/admin-api/v1/export", "/admin-api/v1/export.zip",
-             "/admin-api/v1/feedback", "/admin-api/v1/audit"]
+             "/admin-api/v1/feedback", "/admin-api/v1/audit", "/admin-api/v1/ai-providers"]
 
 
 def at(app, address, **kwargs):

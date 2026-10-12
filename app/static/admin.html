@@ -9,6 +9,7 @@
   <script src="/static/admin.js" defer></script>
   <script src="/static/admin.feedback.js" defer></script>
   <script src="/static/admin.tools.js" defer></script>
+  <script src="/static/admin.providers.js" defer></script>
 </head>
 <body>
   <header><span class="brand">beresta<span>Панель команды</span></span><div class="session"><span id="admin-user"></span><button id="logout" type="button" class="secondary" hidden>Выйти</button></div></header>
@@ -51,6 +52,7 @@
         <section class="panel" aria-labelledby="retention-title"><h2 id="retention-title">Удержание</h2><div id="retention" class="cards compact"></div><p id="retention-pending" class="muted"></p><p class="muted">D1 и D7 учитывают только созревшие когорты. Если окно наблюдения ещё не завершилось, результат не считается нулём.</p></section>
       </div>
       <section class="panel" aria-labelledby="costs-title"><h2 id="costs-title">ИИ и расходы</h2><div id="accounting-status" class="accounting-note" role="status"></div><div id="costs" class="cards compact"></div><h3 class="section-caption">Токены и аудио</h3><div id="token-costs" class="cards compact"></div><p id="cost-context" class="muted"></p><p class="muted">Суммы относятся ко всему выбранному периоду. Неполные измерения показаны с числом учтённых запросов. Расход LLM на DAU использует сумму дневных DAU.</p></section>
+      <section class="panel" aria-labelledby="providers-title"><h2 id="providers-title">ИИ-сервисы и резерв</h2><div id="providers-state" class="cards compact"></div><div id="providers-table" class="table-wrap" tabindex="0" role="region" aria-label="Вызовы по ИИ-сервисам"></div><p id="providers-note" class="muted"></p></section>
       <section class="panel" aria-labelledby="quality-title"><h2 id="quality-title">Обработка и напоминания</h2><div id="quality" class="cards compact"></div><p class="muted">Неизвестный результат отправки не означает доставку. Такая попытка не повторяется автоматически.</p></section>
       <section class="panel" aria-labelledby="usage-title"><h2 id="usage-title">Модельные операции</h2><p class="muted">Только технические идентификаторы, без текстов, аудио, имён и контактов. На странице до 50 операций; расходы выше относятся ко всему выбранному периоду.</p><div id="usage" class="table-wrap" tabindex="0" role="region" aria-label="Расходы по операциям"></div><nav class="pagination" aria-label="Страницы операций"><button id="previous" type="button" class="secondary" disabled="">Назад</button><span id="page"></span><button id="next" type="button" class="secondary" disabled="">Далее</button></nav></section>
     </div>

@@ -20,6 +20,8 @@ from app.models import FallbackSpend
 
 MICRO = 1_000_000
 ESTIMATE_VERSION = "openai-estimate-v1"
+# Меньше этого остатка в дне резерв считается исчерпанным: вызов с таким остатком всё равно не поместится.
+MIN_CALL_MICRO = 10_000
 # Если число символов во входе неизвестно, берём предел текста после распознавания речи.
 LONGEST_NOTE_CHARS = 12000
 # Запас на служебные части запроса: системное правило, дата, категории.
@@ -80,7 +82,11 @@ class FallbackBudget:
         ) or 0
 
     def exhausted(self, db, now=None) -> bool:
-        return self.spent(db, now) >= self.cap
+        return self.spent(db, now) + MIN_CALL_MICRO > self.cap
+
+    def fits(self, db, usd, now=None) -> bool:
+        """Поместится ли вызов с такой наибольшей ценой в остаток дня. Подсказка, решает reserve."""
+        return self.spent(db, now) + to_micro(usd) <= self.cap
 
     def reserve(self, usd, now=None) -> Reservation | None:
         """Занять место под вызов. None, если потолок дня не позволяет."""

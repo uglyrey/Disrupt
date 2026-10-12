@@ -53,7 +53,7 @@ from app.providers import (
     validate_result,
 )
 from app.reminders import auto_reminders
-from app.retry_policy import BAD_OUTPUT, breaker_open, classify, decide
+from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide
 from app.services import lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_fallback_speech_provider, make_speech_provider
 from app.usage import UsageRecorder
@@ -97,26 +97,30 @@ class Worker:
         self.usage = UsageRecorder(sessions, settings)
         self.guard = OutputGuard.for_runtime(settings, self.provider, fallback_provider)
 
+    def job_estimates(self, db, job):
+        """Наибольшая цена этапов следующей попытки на резерве и нужен ли ей этап распознавания речи."""
+        capture = db.get(Capture, job.capture_id)
+        needs_stt = capture.input_kind == "audio" and capture.transcript is None
+        if capture.input_kind == "audio":
+            chars = len(capture.transcript) if capture.transcript is not None else LONGEST_NOTE_CHARS
+        else:
+            chars = len(capture.original_text or "")
+        chars += PROMPT_OVERHEAD_CHARS + len(SYSTEM_PROMPT) + sum(
+            len(name) for name in db.scalars(select(Category.name).where(Category.user_id == job.user_id).limit(100))
+        )
+        estimates = {"llm": llm_max_cost(self.settings, chars, STRUCTURE_MAX_TOKENS)}
+        if needs_stt:
+            estimates["stt"] = stt_max_cost(self.settings, capture.audio_seconds, MAX_AUDIO_SECONDS)
+        return estimates, needs_stt
+
     def begin_attempt(self, job_id):
         """Выбрать, куда пойдёт эта попытка задания, и занять под неё место в дневном потолке резерва."""
         if self.router is None:
             return Attempt()
         with self.sessions() as db:
             job = db.get(Job, job_id)
-            capture = db.get(Capture, job.capture_id)
-            next_route, user_id = job.next_route, job.user_id
-            needs_stt = capture.input_kind == "audio" and capture.transcript is None
-            if capture.input_kind == "audio":
-                chars = len(capture.transcript) if capture.transcript is not None else LONGEST_NOTE_CHARS
-            else:
-                chars = len(capture.original_text or "")
-            chars += PROMPT_OVERHEAD_CHARS + len(SYSTEM_PROMPT) + sum(
-                len(name) for name in db.scalars(select(Category.name).where(Category.user_id == user_id).limit(100))
-            )
-            seconds = capture.audio_seconds
-        estimates = {"llm": llm_max_cost(self.settings, chars, STRUCTURE_MAX_TOKENS)}
-        if needs_stt:
-            estimates["stt"] = stt_max_cost(self.settings, seconds, MAX_AUDIO_SECONDS)
+            next_route = job.next_route
+            estimates, needs_stt = self.job_estimates(db, job)
         target, probe = self.router.choose(next_route)
         spend = None
         if target == FALLBACK:
@@ -229,9 +233,16 @@ class Worker:
         if expired_before is not None and (job.lease_until is None or job.lease_until >= expired_before):
             return None
         # Сбой основного шлюза при готовом резерве: следующая попытка сразу идёт на резерв, без обычной паузы.
-        failover = self.router is not None and self.router.failover_allowed(db, job, code, now)
+        failover = False
+        if self.router is not None and code in GATEWAY_CODES and job.provider_used == PRIMARY:
+            estimates, needs_stt = self.job_estimates(db, job)
+            failover = (
+                not (needs_stt and self.fallback_speech is None)
+                and self.router.failover_allowed(db, job, code, now, sum(estimates.values()))
+            )
         delay = decide(db, self.settings, job, code, retry_after, now=now, failover=failover)
         job.last_error_code, job.last_failed_at = code, now
+        job.last_error_provider = job.provider_used
         if self.router is not None:
             self.router.on_failure(db, job.provider_used, code, now)
         if delay is not None:

@@ -144,11 +144,11 @@ class ProviderRouter:
         else:
             row.probe_until = None  # Проба провалилась, следующая через интервал от её начала.
 
-    def failover_allowed(self, db, job, code, now):
-        """Нужно ли сразу повторить задание на резерве, без обычной паузы."""
+    def failover_allowed(self, db, job, code, now, estimate):
+        """Нужно ли сразу повторить задание на резерве, без обычной паузы. estimate это наибольшая цена попытки."""
         return (
             code in GATEWAY_CODES and job.provider_used == PRIMARY
-            and (job.attempts or 0) < MAX_FAILOVER_ATTEMPTS and self.fallback_open(db, now)
+            and (job.attempts or 0) < MAX_FAILOVER_ATTEMPTS and self.budget.fits(db, estimate, now)
         )
 
 

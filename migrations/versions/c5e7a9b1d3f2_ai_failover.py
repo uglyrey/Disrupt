@@ -35,10 +35,12 @@ def upgrade():
     with op.batch_alter_table("jobs") as batch:
         batch.add_column(sa.Column("provider_used", sa.String(length=16), nullable=True))
         batch.add_column(sa.Column("next_route", sa.String(length=16), nullable=True))
+        batch.add_column(sa.Column("last_error_provider", sa.String(length=16), nullable=True))
 
 
 def downgrade():
     with op.batch_alter_table("jobs") as batch:
+        batch.drop_column("last_error_provider")
         batch.drop_column("next_route")
         batch.drop_column("provider_used")
     with op.batch_alter_table("provider_usage") as batch:
