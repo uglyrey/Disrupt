@@ -258,6 +258,8 @@ def test_fallback_speech_follows_the_main_speech_switch(monkeypatch):
     assert speech.provider_label == "openai" and speech.model_name == "whisper-1"
     assert speech.endpoint == BASE + "/audio/transcriptions"
     assert make_fallback_speech_provider(replace(base, fallback_enabled=False)) is None
+    assert make_fallback_speech_provider(replace(base, fallback_stt_model="")) is None
+    assert replace(base, fallback_stt_model="").fallback_stt_model == ""
 
 
 def Settings_for_live():

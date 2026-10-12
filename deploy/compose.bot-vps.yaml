@@ -1,4 +1,4 @@
-# Standalone bot host. No core and no DB. The optional ai-relay profile holds the OpenAI key (see docs/ai-failover-v1.md).
+# Standalone bot host. No core and no DB. The optional ai-relay profile holds a provider key.
 services:
   telegram:
     build:
@@ -38,15 +38,16 @@ services:
       dockerfile: deploy/Dockerfile.ai-relay
     environment:
       AI_RELAY_TOKEN_FILE: /run/secrets/ai_relay_token
-      AI_RELAY_OPENAI_KEY_FILE: /run/secrets/openai_api_key
+      AI_RELAY_API_KEY_FILE: /run/secrets/ai_provider_api_key
+      AI_RELAY_PROVIDER: ${AI_RELAY_PROVIDER:-openai}
       AI_RELAY_CHAT_MODELS: ${AI_RELAY_CHAT_MODELS:-gpt-4o}
-      AI_RELAY_STT_MODELS: ${AI_RELAY_STT_MODELS:-whisper-1}
+      AI_RELAY_STT_MODELS: ${AI_RELAY_STT_MODELS-whisper-1}
       AI_RELAY_PER_MINUTE: ${AI_RELAY_PER_MINUTE:-60}
       AI_RELAY_HOST: 0.0.0.0
       AI_RELAY_PORT: "18100"
     secrets:
       - ai_relay_token
-      - openai_api_key
+      - ai_provider_api_key
     ports:
       - "${BOT_VPN_IP:-10.77.0.2}:18100:18100"
     read_only: true
@@ -66,8 +67,8 @@ services:
 secrets:
   ai_relay_token:
     file: ../secrets/ai_relay_token.txt
-  openai_api_key:
-    file: ../secrets/openai_api_key.txt
+  ai_provider_api_key:
+    file: ${AI_RELAY_API_KEY_HOST_FILE:-../secrets/openai_api_key.txt}
   telegram_token:
     file: ../secrets/telegram_token.txt
   telegram_service_token:

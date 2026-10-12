@@ -14,7 +14,8 @@ def split(value):
 def config_from_env(env=os.environ):
     return RelayConfig(
         token=read_secret(env["AI_RELAY_TOKEN_FILE"]),
-        api_key=read_secret(env["AI_RELAY_OPENAI_KEY_FILE"]),
+        api_key=read_secret(env.get("AI_RELAY_API_KEY_FILE", env.get("AI_RELAY_OPENAI_KEY_FILE", ""))),
+        provider=env.get("AI_RELAY_PROVIDER", "openai"),
         chat_models=split(env.get("AI_RELAY_CHAT_MODELS", "gpt-4o")),
         stt_models=split(env.get("AI_RELAY_STT_MODELS", "whisper-1")),
         per_minute=int(env.get("AI_RELAY_PER_MINUTE", "60")),

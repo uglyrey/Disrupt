@@ -4,7 +4,7 @@
   const form = $('filters'), dashboard = $('dashboard'), state = $('providers-state');
   if (!form || !dashboard || !state) return;
   const nf = new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 2});
-  const NAMES = {cloudru: 'Cloud.ru', openai: 'OpenAI, резерв', mock: 'Имитация', injected: 'Тестовый сервис'};
+  const NAMES = {cloudru: 'Cloud.ru', openai: 'Внешний ИИ, резерв', mock: 'Имитация', injected: 'Тестовый сервис'};
   const stamp = value => new Intl.DateTimeFormat('ru-RU', {timeZone: 'Europe/Moscow', dateStyle: 'short', timeStyle: 'short'}).format(new Date(value)) + ' МСК';
   const usd = value => {
     if (typeof value !== 'string' || !/^\d+(\.\d+)?$/.test(value)) throw new Error('schema');

@@ -180,7 +180,7 @@ def make_fallback_speech_provider(settings: Settings, *, transport=None):
     """
     if (
         not settings.fallback_enabled or settings.provider != "cloudru" or not settings.allow_live_requests
-        or os.environ.get("NOTES_STT_ENABLED", "false") != "true"
+        or os.environ.get("NOTES_STT_ENABLED", "false") != "true" or not settings.fallback_stt_model
     ):
         return None
     if not settings.fallback_token:

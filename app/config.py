@@ -237,8 +237,8 @@ class Settings:
             # Токен нужен только воркеру. Веб-процесс его не получает, поэтому пустой токен допустим.
             if self.fallback_token and len(self.fallback_token) < 32:
                 raise ValueError("Fallback relay token must contain at least 32 characters")
-            if not self.fallback_model or not self.fallback_stt_model:
-                raise ValueError("Fallback needs a chat model and a speech model")
+            if not self.fallback_model:
+                raise ValueError("Fallback needs a chat model")
         if min(
             self.fallback_daily_usd, self.fallback_price_input_per_m, self.fallback_price_output_per_m,
             self.fallback_price_stt_per_minute,

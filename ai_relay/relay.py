@@ -1,8 +1,8 @@
-"""Посредник к OpenAI. Пропускает только два адреса и только с общим секретом.
+"""Посредник к фиксированному AI API. Пропускает только два маршрута и общий секрет.
 
-Ключ OpenAI лежит в файле на этом сервере. Ядро его не видит, оно знает лишь общий токен посредника.
+Ключ поставщика лежит в файле на этом сервере. Ядро его не видит, оно знает лишь общий токен посредника.
 Тела запросов и ответов нигде не пишутся, в журнал идут путь, метод, задержка и название модели.
-Ключ уходит только на фиксированный адрес OpenAI из константы UPSTREAM.
+Ключ уходит только на фиксированный адрес из UPSTREAMS.
 """
 
 import hmac
@@ -17,7 +17,10 @@ from pathlib import Path
 
 import httpx
 
-UPSTREAM = "https://api.openai.com/v1"
+UPSTREAMS = {
+    "openai": "https://api.openai.com/v1",
+    "purpleapi": "https://purpleapi.lol/v1",
+}
 CHAT_PATH = "/v1/chat/completions"
 AUDIO_PATH = "/v1/audio/transcriptions"
 HEALTH_PATH = "/health"
@@ -32,7 +35,7 @@ CHAT_FIELDS = frozenset({
     "n", "top_p", "seed", "stop",
 })
 AUDIO_FIELDS = frozenset({"model", "file", "language", "prompt", "response_format", "temperature"})
-# Из ответа OpenAI уходит в ядро только это.
+# Из ответа поставщика в ядро уходят только эти заголовки.
 PASS_HEADERS = ("content-type", "retry-after")
 BOUNDARY = re.compile(r"^[A-Za-z0-9'()+_,./:=?-]{1,70}$")
 FIELD_NAME = re.compile(r'name="([^"\r\n]{1,64})"')
@@ -50,6 +53,7 @@ def read_secret(path, *, maximum=4096):
 class RelayConfig:
     token: str = field(repr=False)
     api_key: str = field(repr=False)
+    provider: str = "openai"
     chat_models: frozenset = frozenset({"gpt-4o"})
     stt_models: frozenset = frozenset({"whisper-1"})
     per_minute: int = 60
@@ -59,14 +63,16 @@ class RelayConfig:
     read_timeout: float = 120.0
 
     def __post_init__(self):
+        if self.provider not in UPSTREAMS:
+            raise ValueError("Неизвестный поставщик посредника")
         if len(self.token) < MIN_TOKEN_LENGTH:
             raise ValueError("Токен посредника короче 32 символов")
         if not self.api_key.strip():
-            raise ValueError("Не задан ключ OpenAI")
+            raise ValueError("Не задан ключ поставщика")
         if self.token == self.api_key:
-            raise ValueError("Токен посредника не должен совпадать с ключом OpenAI")
-        if not self.chat_models or not self.stt_models:
-            raise ValueError("Нужна хотя бы одна модель для текста и для речи")
+            raise ValueError("Токен посредника не должен совпадать с ключом поставщика")
+        if not self.chat_models:
+            raise ValueError("Нужна хотя бы одна текстовая модель")
         if self.per_minute < 1 or self.max_concurrent < 1 or not 1 <= self.max_tokens_cap <= 32000:
             raise ValueError("Лимиты посредника заданы неверно")
 
@@ -162,6 +168,8 @@ class Relay:
             if not self.allowed_now():
                 return error_reply(429, "relay_rate_limit", headers=[("Retry-After", "30")])
             chat = path == CHAT_PATH
+            if not chat and not self.config.stt_models:
+                return error_reply(404, "not_found")
             request, model = self.read_request(headers, rfile, chat)
             if not self._busy.acquire(blocking=False):
                 return error_reply(503, "relay_busy", headers=[("Retry-After", "5")])
@@ -239,11 +247,16 @@ class Relay:
         if "stream" in data and not isinstance(data["stream"], bool):
             raise Refusal(400, "bad_fields")
         # Дальше уходит то, что мы проверили, а не исходные байты. Повтор ключей в JSON ничего не обходит.
+        # Sol uses the completion-token limit, which includes reasoning tokens. The core
+        # still sends max_tokens; translate only after enforcing the relay's hard cap.
+        if model.startswith("gpt-6") and model.endswith("-sol"):
+            data["max_completion_tokens"] = data.pop("max_tokens")
+            data.pop("temperature", None)
         return (json.dumps(data, ensure_ascii=False).encode(), "application/json", data.get("stream") is True), model
 
     def forward(self, chat, request):
         content, content_type, stream = request
-        url = UPSTREAM + (CHAT_PATH if chat else AUDIO_PATH)[len("/v1"):]
+        url = UPSTREAMS[self.config.provider] + (CHAT_PATH if chat else AUDIO_PATH)[len("/v1"):]
         # Заголовки собираются с нуля. Из запроса ядра не уходит ничего, в том числе его Authorization.
         outgoing = {
             "Authorization": "Bearer " + self.config.api_key, "Content-Type": content_type,

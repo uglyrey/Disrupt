@@ -92,6 +92,8 @@ def test_config_needs_a_long_distinct_token_and_a_key():
         RelayConfig(token=TOKEN, api_key=OPENAI_KEY, chat_models=frozenset())
     assert OPENAI_KEY not in repr(RelayConfig(token=TOKEN, api_key=OPENAI_KEY))
     assert TOKEN not in repr(RelayConfig(token=TOKEN, api_key=OPENAI_KEY))
+    with pytest.raises(ValueError):
+        RelayConfig(token=TOKEN, api_key=OPENAI_KEY, provider="https://example.org/v1")
 
 
 def test_config_is_read_from_secret_files(tmp_path):
@@ -103,6 +105,21 @@ def test_config_is_read_from_secret_files(tmp_path):
     })
     assert config.token == TOKEN and config.api_key == OPENAI_KEY
     assert config.chat_models == {"gpt-4o", "gpt-4o-mini"} and config.stt_models == {"whisper-1"}
+
+
+def test_purpleapi_config_uses_generic_key_file_and_no_speech_models(tmp_path):
+    (tmp_path / "token").write_text(TOKEN, encoding="utf-8")
+    (tmp_path / "key").write_text(OPENAI_KEY, encoding="utf-8")
+    config = config_from_env({
+        "AI_RELAY_TOKEN_FILE": str(tmp_path / "token"),
+        "AI_RELAY_API_KEY_FILE": str(tmp_path / "key"),
+        "AI_RELAY_PROVIDER": "purpleapi",
+        "AI_RELAY_CHAT_MODELS": "gpt-6.1-sol",
+        "AI_RELAY_STT_MODELS": "",
+    })
+    assert config.provider == "purpleapi"
+    assert config.chat_models == {"gpt-6.1-sol"}
+    assert not config.stt_models
 
 
 # Адреса, методы и токен
@@ -164,6 +181,30 @@ def test_the_key_is_added_and_nothing_from_the_client_is_forwarded():
     for name in ("cookie", "x-forwarded-for", "proxy-authorization", "keep-alive"):
         assert name not in sent.headers
     assert sent.method == "POST" and len(upstream.requests) == 1
+
+
+def test_purpleapi_sol_request_uses_fixed_upstream_and_completion_token_cap():
+    relay, upstream = make_relay(
+        provider="purpleapi", chat_models=frozenset({"gpt-6.1-sol"}), stt_models=frozenset()
+    )
+    payload = {**CHAT, "model": "gpt-6.1-sol", "temperature": 0.2}
+    assert post(relay, "/v1/chat/completions", payload).status == 200
+    sent = upstream.requests[0]
+    assert str(sent.url) == "https://purpleapi.lol/v1/chat/completions"
+    forwarded = json.loads(sent.content)
+    assert forwarded["max_completion_tokens"] == 100
+    assert "max_tokens" not in forwarded and "temperature" not in forwarded
+    assert sent.headers["authorization"] == "Bearer " + OPENAI_KEY
+    assert audio(relay, [("model", "whisper-1"), ("file", b"audio")]).status == 404
+    assert len(upstream.requests) == 1
+
+
+def test_purpleapi_sol_cannot_bypass_completion_token_cap():
+    relay, upstream = make_relay(
+        provider="purpleapi", chat_models=frozenset({"gpt-6.1-sol"}), stt_models=frozenset()
+    )
+    assert post(relay, "/v1/chat/completions", {**CHAT, "model": "gpt-6.1-sol", "max_tokens": 8001}).status == 400
+    assert upstream.requests == []
 
 
 def test_the_relay_token_never_reaches_the_client_answer_and_the_key_never_does_either():
