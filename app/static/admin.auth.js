@@ -1,6 +1,7 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
+  const API = document.body.dataset.review === 'true' ? '/review-api/v1' : '/admin-api/v1';
   const ready = [], gone = [];
   const session = {
     csrf: '',
@@ -37,12 +38,12 @@
   }
   async function check() {
     try {
-      const response = await fetch('/admin-api/v1/me', options({headers: {Accept: 'application/json'}}));
+      const response = await fetch(API + '/me', options({headers: {Accept: 'application/json'}}));
       if (response.status === 401) return showLogin('');
       if (!response.ok) throw new Error('status');
       showApp(await response.json());
     } catch (error) {
-      showLogin('Не удалось связаться с сервером. Проверьте, что вы в приватной сети.');
+      showLogin(document.body.dataset.review === 'true' ? 'Не удалось связаться с сервером. Повторите попытку.' : 'Не удалось связаться с сервером. Проверьте, что вы в приватной сети.');
     }
   }
   $('login-form').addEventListener('submit', async event => {
@@ -50,7 +51,7 @@
     const body = {username: $('admin-username').value.trim(), password: $('admin-password').value, totp: $('admin-code').value.trim()};
     $('login-submit').disabled = true; message('');
     try {
-      const response = await fetch('/admin-api/v1/login', options({
+      const response = await fetch(API + '/login', options({
         method: 'POST', headers: {'Content-Type': 'application/json', Accept: 'application/json'}, body: JSON.stringify(body),
       }));
       if (response.status === 429) { message('Слишком много попыток. Подождите минуту.'); return; }
@@ -68,7 +69,7 @@
     const csrf = session.csrf;
     $('logout').disabled = true;
     try {
-      await fetch('/admin-api/v1/logout', options({method: 'POST', headers: {'X-CSRF-Token': csrf}}));
+      await fetch(API + '/logout', options({method: 'POST', headers: {'X-CSRF-Token': csrf}}));
     } catch (error) { /* The server session also ends by itself. */ }
     $('logout').disabled = false;
     showLogin('Вы вышли.');

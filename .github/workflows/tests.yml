@@ -48,6 +48,9 @@ jobs:
       - run: node tests/web_admin.cjs
         env:
           NODE_PATH: ${{ runner.temp }}/beresta-web-tests/node_modules
+      - run: node tests/web_review.cjs
+        env:
+          NODE_PATH: ${{ runner.temp }}/beresta-web-tests/node_modules
       - run: node tests/web_audio.cjs
         env:
           NODE_PATH: ${{ runner.temp }}/beresta-web-tests/node_modules

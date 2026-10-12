@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ru"><head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Проверка метрик · beresta</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/review/assets/metrics.css">
+  <script src="/review/assets/auth.js" defer></script>
+  <script src="/review/assets/metrics.js" defer></script>
+  <script src="/review/assets/navigation.js" defer></script>
+  <script src="/review/assets/tools.js" defer></script>
+</head>
+<body data-review="true">
+  <header><span class="brand">beresta<span>Проверка метрик</span></span><div class="session"><span id="admin-user"></span><button id="logout" type="button" class="secondary" hidden>Выйти</button></div></header>
+  <main>
+    <p class="network-note">Доступ наблюдателя · только чтение</p>
+    <section id="login-view" hidden>
+      <h1>Вход для экспертов</h1>
+      <p class="intro">Нужны логин наблюдателя, пароль и шестизначный код из приложения-аутентификатора. Обычный аккаунт beresta здесь не подходит.</p>
+      <form id="login-form" class="panel filters" autocomplete="on">
+        <label>Логин<input id="admin-username" name="username" autocomplete="username" maxlength="64" required></label>
+        <label>Пароль<input id="admin-password" name="password" type="password" autocomplete="current-password" maxlength="128" required></label>
+        <label>Код из приложения<input id="admin-code" name="totp" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="one-time-code" required></label>
+        <button id="login-submit" type="submit">Войти</button>
+      </form>
+      <p id="login-message" role="alert" aria-live="assertive" hidden></p>
+    </section>
+    <div id="admin-app" class="admin-shell" hidden>
+    <nav class="admin-sections" aria-label="Разделы проверки метрик"><span class="nav-caption">Разделы проверки</span><button id="show-statistics" type="button" data-view="statistics" aria-pressed="true">Статистика</button><button id="show-archive" type="button" data-view="archive" class="secondary" aria-pressed="false">Архив метрик</button><p class="nav-note">Для проверки метрик.<br>Данные пользователей защищены.</p></nav>
+    <div class="admin-content">
+    <div id="statistics-view">
+    <h1>Как используют beresta</h1>
+    <p class="network-note">Методика конкурсного учёта уточняется. Показатели активации и целевого сценария пока рассчитаны по прежним правилам. Исторические просмотры не восстанавливаются.</p>
+    <p class="intro">Пользователи, целевые действия и расходы. Дни считаются по Москве. Тестовые аккаунты и фоновая активность исключаются сервером.</p>
+    <form id="filters" class="panel filters">
+      <div class="period-shortcuts" aria-label="Быстрый выбор периода"><button type="button" class="secondary" data-period="today">Сегодня</button><button type="button" class="secondary" data-period="7">7 дней</button><button type="button" class="secondary" data-period="30">30 дней</button><span>Сегодняшние показатели предварительные</span></div>
+      <label>С даты<input id="from" name="from" type="date" required=""></label>
+      <label>По дату включительно<input id="to" name="to" type="date" required=""></label>
+      <label>Канал<select id="channel" name="channel"><option value="all">Все каналы</option><option value="web">Веб</option><option value="telegram">Telegram</option></select></label>
+      <label>Источник<input id="source" name="source" maxlength="100" value="all" aria-describedby="source-help"></label>
+      <button id="apply" type="submit">Показать</button>
+      <button id="export" type="button" class="secondary" disabled="">Скачать CSV</button>
+      <small id="source-help">Источник — код привлечения; all означает все источники. CSV содержит агрегаты, без личных записей и списка операций.</small>
+    </form>
+    <p id="status" role="status" aria-live="polite">Загружаем статистику…</p>
+    <div id="dashboard" hidden="" aria-busy="false">
+      <section class="panel" aria-labelledby="budget-title" hidden><h2 id="budget-title">Бюджет ключа</h2><div id="budget-cards" class="cards compact"></div><p id="budget-status" class="muted" role="status"></p></section>
+      <p id="snapshot" class="muted"></p>
+      <section aria-labelledby="users-title"><h2 id="users-title">Пользователи и активация</h2><div id="cards" class="cards"></div><p id="activation-pending" class="muted"></p></section>
+      <section class="panel" aria-labelledby="daily-title"><h2 id="daily-title">По дням</h2><div id="daily" class="table-wrap" tabindex="0" role="region" aria-label="Показатели по дням"></div></section>
+      <div class="columns">
+        <section class="panel" aria-labelledby="funnel-title"><h2 id="funnel-title">Воронка новых пользователей</h2><p class="muted">Доли и порядок событий рассчитаны сервером.</p><div id="funnel" class="table-wrap" tabindex="0" role="region" aria-label="Воронка"></div></section>
+        <section class="panel" aria-labelledby="retention-title"><h2 id="retention-title">Удержание</h2><div id="retention" class="cards compact"></div><p id="retention-pending" class="muted"></p><p class="muted">D1 и D7 учитывают только созревшие когорты. Если окно наблюдения ещё не завершилось, результат не считается нулём.</p></section>
+      </div>
+      <section class="panel" aria-labelledby="costs-title"><h2 id="costs-title">ИИ и расходы</h2><div id="accounting-status" class="accounting-note" role="status"></div><div id="costs" class="cards compact"></div><h3 class="section-caption">Токены и аудио</h3><div id="token-costs" class="cards compact"></div><p id="cost-context" class="muted"></p><p class="muted">Суммы относятся ко всему выбранному периоду. Неполные измерения показаны с числом учтённых запросов. Расход LLM на DAU использует сумму дневных DAU.</p></section>
+      <section class="panel" aria-labelledby="quality-title"><h2 id="quality-title">Обработка и напоминания</h2><div id="quality" class="cards compact"></div><p class="muted">Неизвестный результат отправки не означает доставку. Такая попытка не повторяется автоматически.</p></section>
+      <section class="panel" aria-labelledby="usage-title"><h2 id="usage-title">Модельные операции</h2><p class="muted">Только технические идентификаторы, без текстов, аудио, имён и контактов. На странице до 50 операций; расходы выше относятся ко всему выбранному периоду.</p><div id="usage" class="table-wrap" tabindex="0" role="region" aria-label="Расходы по операциям"></div><nav class="pagination" aria-label="Страницы операций"><button id="previous" type="button" class="secondary" disabled="">Назад</button><span id="page"></span><button id="next" type="button" class="secondary" disabled="">Далее</button></nav></section>
+    </div>
+    <noscript>Для просмотра статистики включите JavaScript.</noscript>
+  </div>
+    <section id="archive-view" hidden>
+      <h1>Архив метрик для организаторов</h1>
+      <p class="intro">ZIP с таблицами по дням, пользователям, событиям, вызовам ИИ и ошибкам. Внутри README с определениями. Имена, тексты записей и контакты в архив не попадают, пользователи заменены псевдонимами. Тестовые аккаунты исключены. Период не длиннее 92 дней, дни по Москве.</p>
+      <form id="archive-form" class="panel filters">
+        <label>С даты<input id="archive-from" name="from" type="date" required></label>
+        <label>По дату включительно<input id="archive-to" name="to" type="date" required></label>
+        <button id="archive-export" type="submit">Скачать архив метрик</button>
+      </form>
+      <p id="archive-status" role="status" aria-live="polite"></p>
+    </section>
+    
+    </div></div></main>
+</body></html>

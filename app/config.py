@@ -91,6 +91,7 @@ class Settings:
     internal_api_token: str = field(default="", repr=False)
     admin_allowed_networks: str = DEFAULT_ADMIN_NETWORKS
     admin_cookie_secure: bool = True
+    review_enabled: bool = False
     # Шифрование содержимого на диске. Подробности в docs/encryption-v1.md. Файлы ключей читает app.crypto.
     data_encryption: str = "off"
     data_key_file: str = ""
@@ -110,6 +111,8 @@ class Settings:
     mail_from: str = ""
 
     def __post_init__(self):
+        if self.review_enabled and (not self.public_origin.startswith("https://") or len(self.analytics_pseudonym_key) < 32):
+            raise ValueError("Observer access requires HTTPS and a stable analytics pseudonym key")
         if self.budget_reserve_rub < 0 or self.budget_attempt_reserve_rub <= 0:
             raise ValueError("Budget reserve must not be negative; attempt reserve must be positive")
         parse_networks(self.admin_allowed_networks)
@@ -215,6 +218,7 @@ class Settings:
             secure_cookies=flag("NOTES_SECURE_COOKIES", False),
             admin_allowed_networks=os.environ.get("NOTES_ADMIN_ALLOWED_NETWORKS", DEFAULT_ADMIN_NETWORKS),
             admin_cookie_secure=flag("NOTES_ADMIN_COOKIE_SECURE", True),
+            review_enabled=flag("NOTES_REVIEW_ENABLED", False),
             data_encryption=os.environ.get("NOTES_DATA_ENCRYPTION", cls.data_encryption),
             data_key_file=os.environ.get("NOTES_DATA_KEY_FILE", ""),
             data_old_key_files=os.environ.get("NOTES_DATA_OLD_KEY_FILES", ""),

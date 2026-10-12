@@ -38,6 +38,7 @@ from app.routes.brain import build_router as brain_router
 from app.routes.feedback import build_router as feedback_router
 from app.routes.internal import build_router as internal_router
 from app.routes.reminders import build_router as reminders_router
+from app.routes.review import build_router as review_router
 from app.routes.structure import build_router as structure_router
 from app.routes.transcripts import build_router as transcripts_router
 from app.schemas import (
@@ -285,6 +286,7 @@ def create_app(
     app.include_router(account_router(database))
     app.include_router(feedback_router(database))
     app.include_router(admin_router(database, STATIC, settings))
+    app.include_router(review_router(database, STATIC, settings))
     app.include_router(internal_router(database, settings))
     app.include_router(structure_router(database))
     app.include_router(reminders_router(database))
