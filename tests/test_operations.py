@@ -100,7 +100,7 @@ def test_backup_restarts_original_writers_after_dump_failure(tmp_path, monkeypat
     tmp_path.chmod(0o700)
     args = SimpleNamespace(maintenance=True, project="test", compose=["compose.yaml"],
                            env_file=None, telegram=False, destination=tmp_path, recipient="public")
-    snapshots = iter([{"db": {"State": "running"}, "api": {"State": "running"}, "worker": {"State": "exited"}}, {}])
+    snapshots = iter([{"db": {"State": "running"}, "api": {"State": "running", "ID": "a" * 12}, "worker": {"State": "exited"}}, {}])
     monkeypatch.setattr(ops, "states", lambda _: next(snapshots))
     calls = []
     def run(command, **kwargs):
@@ -111,7 +111,8 @@ def test_backup_restarts_original_writers_after_dump_failure(tmp_path, monkeypat
     monkeypatch.setattr(ops, "run", run)
     with pytest.raises(ops.Failure, match="dump_failed"):
         ops.backup(args)
-    assert calls[-1][-2:] == ["start", "api"]
+    assert calls[-1] == ["docker", "start", "a" * 12]
+    assert not any(command[0:2] == ["docker", "compose"] and "start" in command for command in calls)
     assert not (tmp_path / "latest.json").exists()
     assert not list(tmp_path.glob(".working-*"))
 
@@ -128,6 +129,61 @@ def test_manifest_hash_mismatch_rejected(tmp_path):
     output.mkdir()
     with pytest.raises(ops.Failure, match="checksum"):
         ops.unpack_bundle(bundle, output)
+
+
+@pytest.mark.parametrize("identifier", ["", "api", "-a", "g" * 12])
+def test_backup_refuses_missing_or_invalid_writer_id_before_stopping(tmp_path, monkeypatch, identifier):
+    tmp_path.chmod(0o700)
+    args = SimpleNamespace(maintenance=True, project="test", compose=["compose.yaml"],
+                           env_file=None, telegram=False, destination=tmp_path, recipient="public")
+    monkeypatch.setattr(ops, "states", lambda _: {
+        "db": {"State": "running"}, "api": {"State": "running", "ID": identifier},
+    })
+    calls = []
+    monkeypatch.setattr(ops, "run", lambda command, **kwargs: calls.append(command))
+    with pytest.raises(ops.Failure, match="writer_container_id_missing_or_invalid"):
+        ops.backup(args)
+    assert calls == []
+    assert not list(tmp_path.glob(".working-*"))
+
+
+@pytest.mark.parametrize("restart_code", [0, 1])
+def test_backup_snapshot_survives_restart_failure_without_starting_dependencies(tmp_path, monkeypatch, capsys, restart_code):
+    tmp_path.chmod(0o700)
+    args = SimpleNamespace(maintenance=True, project="test", compose=["compose.yaml"],
+                           env_file=None, telegram=False, destination=tmp_path, recipient="public")
+    snapshots = iter([{
+        "db": {"State": "running"},
+        "scheduler": {"State": "running", "ID": "b" * 12},
+        "api": {"State": "running", "ID": "a" * 12},
+        "worker": {"State": "exited", "ID": "c" * 12},
+        "migrate": {"State": "exited", "ID": "d" * 12},
+    }, {}])
+    monkeypatch.setattr(ops, "states", lambda _: next(snapshots))
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if "pg_dump" in command:
+            kwargs["output"].write(b"synthetic dump")
+        elif "tar" in command:
+            with tarfile.open(fileobj=kwargs["output"], mode="w"):
+                pass
+        elif command[0] == "age" and "-o" in command:
+            Path(command[command.index("-o") + 1]).write_bytes(b"synthetic encrypted backup")
+        return subprocess.CompletedProcess(command, restart_code if command[:2] == ["docker", "start"] else 0)
+
+    monkeypatch.setattr(ops, "run", run)
+    if restart_code:
+        with pytest.raises(ops.Failure, match="backup_saved_but_service_restart_failed"):
+            ops.backup(args)
+    else:
+        ops.backup(args)
+    assert [command for command in calls if "start" in command] == [["docker", "start", "b" * 12, "a" * 12]]
+    metadata = json.loads((tmp_path / "latest.json").read_text())
+    assert (tmp_path / metadata["file"]).is_file()
+    assert metadata["sha256"] == ops.digest(tmp_path / metadata["file"])
+    assert json.loads(capsys.readouterr().out)["writers_restarted"] is (restart_code == 0)
 
 
 def test_backup_cannot_silently_omit_telegram_state(tmp_path, monkeypatch):
@@ -235,7 +291,7 @@ def test_remote_archive_failure_restarts_both_sides_without_partial_backup(tmp_p
             target.write(b"partial state archive")
             raise ops.Failure("remote_disconnected")
         def restart(self): events.append("remote_start")
-    snapshots = iter([{"db": {"State": "running"}, "api": {"State": "running"}}, {}])
+    snapshots = iter([{"db": {"State": "running"}, "api": {"State": "running", "ID": "a" * 12}}, {}])
     monkeypatch.setattr(ops, "RemoteBot", Remote)
     monkeypatch.setattr(ops, "states", lambda _: next(snapshots))
     def run(command, **kwargs):
