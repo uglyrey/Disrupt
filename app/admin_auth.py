@@ -98,8 +98,8 @@ class AdminContext:
     token: str
 
 
-def authenticate(request: Request, db, *, write=False) -> AdminContext:
-    token = request.cookies.get(COOKIE_NAME, "")
+def authenticate(request: Request, db, *, write=False, role="owner", cookie=COOKIE_NAME) -> AdminContext:
+    token = request.cookies.get(cookie, "")
     if not token or len(token) > 200:
         raise HTTPException(401, UNAUTHENTICATED)
     now = time.time()
@@ -107,8 +107,13 @@ def authenticate(request: Request, db, *, write=False) -> AdminContext:
     if session is None:
         raise HTTPException(401, UNAUTHENTICATED)
     admin = db.get(AdminAccount, session.admin_id)
+    if admin is not None and admin.role != role:
+        # A cookie presented at the wrong portal must not invalidate its legitimate session.
+        raise HTTPException(401, UNAUTHENTICATED)
     if (session.expires_at <= now or session.last_seen_at + IDLE_SECONDS <= now
-            or admin is None or admin.disabled or not admin.totp_enabled):
+            or admin is None or admin.disabled or not admin.totp_enabled
+            or role == "observer" and admin.access_expires_at is None
+            or admin.role != role or admin.access_expires_at is not None and admin.access_expires_at <= now):
         db.delete(session)
         db.commit()
         raise HTTPException(401, UNAUTHENTICATED)
@@ -142,12 +147,12 @@ def refuse(db, admin, ip, reason, *, count=True, now=None):
     raise HTTPException(401, GENERIC_FAILURE)
 
 
-def sign_in(db, *, username, password, code, ip):
+def sign_in(db, *, username, password, code, ip, role="owner"):
     """Check username, password and authenticator code. Returns (token, csrf, admin) or raises 401."""
     now = time.time()
-    throttle(db, "admin-login:" + ip, limit=10)
+    throttle(db, ("admin-login:" if role == "owner" else "observer-login:") + ip, limit=10)
     username = username.strip().lower()
-    admin = db.scalar(select(AdminAccount).where(AdminAccount.username == username)) if 0 < len(username) <= 64 else None
+    admin = db.scalar(select(AdminAccount).where(AdminAccount.username == username, AdminAccount.role == role)) if 0 < len(username) <= 64 else None
     if admin is None:
         verify_password(password, DUMMY_PASSWORD_HASH)  # Same work as for a real account.
         refuse(db, None, ip, "unknown_account", now=now)
@@ -156,7 +161,9 @@ def sign_in(db, *, username, password, code, ip):
         refuse(db, admin, ip, "locked", count=False, now=now)
     password_ok = verify_password(password, admin.password_hash)
     step = totp.verify(admin.totp_secret, code, now=now, last_step=admin.last_totp_step)
-    usable = admin.totp_enabled and not admin.disabled
+    usable = (admin.totp_enabled and not admin.disabled
+              and (role != "observer" or admin.access_expires_at is not None)
+              and (admin.access_expires_at is None or admin.access_expires_at > now))
     if not usable:
         refuse(db, admin, ip, "disabled", count=False, now=now)
     if not (password_ok and step is not None):
@@ -174,7 +181,8 @@ def sign_in(db, *, username, password, code, ip):
     token = secrets.token_urlsafe(32)
     csrf = csrf_for(token)
     db.add(AdminSession(token_hash=hash_token(token), admin_id=admin.id, created_at=now,
-                        expires_at=now + SESSION_SECONDS, last_seen_at=now, csrf_hash=hash_token(csrf), ip=ip))
+                        expires_at=min(now + SESSION_SECONDS, admin.access_expires_at or now + SESSION_SECONDS),
+                        last_seen_at=now, csrf_hash=hash_token(csrf), ip=ip))
     audit(db, "login_success", admin_id=admin.id, ip=ip)
     db.commit()
     return token, csrf, admin

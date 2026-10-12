@@ -100,6 +100,7 @@ services:
     environment:
       <<: *backend-environment
       NOTES_ANALYTICS_PSEUDONYM_KEY_FILE: /run/secrets/analytics_pseudonym_key
+      NOTES_REVIEW_ENABLED: ${NOTES_REVIEW_ENABLED:-false}
     secrets:
       - postgres_password
       - analytics_pseudonym_key

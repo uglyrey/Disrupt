@@ -1,6 +1,7 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
+  const API = document.body.dataset.review === 'true' ? '/review-api/v1' : '/admin-api/v1';
   const nf = new Intl.NumberFormat('ru-RU', {maximumFractionDigits: 2});
   const moscowDay = date => new Intl.DateTimeFormat('sv-SE', {timeZone: 'Europe/Moscow'}).format(date);
   const shiftDay = (day, delta) => new Date(Date.parse(day + 'T12:00:00Z') + delta * 86400000).toISOString().slice(0, 10);
@@ -177,7 +178,7 @@
     try {
       slice = slice || filters();
       const params = new URLSearchParams({...slice, usage_limit:'50',usage_offset:String(targetOffset)});
-      const response = await fetch('/admin-api/v1/summary?' + params, {credentials:'same-origin',cache:'no-store',redirect:'error',signal:active.signal,headers:{Accept:'application/json'}});
+      const response = await fetch(API + '/summary?' + params, {credentials:'same-origin',cache:'no-store',redirect:'error',signal:active.signal,headers:{Accept:'application/json'}});
       if (!response.ok) throw {status:response.status};
       const data = await response.json();
       if (serial !== generation) return;
@@ -213,7 +214,7 @@
     exporting = true; $('export').disabled = true;
     const serial = generation, slice = {...applied}, abort = new AbortController(), timer = setTimeout(() => abort.abort(), 15000);
     try {
-      const response = await fetch('/admin-api/v1/export?' + new URLSearchParams(slice), {credentials:'same-origin',cache:'no-store',redirect:'error',signal:abort.signal,headers:{Accept:'text/csv'}});
+      const response = await fetch(API + '/export?' + new URLSearchParams(slice), {credentials:'same-origin',cache:'no-store',redirect:'error',signal:abort.signal,headers:{Accept:'text/csv'}});
       if (!response.ok) throw {status:response.status};
       if (!(response.headers.get('Content-Type') || '').toLowerCase().startsWith('text/csv')) throw new Error('schema');
       const blob = await response.blob();

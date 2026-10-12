@@ -6,6 +6,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Float,
     ForeignKey,
     Index,
@@ -26,9 +27,12 @@ def new_id():
 
 class AdminAccount(Base):
     __tablename__ = "admin_accounts"
-    __table_args__ = (UniqueConstraint("username", name="uq_admin_accounts_username"),)
+    __table_args__ = (UniqueConstraint("username", name="uq_admin_accounts_username"),
+                     CheckConstraint("role IN ('owner', 'observer')", name="ck_admin_accounts_role"))
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     username: Mapped[str] = mapped_column(String(64))
+    role: Mapped[str] = mapped_column(String(16), default="owner", server_default="owner")
+    access_expires_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(256))
     # Shown once by the CLI and never returned by any API.
     totp_secret: Mapped[str] = mapped_column(EncryptedText("admin_accounts.totp_secret"))

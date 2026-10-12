@@ -1,6 +1,8 @@
 'use strict';
 (() => {
   const $ = id => document.getElementById(id);
+  const review = document.body.dataset.review === 'true';
+  const API = review ? '/review-api/v1' : '/admin-api/v1';
   const moscowDay = date => new Intl.DateTimeFormat('sv-SE', {timeZone: 'Europe/Moscow'}).format(date);
   const shiftDay = (day, delta) => new Date(Date.parse(day + 'T12:00:00Z') + delta * 86400000).toISOString().slice(0, 10);
   const auth = () => window.adminSession || {csrf: '', expired() {}};
@@ -36,7 +38,7 @@
     try {
       const period = archivePeriod();
       archiveStatus('Собираем архив…');
-      const response = await fetch('/admin-api/v1/export.zip?' + new URLSearchParams(period), {
+      const response = await fetch(API + '/export.zip?' + new URLSearchParams(period), {
         credentials: 'same-origin', cache: 'no-store', redirect: 'error', signal: abort.signal, headers: {Accept: 'application/zip'},
       });
       if (!response.ok) {
@@ -70,6 +72,7 @@
     return Object.entries(value).map(([name, item]) => `${name}: ${item}`).join(', ');
   };
   async function loadAudit() {
+    if (review) return;
     const serial = ++auditSerial;
     $('audit-list').replaceChildren(); auditStatus('Загружаем журнал…');
     try {
@@ -96,9 +99,9 @@
       auditStatus('Не удалось загрузить журнал.');
     }
   }
-  $('audit-refresh').addEventListener('click', loadAudit);
+  if ($('audit-refresh') && !review) $('audit-refresh').addEventListener('click', loadAudit);
   document.addEventListener('admin:view', event => { if (event.detail === 'audit') loadAudit(); });
   if (window.adminSession) {
-    window.adminSession.onLogout(() => { auditSerial++; archiveSerial++; $('audit-list').replaceChildren(); auditStatus(''); archiveStatus(''); });
+    window.adminSession.onLogout(() => { auditSerial++; archiveSerial++; if (!review) { $('audit-list').replaceChildren(); auditStatus(''); } archiveStatus(''); });
   }
 })();

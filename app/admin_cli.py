@@ -11,6 +11,7 @@ import argparse
 import getpass
 import re
 import sys
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, select
@@ -57,10 +58,20 @@ def create(db, args, parser):
     if len(password) < MIN_PASSWORD or len(password) > 128 or password.lower() == username:
         parser.error(f"Пароль должен быть от {MIN_PASSWORD} до 128 символов")
     secret = totp.new_secret()
-    admin = AdminAccount(username=username, password_hash=hash_password(password), totp_secret=secret)
+    role = getattr(args, "role", "owner")
+    expires = time.time() + 14 * 86400 if role == "observer" else None
+    if getattr(args, "expires", None):
+        try:
+            expires = datetime.fromisoformat(args.expires.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            parser.error("Срок доступа в формате ISO 8601 с часовым поясом")
+        if datetime.fromisoformat(args.expires.replace("Z", "+00:00")).tzinfo is None or expires <= time.time():
+            parser.error("Нужен будущий срок доступа с часовым поясом")
+    admin = AdminAccount(username=username, role=role, access_expires_at=expires,
+                         password_hash=hash_password(password), totp_secret=secret)
     db.add(admin)
     db.flush()
-    note(db, "admin_created", target=username)
+    note(db, "admin_created", target=username, **({"role": role, "expires_at": expires} if role == "observer" else {}))
     db.commit()
     show_secret(admin, secret)
 
@@ -118,7 +129,9 @@ def listing(db, args, parser):
         state = "отключён" if admin.disabled else "активен" if admin.totp_enabled else "ждёт подтверждения кода"
         last = (datetime.fromtimestamp(admin.last_login_at, timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                 if admin.last_login_at else "не входил")
-        print(f"{admin.username}\t{state}\tпоследний вход {last}")
+        deadline = (datetime.fromtimestamp(admin.access_expires_at, timezone.utc).isoformat()
+                    if admin.access_expires_at is not None else "без срока")
+        print(f"{admin.username}\t{state}\tпоследний вход {last}\t{admin.role}\tдоступ {deadline}")
 
 
 def mark(flag):
@@ -143,6 +156,9 @@ def build_parser():
         ("mark-test-user", mark(True), ["username"]), ("unmark-test-user", mark(False), ["username"]),
     ]:
         command = commands.add_parser(name)
+        if name == "create":
+            command.add_argument("--role", choices=["owner", "observer"], default="owner")
+            command.add_argument("--expires")
         for argument in arguments:
             command.add_argument(argument)
         command.set_defaults(handler=handler)
