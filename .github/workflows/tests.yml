@@ -69,6 +69,7 @@ jobs:
           docker compose config --quiet
           docker compose -f compose.yaml -f deploy/compose.telegram.yaml --profile telegram config --quiet
           APP_DOMAIN=example.invalid docker compose -f compose.production.yaml -f deploy/compose.telegram.yaml --profile telegram config --quiet
+          APP_DOMAIN=example.invalid NOTES_REVIEW_ENABLED=true docker compose -f compose.production.yaml config --format json | python -c 'import json,sys; services=json.load(sys.stdin)["services"]; assert services["api"]["environment"]["NOTES_REVIEW_ENABLED"] == "true"; assert all(services[name]["environment"].get("NOTES_REVIEW_ENABLED", "false") == "false" for name in ("worker", "scheduler", "migrate"))'
           docker build -t beresta-audio-check .
           docker run --rm beresta-audio-check ffmpeg -version
           docker run --rm beresta-audio-check ffprobe -version
