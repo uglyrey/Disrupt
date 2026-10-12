@@ -356,6 +356,7 @@ async function openNote(id, {userAction = false, search = null, reminder = null,
   if (recorder || microphonePending) return message('Сначала завершите запись голоса.');
   if (window.BerestaFocus?.pending()) { await window.BerestaFocus.flush(); if (noteBusy) return message('Дождитесь сохранения.'); }
   if (hasDrafts() && !confirm('Есть несохранённые правки. Открыть другую заметку?')) return;
+  if (currentNote) window.BerestaFocus?.checkpoint(currentNote);  // Leaving the note closes its editing session.
   const generation = ++viewGeneration;
   const currentEpoch = epoch;
   setNoteBusy(true);
@@ -602,7 +603,11 @@ $('thought').addEventListener('keydown',event => {
   else $('capture-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 });
 // Text and title save themselves (focus.js). The form only keeps Enter from reloading the page.
-$('edit-form').onsubmit = event => { event.preventDefault(); window.BerestaFocus?.flush(); };
+$('edit-form').onsubmit = event => {
+  event.preventDefault();
+  const focus = window.BerestaFocus;
+  if (focus) focus.flush().then(() => focus.checkpoint());
+};
 // Closes the open note or source before another view takes the column. False when something blocks it.
 // With autosave pending, `retry` runs once the save has finished and this check starts over.
 let leaveFlushed = false;
@@ -617,6 +622,7 @@ function leaveNote(question = 'Есть несохранённые правки.
     return false;
   }
   if (hasDrafts() && !confirm(question)) return false;
+  if (currentNote) window.BerestaFocus?.checkpoint(currentNote);  // Leaving the note closes its editing session.
   viewGeneration++; currentNote=null; currentCapture=null; hideSource();
   window.BerestaReminders?.hide();
   $('note-card').hidden=true; return true;
@@ -628,12 +634,32 @@ $('new-note').onclick = () => {
   loadJobs().catch(e=>message(e.message));
 };
 $('more-notes').onclick = () => loadNotes(false).catch(e=>message(e.message));
+const revisionKinds = {original:'Первая версия',edit:'Правка текста',conclusion:'Вывод',change:'Изменение структуры'};
+function revisionTime(seconds) {
+  return new Date(seconds*1000).toLocaleString('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
+}
+function revisionChars(count) {
+  const tail = count % 100 > 10 && count % 100 < 15 ? 'знаков' : ({1:'знак',2:'знака',3:'знака',4:'знака'}[count % 10] || 'знаков');
+  return `изменено ${count} ${tail}`;
+}
+// One row is one editing session. Autosaves inside a session are already one version on the server.
+function revisionSummary(rev) {
+  const parts = [revisionTime(rev.created_at),revisionKinds[rev.kind] || revisionKinds.change];
+  if (typeof rev.changed_chars === 'number') parts.push(rev.changed_chars ? revisionChars(rev.changed_chars) : 'без изменений текста');
+  return parts.join(' · ');
+}
 $('load-history').onclick = async () => {
   try {
-    const revisions = await api(`/api/v1/notes/${currentNote.id}/revisions`); $('history').replaceChildren();
+    await window.BerestaFocus?.checkpoint();  // Opening the history closes the session, so it shows as a finished row.
+    const note = currentNote;
+    if (!note) return;
+    const revisions = await api(`/api/v1/notes/${note.id}/revisions`);
+    if (currentNote !== note) return;
+    $('history').replaceChildren();
+    if (!revisions.length) $('history').append(element('p','Сохранённых версий пока нет.'));
     for (const rev of revisions) {
       const detail = document.createElement('details');
-      detail.append(element('summary',`Версия ${rev.version} · ${rev.title}`),element('pre',rev.markdown));
+      detail.append(element('summary',revisionSummary(rev)),element('p',rev.title,'muted'),element('pre',rev.markdown));
       for (const c of rev.conclusions) detail.append(element('p',`${conclusionLabels[c.status]}: ${c.text}`));
       $('history').append(detail);
     }

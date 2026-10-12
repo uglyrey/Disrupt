@@ -24,7 +24,7 @@ function boot() {
   w.confirm = () => true;
   w.noteAutosaveMs = 10; w.noteAutosaveRetryMs = 600000;
   const state = {
-    calls: [], patches: [], active: 0, maxActive: 0, patchHook: null,
+    calls: [], patches: [], active: 0, maxActive: 0, patchHook: null, revisions: [],
     note: {id: 'n1', capture_id: 'k1', channel: 'web', input_kind: 'text', title: 'Заметка', markdown: 'Первый текст',
       original_text: 'Исходник', conclusions: [], version: 3, provider: 'manual', category_id: null,
       category_name: null, structure_confirmed_at: null, created_at: 1791220000, updated_at: 1791220000,
@@ -40,13 +40,16 @@ function boot() {
     if (url.pathname === '/api/v1/categories') return reply([]);
     if (url.pathname === '/api/v1/jobs') return reply([]);
     if (url.pathname === '/api/v1/notes') return reply(summaries);
-    if (url.pathname === '/api/v1/notes/n1/revisions') return reply([]);
+    if (url.pathname === '/api/v1/notes/n1/revisions') return reply(state.revisions);
     if (url.pathname === '/api/v1/notes/n1' && method === 'GET') return reply(state.note);
     if (url.pathname === '/api/v1/notes/n2' && method === 'GET') return reply({...state.note, id: 'n2', title: 'Другая', version: 1});
     if (url.pathname === '/api/v1/notes/n1' && method === 'PATCH') {
       state.patches.push(body); state.active++; state.maxActive = Math.max(state.maxActive, state.active);
       try {
         if (state.patchHook) { const early = await state.patchHook(body); if (early) return early; }
+        // A checkpoint with the same text only closes the editing session. The server adds no version.
+        if (body.checkpoint && body.title === state.note.title && body.markdown === state.note.markdown
+          && body.version === state.note.version) return reply(state.note);
         if (body.version !== state.note.version) return reply({detail: 'Заметка уже изменена. Обновите её перед сохранением'}, 409);
         Object.assign(state.note, {title: body.title, markdown: body.markdown, version: state.note.version + 1});
         return reply(state.note);
@@ -188,9 +191,55 @@ async function failedSaveAndLeaving() {
     w2.confirm = () => { throw new Error('no prompt expected'); };
     type2($2('markdown'), 'Перед новой записью');
     $2('new-note').click(); await settled();
-    assert.equal(s2.patches.length, 1); assert.equal(s2.patches[0].markdown, 'Перед новой записью');
+    assert.equal(s2.patches.length, 2); assert.equal(s2.patches[0].markdown, 'Перед новой записью');
+    assert.equal(s2.patches[1].checkpoint, true, 'leaving closes the editing session');
     assert.equal($2('capture-card').hidden, false); assert.equal($2('note-card').hidden, true);
   } finally { await closeWindow(u); }
+}
+
+async function checkpointOnLeaving() {
+  const t = boot(); const {w, $, state, wait, type} = t;
+  try {
+    await openFirst(t);
+    // Opening and leaving a note that was not changed sends nothing.
+    [...$('notes').querySelectorAll('button')][1].click(); await settled();
+    assert.equal(state.patches.length, 0, 'no edit, no checkpoint');
+    [...$('notes').querySelectorAll('button')][0].click(); await settled();
+    // An autosave carries the tab label and no checkpoint.
+    type($('markdown'), 'Первая правка'); await wait(60); await settled();
+    assert.equal(state.patches.length, 1);
+    assert.match(state.patches[0].editor, /^[A-Za-z0-9_-]+$/); assert.notEqual(state.patches[0].checkpoint, true);
+    // Switching to another note closes the session with the saved text and its version.
+    [...$('notes').querySelectorAll('button')][1].click(); await settled();
+    assert.equal(state.patches.length, 2);
+    assert.deepEqual([state.patches[1].checkpoint, state.patches[1].version, state.patches[1].markdown, state.patches[1].editor],
+      [true, 4, 'Первая правка', state.patches[0].editor]);
+    assert.equal(state.note.version, 4, 'the same text adds no version');
+    // Once closed, leaving again sends nothing more.
+    [...$('notes').querySelectorAll('button')][0].click(); await settled();
+    [...$('notes').querySelectorAll('button')][1].click(); await settled();
+    assert.equal(state.patches.length, 2);
+    // The next edit opens a new session, and the history is read after a checkpoint.
+    [...$('notes').querySelectorAll('button')][0].click(); await settled();
+    type($('markdown'), 'Вторая правка'); await wait(60); await settled();
+    assert.equal(state.patches.length, 3);
+    state.revisions = [
+      {version: 5, created_at: 1791220900, started_at: 1791220000, kind: 'edit', changed_chars: 1, title: 'Заметка', markdown: 'Вторая правка', conclusions: [], items: []},
+      {version: 4, created_at: 1791220500, started_at: 1791220400, kind: 'edit', changed_chars: 21, title: 'Заметка', markdown: 'Первая правка', conclusions: [], items: []},
+      {version: 1, created_at: 1791220000, started_at: 1791220000, kind: 'original', changed_chars: null, title: 'Заметка', markdown: 'Первый текст', conclusions: [], items: []},
+    ];
+    const before = state.calls.length;
+    $('load-history').click(); await settled();
+    const after = state.calls.slice(before).map(c => `${c.method} ${c.url.pathname}`);
+    assert.deepEqual(after, ['PATCH /api/v1/notes/n1', 'GET /api/v1/notes/n1/revisions'], 'checkpoint goes before the history');
+    assert.equal(state.patches[3].checkpoint, true);
+    const rows = [...$('history').querySelectorAll('details')];
+    assert.equal(rows.length, 3, 'one row per session');
+    const text = rows.map(row => row.querySelector('summary').textContent);
+    assert.match(text[0], /Правка текста · изменено 1 знак$/); assert.match(text[1], /изменено 21 знак$/);
+    assert.match(text[2], /Первая версия$/); assert.ok(!/Версия 5/.test(text[0]));
+    assert.equal(rows[0].querySelector('pre').textContent, 'Вторая правка');
+  } finally { await closeWindow(t); }
 }
 
 async function titleFit() {
@@ -395,6 +444,7 @@ module.exports = async () => {
   await overlappingSaves();
   await conflictKeepsText();
   await failedSaveAndLeaving();
+  await checkpointOnLeaving();
   await titleFit();
   await popovers();
   await popoverStaysInNoteColumn();

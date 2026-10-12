@@ -7352,6 +7352,24 @@
             "maxLength": 24000,
             "minLength": 1,
             "title": "Markdown"
+          },
+          "checkpoint": {
+            "type": "boolean",
+            "title": "Checkpoint",
+            "default": false
+          },
+          "editor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Editor"
           }
         },
         "additionalProperties": false,

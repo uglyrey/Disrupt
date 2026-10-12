@@ -63,6 +63,7 @@ from app.services import (
     MAX_OFFSET,
     capture_text,
     capture_view,
+    checkpoint_note,
     create_audio_capture,
     edit_note,
     job_view,
@@ -70,6 +71,7 @@ from app.services import (
     note_view,
     owned_capture,
     owned_note,
+    revision_views,
     search_notes,
 )
 from app.sessions import create_session, user_payload
@@ -476,15 +478,21 @@ def create_app(
         session = get_login_session(request, db)
         owned_note(db, note_id, session.user_id)
         rows = db.scalars(
-            select(Revision).where(Revision.note_id == note_id).order_by(Revision.version.desc()).limit(100)
+            select(Revision).where(Revision.note_id == note_id).order_by(Revision.version.desc()).limit(101)
         ).all()
-        return [{"version": r.version, "created_at": r.created_at, **r.snapshot} for r in rows]
+        return revision_views(rows)[:100]  # The extra row only gives the oldest shown one something to compare with.
 
     @app.patch("/api/v1/notes/{note_id}", response_model=NoteResponse)
     def update_note(note_id: str, body: NoteEdit, request: Request, db=Depends(database)):
         session = get_login_session(request, db, write=True)
         note = owned_note(db, note_id, session.user_id)
-        edit_note(db, note, body.version, title=body.title, markdown=body.markdown)
+        if body.checkpoint and checkpoint_note(db, note, body.version, title=body.title, markdown=body.markdown):
+            return note_view(db, note, settings)  # Same text: only the editing session is closed, no new version.
+        actor = f"{session.token_hash[:16]}:{body.editor or ''}"
+        edit_note(
+            db, note, body.version, actor=actor, checkpoint=body.checkpoint, settings=settings,
+            title=body.title, markdown=body.markdown,
+        )
         return note_view(db, note, settings)
 
     @app.patch("/api/v1/notes/{note_id}/conclusions/{conclusion_id}", response_model=NoteResponse)
