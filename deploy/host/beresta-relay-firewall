@@ -1,0 +1,23 @@
+#!/bin/sh
+# Helsinki host. Port 18100 of the reserve AI relay answers only the core (10.77.0.1) over WireGuard.
+# Docker iptables backend only. Never flush UFW or Docker chains.
+set -eu
+ipt() { iptables -w 10 "$@"; }
+ensure() {
+    chain=$1; shift
+    ipt -C "$chain" "$@" 2>/dev/null || ipt -A "$chain" "$@"
+}
+ipt -S DOCKER-USER >/dev/null
+ipt -N BERESTA-RELAY 2>/dev/null || true
+# Match the ORIGINAL port, before Docker DNAT, and allow only the core.
+ensure BERESTA-RELAY -i beresta -s 10.77.0.1/32 -p tcp -m conntrack --ctorigdst 10.77.0.2 --ctorigdstport 18100 -j ACCEPT
+ensure BERESTA-RELAY -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 18100 -j DROP
+ipt -C DOCKER-USER -j BERESTA-RELAY 2>/dev/null || ipt -I DOCKER-USER 1 -j BERESTA-RELAY
+# Also cover a userland proxy or a future host process on this port.
+ipt -N BERESTA-RELAY-HOST 2>/dev/null || true
+ensure BERESTA-RELAY-HOST -i beresta -s 10.77.0.1/32 -d 10.77.0.2/32 -p tcp --dport 18100 -j ACCEPT
+ensure BERESTA-RELAY-HOST -p tcp --dport 18100 -j DROP
+ipt -C INPUT -j BERESTA-RELAY-HOST 2>/dev/null || ipt -I INPUT 1 -j BERESTA-RELAY-HOST
+# No IPv6 listener for the private relay.
+ip6tables -w 10 -C INPUT -p tcp --dport 18100 -j DROP 2>/dev/null || ip6tables -w 10 -I INPUT 1 -p tcp --dport 18100 -j DROP
+ip6tables -w 10 -C FORWARD -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 18100 -j DROP 2>/dev/null || ip6tables -w 10 -I FORWARD 1 -p tcp -m conntrack --ctdir ORIGINAL --ctorigdstport 18100 -j DROP

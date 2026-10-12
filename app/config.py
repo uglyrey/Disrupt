@@ -4,9 +4,10 @@ import ipaddress
 import os
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 PROGRAM_BASE_URL = "https://shared1.multitool.works:4000/v1"
@@ -38,6 +39,30 @@ def read_secret_file(path: str, *, maximum: int = 16384) -> str:
     if not value or "\x00" in value:
         raise ValueError("Secret file is empty or invalid")
     return value
+
+
+def parse_decimal(name: str, value: str) -> Decimal:
+    try:
+        number = Decimal(value.strip())
+    except InvalidOperation:
+        raise ValueError(f"{name} must be a decimal number") from None
+    if not number.is_finite() or number < 0:
+        raise ValueError(f"{name} must not be negative")
+    return number
+
+
+def check_fallback_url(value: str) -> None:
+    """Токен посредника уходит по этому адресу. По http можно только внутри закрытой сети."""
+    parts = urlsplit(value)
+    if parts.scheme not in {"http", "https"} or not parts.hostname or parts.username or parts.query or parts.fragment:
+        raise ValueError("NOTES_FALLBACK_BASE_URL must be a plain http(s) URL")
+    if parts.scheme == "http":
+        try:
+            private = ipaddress.ip_address(parts.hostname).is_private
+        except ValueError:
+            private = False
+        if not private:
+            raise ValueError("NOTES_FALLBACK_BASE_URL over http must point to a private IP address")
 
 
 DEFAULT_ADMIN_NETWORKS = "127.0.0.1/32,::1/128,10.77.0.0/24"
@@ -102,6 +127,23 @@ class Settings:
     retry_breaker_window_seconds: int = 300
     retry_breaker_pause_seconds: int = 600
     delivery_lease_seconds: int = 60
+    # Резервный ИИ через посредника в Хельсинки. Подробности в docs/ai-failover-v1.md. По умолчанию выключен.
+    fallback_enabled: bool = False
+    fallback_base_url: str = ""
+    fallback_token: str = field(default="", repr=False)
+    fallback_model: str = "gpt-4o"
+    fallback_stt_model: str = "whisper-1"
+    # Потолок расхода на резерв за календарный день в часовом поясе лимитов. Доллары США.
+    fallback_daily_usd: Decimal = Decimal("10")
+    # Цены для оценки расхода. Владелец сверяет их с прайсом OpenAI. Доллары за миллион токенов и за минуту речи.
+    fallback_price_input_per_m: Decimal = Decimal("2.50")
+    fallback_price_output_per_m: Decimal = Decimal("10.00")
+    fallback_price_stt_per_minute: Decimal = Decimal("0.006")
+    # Пока основной шлюз упал, раз в столько секунд одно настоящее задание проверяет, не ожил ли он.
+    fallback_probe_seconds: int = 300
+    # Столько сбоев шлюза подряд за окно переводят основной сервис в состояние «упал».
+    fallback_failures_to_down: int = 2
+    fallback_failure_window_seconds: int = 300
     # История версий заметки. Подробности в docs/note-revisions-v1.md.
     # Правки текста в паузе до этого срока попадают в одну версию. 0 отключает объединение.
     revision_coalesce_seconds: int = 600
@@ -182,6 +224,24 @@ class Settings:
             raise ValueError("Revision coalesce and session seconds are out of range")
         if self.revision_keep != 0 and not 5 <= self.revision_keep <= 1000:
             raise ValueError("NOTES_REVISION_KEEP must be 0 or between 5 and 1000")
+        if self.fallback_enabled:
+            check_fallback_url(self.fallback_base_url)
+            # Токен нужен только воркеру. Веб-процесс его не получает, поэтому пустой токен допустим.
+            if self.fallback_token and len(self.fallback_token) < 32:
+                raise ValueError("Fallback relay token must contain at least 32 characters")
+            if not self.fallback_model or not self.fallback_stt_model:
+                raise ValueError("Fallback needs a chat model and a speech model")
+        if min(
+            self.fallback_daily_usd, self.fallback_price_input_per_m, self.fallback_price_output_per_m,
+            self.fallback_price_stt_per_minute,
+        ) < 0:
+            raise ValueError("Fallback cap and prices must not be negative")
+        if (
+            not 30 <= self.fallback_probe_seconds <= 3600
+            or not 1 <= self.fallback_failures_to_down <= 10
+            or not 30 <= self.fallback_failure_window_seconds <= 3600
+        ):
+            raise ValueError("Fallback probe, failure count or failure window is out of range")
         if min(self.retry_user_per_hour, self.retry_global_per_hour) < 0:
             raise ValueError("Retry caps must not be negative")
         if self.retry_breaker_failures < 1 or not (
@@ -244,6 +304,14 @@ class Settings:
         if analytics_file and analytics_key:
             raise ValueError("Use either NOTES_ANALYTICS_PSEUDONYM_KEY or NOTES_ANALYTICS_PSEUDONYM_KEY_FILE")
 
+        fallback_token_file = os.environ.get("NOTES_FALLBACK_TOKEN_FILE")
+        fallback_token = os.environ.get("NOTES_FALLBACK_TOKEN", "")
+        if fallback_token_file and fallback_token:
+            raise ValueError("Use either NOTES_FALLBACK_TOKEN or NOTES_FALLBACK_TOKEN_FILE")
+        fallback_enabled = flag("NOTES_FALLBACK_ENABLED", False)
+        if fallback_enabled and fallback_token_file and os.path.exists(fallback_token_file):
+            fallback_token = read_secret_file(fallback_token_file, maximum=4096)
+
         llm_read_timeout = int(os.environ.get("NOTES_LLM_READ_TIMEOUT_SECONDS", str(LLM_READ_TIMEOUT_SECONDS)))
         llm_stream = flag("NOTES_LLM_STREAM", False)
         # The lease follows the longest possible model call, so a slow answer is never cut off by the worker.
@@ -253,6 +321,21 @@ class Settings:
         )
 
         return cls(
+            fallback_enabled=fallback_enabled,
+            fallback_base_url=os.environ.get("NOTES_FALLBACK_BASE_URL", "").rstrip("/"),
+            fallback_token=fallback_token,
+            fallback_model=os.environ.get("NOTES_FALLBACK_MODEL", cls.fallback_model),
+            fallback_stt_model=os.environ.get("NOTES_FALLBACK_STT_MODEL", cls.fallback_stt_model),
+            fallback_daily_usd=parse_decimal("NOTES_FALLBACK_DAILY_USD", os.environ.get("NOTES_FALLBACK_DAILY_USD", "10")),
+            fallback_price_input_per_m=parse_decimal(
+                "NOTES_FALLBACK_PRICE_INPUT_PER_M", os.environ.get("NOTES_FALLBACK_PRICE_INPUT_PER_M", "2.50")),
+            fallback_price_output_per_m=parse_decimal(
+                "NOTES_FALLBACK_PRICE_OUTPUT_PER_M", os.environ.get("NOTES_FALLBACK_PRICE_OUTPUT_PER_M", "10.00")),
+            fallback_price_stt_per_minute=parse_decimal(
+                "NOTES_FALLBACK_PRICE_STT_PER_MINUTE", os.environ.get("NOTES_FALLBACK_PRICE_STT_PER_MINUTE", "0.006")),
+            fallback_probe_seconds=int(os.environ.get("NOTES_FALLBACK_PROBE_SECONDS", "300")),
+            fallback_failures_to_down=int(os.environ.get("NOTES_FALLBACK_FAILURES_TO_DOWN", "2")),
+            fallback_failure_window_seconds=int(os.environ.get("NOTES_FALLBACK_FAILURE_WINDOW_SECONDS", "300")),
             llm_read_timeout_seconds=llm_read_timeout,
             llm_stream=llm_stream,
             lease_seconds=derived_lease,
