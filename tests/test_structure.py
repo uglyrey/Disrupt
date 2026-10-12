@@ -1,12 +1,13 @@
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from app.models import Category, Item, Note, Outbox, ProductEvent, Reminder
+from app.models import Category, Item, Note, Outbox, ProductEvent, Reminder, Revision
 from app.providers import DEMO_TEXT, MockProvider
 from app.worker import Worker
 from tests.conftest import register
@@ -76,7 +77,7 @@ def test_invalid_model_items_do_not_save_partial_structure(app, client, change):
 
             return StructuredNote.model_validate(result)
 
-    assert Worker(app.state.sessions, app.state.settings, BadProvider()).run_once()
+    assert Worker(app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), BadProvider()).run_once()
     after = client.get("/api/v1/jobs/" + job["id"]).json()
     assert after["status"] == "failed" and after["original_text"] == DEMO_TEXT
     with app.state.sessions() as db:
@@ -387,3 +388,49 @@ def test_item_limit_rolls_back_note_version_and_events(app, client):
     after = client.get("/api/v1/notes/" + note["id"]).json()
     assert after["version"] == 1 and len(after["items"]) == 30
     assert event_counts(app) == before
+
+
+def test_delete_category_moves_notes_to_none_and_checks_version(app, client):
+    register(client)
+    category = client.post("/api/v1/categories", json={"name": "Работа"}).json()
+    other = client.post("/api/v1/categories", json={"name": "Дом"}).json()
+    first = manual(client, key="del-1")
+    second = manual(client, text="Вторая", key="del-2")
+    kept = manual(client, text="Третья", key="del-3")
+    for note, target in ((first, category), (second, category), (kept, other)):
+        done = client.patch(
+            f"/api/v1/notes/{note['id']}/category", json={"version": note["version"], "category_id": target["id"]}
+        )
+        assert done.status_code == 200
+    path = "/api/v1/categories/" + category["id"]
+    assert client.delete(path, params={"version": 5}).status_code == 409
+    assert len(client.get("/api/v1/categories").json()) == 2
+    assert client.delete(path).status_code == 422
+    assert client.delete(path, params={"version": category["version"]}).status_code == 204
+    assert [c["id"] for c in client.get("/api/v1/categories").json()] == [other["id"]]
+    none_ids = {n["id"] for n in client.get("/api/v1/notes", params={"category_id": "none"}).json()}
+    assert none_ids == {first["id"], second["id"]}
+    moved = client.get("/api/v1/notes/" + first["id"]).json()
+    assert moved["category_id"] is None and moved["category_name"] is None and moved["version"] == 3
+    assert client.get("/api/v1/notes/" + kept["id"]).json()["category_id"] == other["id"]
+    with app.state.sessions() as db:
+        versions = set(db.scalars(select(Revision.version).where(Revision.note_id == first["id"])))
+    assert 3 in versions
+    assert client.delete(path, params={"version": category["version"]}).status_code == 404
+    assert event_counts(app)["category_deleted"] == 1
+
+
+def test_delete_category_is_private_and_needs_csrf(app, client):
+    register(client)
+    category = client.post("/api/v1/categories", json={"name": "Секретная"}).json()
+    note = manual(client)
+    client.patch(f"/api/v1/notes/{note['id']}/category", json={"version": 1, "category_id": category["id"]})
+    path = "/api/v1/categories/" + category["id"]
+    with TestClient(app) as other:
+        register(other, "other")
+        assert other.delete(path, params={"version": 1}).status_code == 404
+    token = client.headers.pop("X-CSRF-Token")
+    assert client.delete(path, params={"version": 1}).status_code == 403
+    client.headers["X-CSRF-Token"] = token
+    assert len(client.get("/api/v1/categories").json()) == 1
+    assert client.get("/api/v1/notes/" + note["id"]).json()["category_id"] == category["id"]

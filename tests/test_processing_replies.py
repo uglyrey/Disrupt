@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import time
+from dataclasses import replace
 
 import pytest
 from alembic import command
@@ -130,7 +131,7 @@ def test_processing_failure_cancels_reply_and_tells_the_chat_once(reminders):
 def test_expired_lease_also_tells_the_chat(reminders):
     app, client, ids = reminders
     saved = message(client, update_id=200).json()
-    worker = Worker(app.state.sessions, app.state.settings, provider=MockProvider())
+    worker = Worker(app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), provider=MockProvider())
     with app.state.sessions.begin() as db:
         job = db.get(Job, saved["job_id"])
         job.status, job.lease_until = "running", time.time() - 5

@@ -1,30 +1,100 @@
 'use strict';
 // Telegram linking in one step. Loaded after app.js and uses its api(), message() and element().
-// The code issued here lives in memory only. A reload forgets it, and the bot's deep link
-// (#telegram-confirm) or the "Проверить запрос" button still finish the job.
+// The code issued here lives in memory only. The request id and its end time wait in sessionStorage, so a tab
+// that was sent to Telegram and came back opens the dialog again and finishes the job. The bot's deep link
+// (#telegram-confirm) and the "Проверить запрос" button work as before.
 (() => {
   const BOT_USERNAME = 'beresta_ru_bot'; // The only place in this file that names the bot.
-  const POLL_MS = 3000, CODE_MS = 10 * 60 * 1000;
+  const POLL_MS = 3000, SLOW_POLL_MS = 10000, CODE_MS = 10 * 60 * 1000;
+  const FLOW_KEY = 'beresta-tg-link';
   const el = id => document.getElementById(id);
-  let issued = null, timer = null, busy = false, box = null, statusLine = null, openLink = null;
+  let issued = null, timer = null, busy = false, box = null, statusLine = null, openLink = null, appLink = null, socket = null;
 
   const botUrl = code => `https://t.me/${BOT_USERNAME}?start=${encodeURIComponent(code)}`;
   const say = text => { if (statusLine) statusLine.textContent = text; };
+
+  // Opening the bot. The tab is reserved inside the click, before the first await, so the browser allows it.
+  const onPhone = () => {
+    const coarse = typeof window.matchMedia === 'function'
+      && (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(max-width: 700px)').matches);
+    return coarse || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+  };
+  function reserveTarget() {
+    if (onPhone()) return {tab: null};
+    let tab = null;
+    try { tab = window.open('', '_blank'); } catch { tab = null; }
+    if (tab) { try { tab.opener = null; } catch { /* a foreign window refuses it */ } }
+    return {tab};
+  }
+  function goTo(target, url) {
+    const tab = target.tab;
+    if (tab && !tab.closed) {
+      try { tab.location.href = url; return; } catch { /* fall back to this tab */ }
+    }
+    // window.berestaNavigate is a hook for tests only. The page never defines it.
+    if (typeof window.berestaNavigate === 'function') window.berestaNavigate(url); else location.href = url;
+  }
+  function dropTarget(target) {
+    try { if (target.tab && !target.tab.closed) target.tab.close(); } catch { /* nothing to close */ }
+  }
+
+  const stored = {
+    save(data) { try { sessionStorage.setItem(FLOW_KEY, JSON.stringify(data)); } catch { /* storage may be blocked */ } },
+    clear() { try { sessionStorage.removeItem(FLOW_KEY); } catch { /* storage may be blocked */ } },
+    load() {
+      try {
+        const data = JSON.parse(sessionStorage.getItem(FLOW_KEY) || 'null');
+        if (data && typeof data.id === 'string' && Number.isFinite(data.expires) && data.expires > Date.now()) return data;
+      } catch { /* damaged value */ }
+      stored.clear();
+      return null;
+    },
+  };
+
+  // The socket only says that something changed for this account. The REST calls stay the source of truth.
+  function closeSocket() {
+    const old = socket; socket = null;
+    if (!old) return;
+    old.onmessage = old.onclose = old.onerror = null;
+    try { old.close(); } catch { /* already closed */ }
+  }
+  function openSocket() {
+    closeSocket();
+    const mine = issued;
+    if (!mine || typeof window.WebSocket !== 'function') return;
+    let next;
+    try { next = new window.WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/v1/telegram/links/ws`); }
+    catch { return; }
+    socket = next;
+    next.onmessage = () => { if (socket === next && issued === mine) tick(); };
+    next.onclose = () => { if (socket === next) { socket = null; if (issued === mine) schedule(); } };
+    next.onerror = () => {};
+  }
+
+  // The request is finished, expired or the account left. Everything that waited for it stops.
+  function forget() {
+    issued = null; stopPolling(); closeSocket(); stored.clear();
+  }
 
   function ensureBox() {
     if (box) return;
     box = document.createElement('div'); box.id = 'telegram-open-bot'; box.hidden = true;
     openLink = document.createElement('a'); openLink.className = 'button-link'; openLink.textContent = 'Открыть бота';
     openLink.target = '_blank'; openLink.rel = 'noopener';
+    appLink = document.createElement('a'); appLink.className = 'button-link alt'; appLink.textContent = 'Открыть приложение Telegram';
     const hint = element('p', 'Если бот не открылся, отправьте ему это сообщение.', 'muted');
     statusLine = element('p', '', 'muted'); statusLine.id = 'telegram-status'; statusLine.setAttribute('aria-live', 'polite');
-    box.append(openLink, hint, statusLine);
+    box.append(openLink, appLink, hint, statusLine);
     el('telegram-code').before(box);
   }
+
+  // tg://resolve opens Telegram Desktop directly.
+  const appUrl = code => `tg://resolve?domain=${encodeURIComponent(BOT_USERNAME)}&start=${encodeURIComponent(code)}`;
 
   function showCode(code) {
     ensureBox();
     openLink.href = botUrl(code); openLink.hidden = false; box.hidden = false;
+    appLink.href = appUrl(code); appLink.hidden = false;
     el('telegram-code').textContent = `/start ${code}`;
     say('Нажмите «Открыть бота» и «Запустить» в Telegram. Подключение подтвердится само.');
   }
@@ -62,26 +132,26 @@
 
   async function confirmAndFinish(id) {
     await api(`/api/v1/telegram/links/${encodeURIComponent(id)}/confirm`, {method: 'POST'});
-    issued = null; stopPolling(); clearCode();
+    forget(); clearCode();
     await loadLinks();
     message('Telegram подключён.');
   }
 
   function expire() {
-    issued = null; stopPolling(); clearCode();
-    ensureBox(); box.hidden = false; openLink.hidden = true;
+    forget(); clearCode();
+    ensureBox(); box.hidden = false; openLink.hidden = true; appLink.hidden = true;
     say('Код истёк. Нажмите «Подключить Telegram» ещё раз.');
   }
 
   function schedule() {
     stopPolling();
-    if (issued && !document.hidden) timer = setTimeout(tick, POLL_MS);
+    if (issued) timer = setTimeout(tick, socket || document.hidden ? SLOW_POLL_MS : POLL_MS);
   }
 
   async function tick() {
     timer = null;
     const mine = issued;
-    if (!mine || el('workspace').hidden) { issued = null; return; }
+    if (!mine || el('workspace').hidden) { if (mine) forget(); return; }
     if (Date.now() >= mine.expires) return expire();
     try {
       const links = await api('/api/v1/telegram/links');
@@ -99,12 +169,12 @@
       }
       if (mine.seen && links.identities.length) {
         // Another tab or button confirmed it already.
-        issued = null; stopPolling(); clearCode(); renderLinks(links); message('Telegram подключён.');
+        forget(); clearCode(); renderLinks(links); message('Telegram подключён.');
         return;
       }
     } catch (e) {
-      if (e.status === 401) { issued = null; return; }
-      if (e.status === 409 || e.status === 404) { say(e.message); issued = null; clearCode(); return; }
+      if (e.status === 401) { forget(); return; }
+      if (e.status === 409 || e.status === 404) { say(e.message); forget(); clearCode(); return; }
     }
     if (issued === mine) schedule();
   }
@@ -114,13 +184,18 @@
   if (intro) intro.textContent = 'Нажмите «Подключить Telegram», затем «Открыть бота» и «Запустить» в Telegram. Подключение подтвердится само.';
 
   el('link-code').onclick = async () => {
+    const target = reserveTarget(); // Still inside the tap, before the first await.
     try {
       const link = await api('/api/v1/telegram/link-code', {method: 'POST'});
+      forget();
       issued = {id: link.link_request_id, expires: Date.now() + CODE_MS, seen: false};
+      stored.save({id: issued.id, expires: issued.expires});
       showCode(link.code);
+      openSocket();
+      goTo(target, botUrl(link.code));
       await loadLinks();
       schedule();
-    } catch (e) { message(e.message); }
+    } catch (e) { dropTarget(target); message(e.message); }
   };
 
   el('refresh-links').onclick = async () => {
@@ -131,10 +206,18 @@
     } catch (e) { message(e.message); }
   };
 
+  // Back from Telegram, focus, bfcache and a returning network all check at once.
+  function wake() {
+    if (!issued) return;
+    if (!socket) openSocket();
+    stopPolling(); tick();
+  }
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) stopPolling();
-    else if (issued) { stopPolling(); tick(); }
+    if (document.hidden) { if (issued) schedule(); } else wake();
   });
+  window.addEventListener('pageshow', wake);
+  window.addEventListener('focus', wake);
+  window.addEventListener('online', wake);
 
   function openDialog() {
     const dialog = el('telegram-dialog');
@@ -170,9 +253,29 @@
     } catch (e) { message(e.message); }
   }
 
+  // The tab was reloaded or sent back from Telegram while a request was open: show it again and finish.
+  async function resume() {
+    if (issued || el('workspace').hidden) return;
+    const saved = stored.load();
+    if (!saved) return;
+    issued = {id: saved.id, expires: saved.expires, seen: false};
+    openDialog();
+    ensureBox(); box.hidden = false; openLink.hidden = true; appLink.hidden = true;
+    say('Завершаем подключение…');
+    openSocket();
+    try {
+      const links = await loadLinks();
+      if (issued && !links.pending.length && links.identities.length) { forget(); clearCode(); return; }
+    } catch (e) {
+      if (e.status === 401) { forget(); return; }
+    }
+    if (issued) tick();
+  }
+
   new MutationObserver(() => {
-    if (el('workspace').hidden) { issued = null; stopPolling(); } else handleHash();
+    if (el('workspace').hidden) forget(); else { handleHash(); resume(); }
   }).observe(el('workspace'), {attributes: true, attributeFilter: ['hidden']});
   window.addEventListener('hashchange', handleHash);
   handleHash();
+  resume();
 })();

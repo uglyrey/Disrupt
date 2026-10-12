@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
+from app.ai_guard import BLOCKED_CODE
 from app.assistant_retrieval import (
     context_for_ask,
     context_for_digest,
@@ -36,6 +37,7 @@ LIMIT_MESSAGE = "На сегодня лимит ИИ закончился. Он 
 ERROR_MESSAGES = {
     "ungrounded_quote": "Ответ не удалось подтвердить вашими заметками, поэтому он не показан.",
     "budget_exhausted": "Общий лимит запросов к ИИ закончился. Попробуйте позже.",
+    "ai_output_blocked": "ИИ ответил странно, поэтому ответ не показан.",
     "execution_unknown": "Не удалось узнать, чем закончился запрос. Повторите его позже.",
 }
 DEFAULT_ERROR_MESSAGE = "ИИ не ответил. Попробуйте ещё раз позже."
@@ -278,6 +280,10 @@ def run_assistant_once(worker):
                 if call else plain(kind, context, question=question)
             )
             result = validate_assistant(kind, raw, context)
+            rule = worker.guard.assistant_violation(result, context, question)
+            if rule:
+                log_error("ai_output_blocked", rule, log_file=worker.settings.error_log_file, job_id=request_id)
+                raise ProviderError(BLOCKED_CODE)
         except Exception as exc:
             ambiguous = isinstance(exc, ProviderError) and (
                 exc.code.endswith("_unknown") or exc.code in {"execution_unknown", "provider_unavailable"}

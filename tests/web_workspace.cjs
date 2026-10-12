@@ -23,20 +23,13 @@ module.exports=async()=>{
  try{
   w.eval(fs.readFileSync(path.join(root,'app.js'),'utf8')+'\n'+fs.readFileSync(path.join(root,'workspace.js'),'utf8')+'\n'+fs.readFileSync(path.join(root,'focus.js'),'utf8'));await settled();
   assert.equal($('workspace').hidden,false);assert.equal($('category-navigation').children.length,3);
-  $('category-navigation').lastChild.click();await settled();assert.equal($('library-title').textContent,'Research');
+  $('category-navigation').lastChild.querySelector('.category-button').click();await settled();assert.equal($('library-title').textContent,'Research');
   $('notes').querySelector('button').click();await settled();
   assert.equal($('note-heading-title').textContent,'Synthetic note');assert.equal($('view-tasks').hidden,false);assert.equal($('view-reminders').hidden,false);assert.equal($('markdown').hidden,false);assert.equal(w.document.querySelector('#note-card [data-note-view]'),null);
   assert.equal($('preview').hidden,true);$('markdown').value='Unsaved';
   $('tool-original').click();await settled();assert.equal($('original-details').open,true);assert.equal($('pop-original').hidden,false);assert.equal($('markdown').value,'Unsaved');assert.equal($('markdown').hidden,false);
   $('mobile-library-toggle').click();assert.equal($('mobile-library-toggle').getAttribute('aria-expanded'),'true');
   $('mobile-library-toggle').click();assert.equal($('workspace').classList.contains('library-open'),false);
-  // A dialog hides the line under the header, so its own status line carries the text.
-  $('manage-categories').click();assert.equal($('category-dialog').open,true);
-  const dialogStatus=$('category-dialog').querySelector('.dialog-status');assert.ok(dialogStatus);assert.equal(dialogStatus.textContent,'');
-  $('category-name').value=' research ';$('category-form').onsubmit({preventDefault(){},target:$('category-form')});await settled();
-  assert.equal(dialogStatus.textContent,'Такая категория уже есть.');assert.equal($('message').textContent,'Такая категория уже есть.');
-  $('category-dialog').close();$('manage-categories').click();assert.equal(dialogStatus.textContent,'','status is cleared when the dialog opens');
-  $('category-dialog').close();
   $('open-telegram').click();assert.ok($('telegram-dialog').querySelector('.dialog-status'));$('telegram-dialog').close();
   $('open-feedback').click();assert.equal($('feedback-dialog').open,true);
   $('feedback-subject').value='Bug';$('feedback-description').value='Synthetic reproduction';

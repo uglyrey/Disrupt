@@ -31,7 +31,9 @@ const errors = {
   provider_invalid_response:'ИИ ответил, но результат не удалось принять. Исходник сохранён. %RETRY%',
   provider_incomplete_response:'ИИ не успел закончить ответ. Исходник сохранён. %RETRY%',
   provider_response_too_large:'Ответ ИИ получился слишком большим. Исходник сохранён. Его можно сохранить без ИИ.',
+  provider_connect_failed:'Не удалось связаться с сервисом ИИ. Исходник сохранён. %RETRY%',
   provider_connection_unknown:'Не удалось связаться с сервисом ИИ. Запрос мог быть учтён. Исходник сохранён. %RETRY%',
+  ai_output_blocked:'ИИ ответил странно, заметка сохранена без обработки.',
   ungrounded_quote:'ИИ вернул неточную цитату. Исходник сохранён. %RETRY%',
   provider_rate_limit:'Сервис ИИ ограничил запросы. Подождите немного. Исходник сохранён. %RETRY%',
   provider_unavailable:'Сервис ИИ сейчас недоступен. Исходник сохранён. %RETRY%',
@@ -44,6 +46,13 @@ const errors = {
   stt_failed:'Не удалось распознать запись. Оригинал сохранён.',
   audio_storage_unavailable:'Не удалось прочитать аудио. Попробуйте открыть оригинал позже.',
 };
+const omittedNotice = 'Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.';
+const blockedNotice = 'ИИ ответил странно, заметка сохранена без обработки.';
+// A finished job can carry a short note about what was left out.
+function jobNotice(job) {
+  if (job.status !== 'succeeded') return '';
+  return job.error_code === 'ai_output_blocked' ? blockedNotice : job.error_code === 'ungrounded_details_omitted' ? omittedNotice : '';
+}
 for (const code of Object.keys(errors)) errors[code] = errors[code].replace('%RETRY%','Нажмите «Отправить ещё раз с ИИ» или сохраните без ИИ.');
 // The line under the header is hidden behind a modal dialog, so an open dialog with a status line shows the text too.
 function message(text = '') {
@@ -355,6 +364,7 @@ async function openNote(id, {userAction = false, search = null, reminder = null,
   if (recorder || microphonePending) return message('Сначала завершите запись голоса.');
   if (window.BerestaFocus?.pending()) { await window.BerestaFocus.flush(); if (noteBusy) return message('Дождитесь сохранения.'); }
   if (hasDrafts() && !confirm('Есть несохранённые правки. Открыть другую заметку?')) return;
+  if (currentNote) window.BerestaFocus?.checkpoint(currentNote);  // Leaving the note closes its editing session.
   const generation = ++viewGeneration;
   const currentEpoch = epoch;
   setNoteBusy(true);
@@ -368,6 +378,12 @@ async function openNote(id, {userAction = false, search = null, reminder = null,
       method:'POST',body:JSON.stringify({operation_id:window.berestaId(),search_operation_id:search,reminder_id:reminder}),
     });
   } finally { setNoteBusy(false); }
+}
+// While a retry is scheduled the job stays queued and carries retry_at (seconds). The server retries by itself.
+function retryNote(job) {
+  if (job.status !== 'queued' || !job.retry_at) return '';
+  const time = new Date(job.retry_at*1000).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+  return `Сервис ИИ не ответил. Попробуем ещё раз в ${time}. Запись сохранена.`;
 }
 async function loadJobs() {
   const jobs = await api('/api/v1/jobs'); $('jobs').replaceChildren();
@@ -387,7 +403,8 @@ async function loadJobs() {
         actions.append(manual); row.append(actions);
       }
     }
-    if (job.status === 'succeeded' && job.error_code === 'ungrounded_details_omitted') row.append(element('p','Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.'));
+    if (retryNote(job)) row.append(element('p',retryNote(job)));
+    if (jobNotice(job)) row.append(element('p',jobNotice(job)));
     if (job.note_id) {
       const button = element('button','Открыть заметку','quiet');
       button.onclick = () => openNote(job.note_id,{userAction:true}).catch(e => message(e.message)); row.append(button);
@@ -456,26 +473,32 @@ function watchSavedJob(job, generation, kind = 'text', draft = '') {
   });
 }
 async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGeneration, draft = $('thought').value} = {}) {
-  let lastStatus = 'queued';
+  let lastStatus = 'queued', waiting = false, historyShown = false;
   // About five minutes: the model may answer in up to NOTES_LLM_READ_TIMEOUT_SECONDS plus queue time.
-  for (let i=0; i<300 && currentEpoch===epoch && generation===viewGeneration; i++) {
+  // A retry the server scheduled within ten minutes is followed too (the deadline moves past that retry).
+  let deadline = Date.now() + 300000;
+  while (currentEpoch===epoch && generation===viewGeneration && Date.now() < deadline) {
     const job = await api(`/api/v1/jobs/${id}`);
     if (currentEpoch!==epoch || generation!==viewGeneration) return;
     lastStatus = job.status;
-    $('job-status').textContent = job.status === 'queued'
+    waiting = Boolean(retryNote(job));
+    if (waiting && job.retry_at*1000 - Date.now() < 600000) deadline = Math.max(deadline, job.retry_at*1000 + 150000);
+    $('job-status').textContent = waiting ? retryNote(job) : job.status === 'queued'
       ? 'В очереди. Исходник сохранён. Можно продолжить работу.' : statusLabels[job.status];
+    if (waiting && !historyShown) { historyShown = true; await loadJobs(); }  // History rows show the same text.
     if (job.status === 'succeeded') {
-      if (job.error_code === 'ungrounded_details_omitted') $('job-status').textContent = 'Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.';
+      if (jobNotice(job)) $('job-status').textContent = jobNotice(job);
       await loadNotes(); await loadJobs(); await loadProviderUsage();
       if (currentEpoch!==epoch || generation!==viewGeneration) return;
       if (canShowJobResult(generation,draft)) {
         await openNote(job.note_id,{backgroundDraft:draft});
-        if (job.error_code === 'ungrounded_details_omitted' && currentEpoch === epoch &&
+        if (jobNotice(job) && currentEpoch === epoch &&
             viewGeneration === generation + 1 && currentNote?.id === job.note_id) {
-          message('Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.');
+          message(jobNotice(job));
         }
       } else message('Запись обработана. Она доступна в списке заметок.' +
-        (job.error_code === 'ungrounded_details_omitted' ? ' Неподтверждённые выводы, задачи или сроки не добавлены.' : ''));
+        (job.error_code === 'ai_output_blocked' ? ' ' + blockedNotice
+          : job.error_code === 'ungrounded_details_omitted' ? ' Неподтверждённые выводы, задачи или сроки не добавлены.' : ''));
       return;
     }
     if (job.status === 'failed') {
@@ -488,10 +511,11 @@ async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGenera
       } else message(error);
       return;
     }
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, waiting ? 5000 : 1000));
   }
   if (currentEpoch===epoch && generation===viewGeneration) {
-    message(lastStatus === 'queued'
+    message(waiting ? 'Исходник сохранён. ИИ попробует ещё раз позже. Статус доступен в последних записях.'
+      : lastStatus === 'queued'
       ? 'Исходник сохранён. Задание пока в очереди. Статус доступен в последних записях.'
       : 'Исходник сохранён. Обработка ещё не завершилась. Статус доступен в последних записях.');
   }
@@ -588,7 +612,11 @@ $('thought').addEventListener('keydown',event => {
   else $('capture-form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 });
 // Text and title save themselves (focus.js). The form only keeps Enter from reloading the page.
-$('edit-form').onsubmit = event => { event.preventDefault(); window.BerestaFocus?.flush(); };
+$('edit-form').onsubmit = event => {
+  event.preventDefault();
+  const focus = window.BerestaFocus;
+  if (focus) focus.flush().then(() => focus.checkpoint());
+};
 // Closes the open note or source before another view takes the column. False when something blocks it.
 // With autosave pending, `retry` runs once the save has finished and this check starts over.
 let leaveFlushed = false;
@@ -603,6 +631,7 @@ function leaveNote(question = 'Есть несохранённые правки.
     return false;
   }
   if (hasDrafts() && !confirm(question)) return false;
+  if (currentNote) window.BerestaFocus?.checkpoint(currentNote);  // Leaving the note closes its editing session.
   viewGeneration++; currentNote=null; currentCapture=null; hideSource();
   window.BerestaReminders?.hide();
   $('note-card').hidden=true; return true;
@@ -614,12 +643,32 @@ $('new-note').onclick = () => {
   loadJobs().catch(e=>message(e.message));
 };
 $('more-notes').onclick = () => loadNotes(false).catch(e=>message(e.message));
+const revisionKinds = {original:'Первая версия',edit:'Правка текста',conclusion:'Вывод',change:'Изменение структуры'};
+function revisionTime(seconds) {
+  return new Date(seconds*1000).toLocaleString('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
+}
+function revisionChars(count) {
+  const tail = count % 100 > 10 && count % 100 < 15 ? 'знаков' : ({1:'знак',2:'знака',3:'знака',4:'знака'}[count % 10] || 'знаков');
+  return `изменено ${count} ${tail}`;
+}
+// One row is one editing session. Autosaves inside a session are already one version on the server.
+function revisionSummary(rev) {
+  const parts = [revisionTime(rev.created_at),revisionKinds[rev.kind] || revisionKinds.change];
+  if (typeof rev.changed_chars === 'number') parts.push(rev.changed_chars ? revisionChars(rev.changed_chars) : 'без изменений текста');
+  return parts.join(' · ');
+}
 $('load-history').onclick = async () => {
   try {
-    const revisions = await api(`/api/v1/notes/${currentNote.id}/revisions`); $('history').replaceChildren();
+    await window.BerestaFocus?.checkpoint();  // Opening the history closes the session, so it shows as a finished row.
+    const note = currentNote;
+    if (!note) return;
+    const revisions = await api(`/api/v1/notes/${note.id}/revisions`);
+    if (currentNote !== note) return;
+    $('history').replaceChildren();
+    if (!revisions.length) $('history').append(element('p','Сохранённых версий пока нет.'));
     for (const rev of revisions) {
       const detail = document.createElement('details');
-      detail.append(element('summary',`Версия ${rev.version} · ${rev.title}`),element('pre',rev.markdown));
+      detail.append(element('summary',revisionSummary(rev)),element('p',rev.title,'muted'),element('pre',rev.markdown));
       for (const c of rev.conclusions) detail.append(element('p',`${conclusionLabels[c.status]}: ${c.text}`));
       $('history').append(detail);
     }
@@ -637,32 +686,43 @@ async function loadCategories() {
   categories = await api('/api/v1/categories');
   fillCategoryOptions($('category-filter'),true);
   if (currentNote) fillCategoryOptions($('note-category'),false,currentNote.category_id || '');
-  $('categories').replaceChildren();
-  for (const category of categories) {
-    const row = element('form','','category-row'), input = document.createElement('input');
-    input.value = category.name; input.maxLength = 100; input.required = true;
-    input.setAttribute('aria-label',`Название категории ${category.name}`);
-    const button = element('button','Переименовать','quiet'); button.type = 'submit';
-    row.append(input,button);
-    row.onsubmit = async event => {
-      event.preventDefault(); button.disabled = true;
-      try {
-        await api(`/api/v1/categories/${category.id}`,{method:'PATCH',body:JSON.stringify({version:category.version,name:input.value})});
-        await loadCategories(); message('Название категории сохранено.');
-      } catch(e) { message(e.message); } finally { button.disabled = false; }
-    };
-    $('categories').append(row);
-  }
 }
-$('category-form').onsubmit = async event => {
-  event.preventDefault(); const button = event.target.querySelector('button'); button.disabled = true;
-  try {
-    const name = $('category-name').value.trim().toLowerCase();
-    if (name && categories.some(category => category.name.trim().toLowerCase() === name)) { message('Такая категория уже есть.'); return; }
-    await api('/api/v1/categories',{method:'POST',body:JSON.stringify({name:$('category-name').value})});
-    $('category-name').value = ''; await loadCategories(); message('Категория добавлена.');
-  } catch(e) { message(e.message); } finally { button.disabled = false; }
-};
+// Category actions for the sidebar (workspace.js draws the menu). Each one reloads the list.
+function categoryKey(name) { return name.trim().toLowerCase().replaceAll('ё','е'); }
+async function createCategory(name) {
+  name = name.trim();
+  if (!name) throw new Error('Введите название.');
+  const same = categories.find(category => categoryKey(category.name) === categoryKey(name));
+  if (same) { const error = new Error('Такая категория уже есть.'); error.category = same; throw error; }
+  const created = await api('/api/v1/categories',{method:'POST',body:JSON.stringify({name})});
+  await loadCategories();
+  return created;
+}
+async function renameCategory(id, name) {
+  const category = categories.find(item => item.id === id);
+  name = name.trim();
+  if (!category) throw new Error('Категория не найдена. Обновите страницу.');
+  if (!name) throw new Error('Введите название.');
+  if (name === category.name) return category;
+  if (categories.some(item => item.id !== id && categoryKey(item.name) === categoryKey(name))) throw new Error('Такая категория уже есть.');
+  const renamed = await api(`/api/v1/categories/${id}`,{method:'PATCH',body:JSON.stringify({version:category.version,name})});
+  await loadCategories();
+  // Note rows show the category name, so the list is read again. A failed refresh must not undo the rename.
+  await loadNotes().catch(() => {});
+  return renamed;
+}
+async function deleteCategory(id) {
+  const category = categories.find(item => item.id === id);
+  if (!category) throw new Error('Категория не найдена. Обновите страницу.');
+  await api(`/api/v1/categories/${id}?version=${category.version}`,{method:'DELETE'});
+  const wasOpen = currentNote?.category_id === id, wasFiltered = activeFilter.category === id;
+  if (wasFiltered) { activeFilter = {...activeFilter,category:''}; }
+  await loadCategories();
+  if (wasFiltered) $('category-filter').value = '';
+  await loadNotes();
+  if (wasOpen && !hasDrafts()) await openNote(currentNote.id);
+  return wasFiltered;
+}
 let searchSeq = 0, searchTimer = null;
 window.searchDebounceMs = 300;
 $('search-form').onsubmit = async event => {

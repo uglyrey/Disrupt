@@ -1,11 +1,12 @@
 """Owned structure and explicit user actions. GET requests do not create events."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 
 from app.analytics import record_event
 from app.models import Category, Outbox, ProductEvent, Reminder
 from app.schemas import (
+    MAX_COUNTER,
     CategoryCreate,
     CategoryEdit,
     CategoryResponse,
@@ -24,6 +25,7 @@ from app.services import (
     change_note_category,
     confirm_structure,
     create_item,
+    delete_category,
     edit_item,
     ensure_category,
     note_view,
@@ -57,6 +59,14 @@ def build_router(database):
         session = get_login_session(request, db, write=True)
         category = owned_category(db, category_id, session.user_id)
         return category_view(rename_category(db, category, body.name, body.version))
+
+    @router.delete("/categories/{category_id}", status_code=204)
+    def remove_category(
+        category_id: str, request: Request, version: int = Query(ge=1, le=MAX_COUNTER), db=Depends(database)
+    ):
+        session = get_login_session(request, db, write=True)
+        category = owned_category(db, category_id, session.user_id)
+        delete_category(db, category, version)
 
     @router.patch("/notes/{note_id}/category", response_model=NoteResponse)
     def update_note_category(note_id: str, body: NoteCategoryEdit, request: Request, db=Depends(database)):

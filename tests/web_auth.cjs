@@ -9,16 +9,33 @@ async function settled(){for(let i=0;i<25;i++)await new Promise(resolve=>setImme
 const VERSION='2026-10-12', TOKEN='R'.repeat(43);
 const user=(extra={})=>({id:'u1',username:'ivan',csrf_token:'csrf-1',policy_current:true,policy_version:VERSION,deletion_requested:false,...extra});
 
-async function open({hash='',me=null,routes={}}={}){
+async function open({hash='',me=null,routes={},popup='ok',phone=false,session={}}={}){
  const dom=new JSDOM(read('index.html'),{url:'https://beresta.invalid/'+hash,runScripts:'outside-only'});
  const w=dom.window,$=id=>w.document.getElementById(id);
  w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
  w.HTMLDialogElement.prototype.close=function(){this.open=false;this.dispatchEvent(new w.Event('close'));};
  // jsdom reports a hidden document unless told otherwise; a real visible tab polls.
  Object.defineProperty(w.document,'hidden',{configurable:true,get:()=>false});
- const timers=new Map();let next=1;
- w.setTimeout=fn=>{const id=next++;timers.set(id,fn);return id;};
+ const timers=new Map(),delays=[];let next=1;
+ w.setTimeout=(fn,ms)=>{const id=next++;timers.set(id,fn);delays.push(ms);return id;};
  w.clearTimeout=id=>{timers.delete(id);};
+ // jsdom has no WebSocket server, no popups and no navigation. These stand in for them.
+ const sockets=[],tabs=[],navigations=[];let openCalls=0;
+ w.WebSocket=class{
+  constructor(url){this.url=url;this.closed=false;sockets.push(this);}
+  close(){this.closed=true;}
+  push(data){if(this.onmessage)this.onmessage({data:JSON.stringify(data)});}
+  drop(){if(this.onclose)this.onclose();}
+ };
+ w.open=()=>{
+  openCalls++;
+  if(popup==='blocked')return null;
+  const tab={closed:false,opener:{},location:{href:''},close(){this.closed=true;}};
+  tabs.push(tab);return tab;
+ };
+ w.berestaNavigate=url=>navigations.push(url);
+ if(phone)Object.defineProperty(w.navigator,'userAgent',{configurable:true,get:()=>'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15'});
+ for(const [key,value] of Object.entries(session))w.sessionStorage.setItem(key,value);
  const calls=[];
  w.fetch=async(input,options={})=>{
   const url=new URL(input,w.location.href),body=options.body?JSON.parse(options.body):null;
@@ -34,7 +51,7 @@ async function open({hash='',me=null,routes={}}={}){
  await settled();
  // One round of due timers. Everything they schedule waits for the next call.
  const tick=async()=>{const due=[...timers.values()];timers.clear();for(const fn of due)await fn();await settled();};
- return {dom,w,$,calls,timers,tick,closeAll:()=>dom.window.close()};
+ return {dom,w,$,calls,timers,delays,sockets,tabs,navigations,openCalls:()=>openCalls,tick,closeAll:()=>dom.window.close()};
 }
 const callsTo=(t,suffix)=>t.calls.filter(c=>c.path.endsWith(suffix));
 
@@ -217,6 +234,207 @@ async function policyAndDeletion(){
  }finally{t.closeAll();}
 }
 
+// One tap, WebSocket push, polling as the safety net and resuming after a return from Telegram.
+const DEEP='https://t.me/beresta_ru_bot?start=login_'+TOKEN;
+const APP_DEEP='tg://resolve?domain=beresta_ru_bot&start=login_'+TOKEN;
+const FLOW='beresta-tg-flow';
+function liveRoutes(login,extra={}){
+ return {
+  '/api/v1/auth/telegram/start':()=>reply({login_id:'login-1',deep_link:DEEP,expires_at:new Date(Date.now()+300000).toISOString()},201),
+  '/api/v1/auth/telegram/status/*':()=>login.status==='ok'?reply({...user({username:'tg123'}),status:'ok',new_account:false}):reply({status:login.status}),
+  ...extra,
+ };
+}
+const startLogin=async t=>{t.$('accept-policy').checked=true;t.$('confirm-age').checked=true;t.$('tg-login').click();};
+
+async function oneTapSignIn(){
+ // Desktop: the tab opens inside the click, before the answer of the server. Its address is set afterwards.
+ let t=await open({routes:liveRoutes({status:'pending'})});
+ try{
+  await startLogin(t);
+  assert.equal(t.openCalls(),1,'the popup opens synchronously inside the click');
+  assert.equal(t.tabs[0].location.href,'','no address before the server has answered');
+  assert.equal(callsTo(t,'/telegram/start').length,1,'the request started in the same tap');
+  await settled();
+  assert.equal(t.tabs[0].location.href,DEEP,'the tab goes straight to Telegram');
+  assert.deepEqual(t.navigations,[],'this tab stays');
+  assert.equal(t.$('tg-login-box').hidden,false,'the link stays as a fallback');
+  assert.equal(t.$('tg-login-link').href,DEEP);
+  assert.equal(t.$('tg-login-app').hidden,false);assert.equal(t.$('tg-login-app').getAttribute('href'),APP_DEEP);
+  const saved=JSON.parse(t.w.sessionStorage.getItem(FLOW));
+  assert.equal(saved.id,'login-1');assert.equal(saved.purpose,'login');assert.ok(saved.expires>Date.now());
+  assert.ok(!JSON.stringify(saved).includes(TOKEN),'the start token is not stored');
+  assert.equal(t.sockets.length,1);assert.equal(t.sockets[0].url,'wss://beresta.invalid/api/v1/auth/telegram/ws/login-1');
+ }finally{t.closeAll();}
+ // A blocked popup: this tab goes to Telegram and the box stays.
+ t=await open({popup:'blocked',routes:liveRoutes({status:'pending'})});
+ try{
+  await startLogin(t);await settled();
+  assert.equal(t.openCalls(),1);assert.deepEqual(t.navigations,[DEEP]);
+  assert.equal(t.$('tg-login-box').hidden,false);
+ }finally{t.closeAll();}
+ // A phone does not open a popup at all. The flow is already saved for the return.
+ t=await open({phone:true,routes:liveRoutes({status:'pending'})});
+ try{
+  await startLogin(t);await settled();
+  assert.equal(t.openCalls(),0);assert.deepEqual(t.navigations,[DEEP]);
+  assert.equal(JSON.parse(t.w.sessionStorage.getItem(FLOW)).id,'login-1');
+ }finally{t.closeAll();}
+ // A failed start closes the reserved tab and goes nowhere.
+ t=await open({routes:liveRoutes({status:'pending'},{'/api/v1/auth/telegram/start':()=>reply({detail:'Слишком много попыток. Подождите минуту.'},429)})});
+ try{
+  await startLogin(t);await settled();
+  assert.equal(t.tabs[0].closed,true);assert.deepEqual(t.navigations,[]);
+  assert.match(t.$('auth-message').textContent,/Слишком много попыток/);
+  assert.equal(t.$('tg-login').disabled,false);assert.equal(t.w.sessionStorage.getItem(FLOW),null);
+ }finally{t.closeAll();}
+}
+
+async function socketPush(){
+ const login={status:'pending'};
+ const t=await open({routes:liveRoutes(login)});
+ try{
+  await startLogin(t);await settled();
+  const socket=t.sockets[0];
+  assert.ok(t.delays.includes(10000),'with a socket the poll is slow');
+  socket.push({status:'pending'});await settled();
+  assert.equal(callsTo(t,'/status/login-1').length,0,'pending needs no call');
+  login.status='ok';
+  socket.push({status:'confirmed'});await settled();
+  assert.equal(callsTo(t,'/status/login-1').length,1,'the page asks the usual endpoint');
+  assert.equal(t.$('workspace').hidden,false);assert.equal(t.$('username').textContent,'tg123');
+  assert.equal(t.timers.size,0);assert.equal(socket.closed,true);
+  assert.equal(t.w.sessionStorage.getItem(FLOW),null,'nothing is left to resume');
+ }finally{t.closeAll();}
+ // Two signals at once make one call.
+ const second={status:'ok'};
+ const t2=await open({routes:liveRoutes(second)});
+ try{
+  await startLogin(t2);await settled();
+  t2.sockets[0].push({status:'confirmed'});t2.w.dispatchEvent(new t2.w.Event('focus'));await settled();
+  assert.equal(t2.$('workspace').hidden,false);assert.equal(t2.$('auth-message').hidden,true);
+ }finally{t2.closeAll();}
+}
+
+async function socketFailureFallsBackToPolling(){
+ const login={status:'pending'};
+ const t=await open({routes:liveRoutes(login)});
+ try{
+  await startLogin(t);await settled();
+  const before=t.delays.length;
+  t.sockets[0].drop();
+  assert.equal(t.timers.size,1);assert.deepEqual(t.delays.slice(before),[2000],'without a socket the poll is quick again');
+  login.status='ok';await t.tick();
+  assert.equal(t.$('workspace').hidden,false);
+ }finally{t.closeAll();}
+ // No usable WebSocket in the browser at all.
+ const broken=await open({routes:liveRoutes({status:'pending'})});
+ try{
+  broken.w.WebSocket=function(){throw new Error('blocked');};
+  await startLogin(broken);await settled();
+  assert.equal(broken.$('tg-login-box').hidden,false);assert.equal(broken.timers.size,1);
+  assert.ok(broken.delays.includes(2000));
+ }finally{broken.closeAll();}
+}
+
+async function comingBack(){
+ for(const event of ['focus','pageshow','online','visibilitychange']){
+  const login={status:'pending'};
+  const t=await open({routes:liveRoutes(login)});
+  try{
+   await startLogin(t);await settled();
+   t.sockets[0].drop();
+   login.status='ok';
+   if(event==='visibilitychange')t.w.document.dispatchEvent(new t.w.Event('visibilitychange'));
+   else t.w.dispatchEvent(new t.w.Event(event));
+   await settled();
+   assert.equal(t.$('workspace').hidden,false,event+' checks at once');
+   assert.equal(t.sockets.length>=2,true,event+' opens the socket again');
+  }finally{t.closeAll();}
+ }
+}
+
+async function resumeAfterReload(){
+ const saved=(extra={})=>({[FLOW]:JSON.stringify({id:'login-9',expires:Date.now()+120000,purpose:'login',...extra})});
+ const login={status:'pending'};
+ let t=await open({session:saved(),routes:liveRoutes(login)});
+ try{
+  assert.equal(t.$('tg-login-box').hidden,false);assert.equal(t.$('tg-login').disabled,true);
+  assert.equal(t.$('tg-login-status').textContent,'Завершаем вход…');
+  assert.equal(t.$('tg-login-link').hidden,true);
+  assert.equal(t.sockets[0].url,'wss://beresta.invalid/api/v1/auth/telegram/ws/login-9');
+  login.status='ok';t.sockets[0].push({status:'confirmed'});await settled();
+  assert.equal(callsTo(t,'/status/login-9').length,1);
+  assert.equal(t.$('workspace').hidden,false);assert.equal(t.w.sessionStorage.getItem(FLOW),null);
+ }finally{t.closeAll();}
+ // An ended or damaged record is dropped without noise.
+ t=await open({session:saved({expires:Date.now()-1000}),routes:liveRoutes({status:'pending'})});
+ try{
+  assert.equal(t.$('tg-login-box').hidden,true);assert.equal(t.sockets.length,0);assert.equal(t.w.sessionStorage.getItem(FLOW),null);
+ }finally{t.closeAll();}
+ t=await open({session:{[FLOW]:'not json'},routes:liveRoutes({status:'pending'})});
+ try{assert.equal(t.$('tg-login-box').hidden,true);}finally{t.closeAll();}
+ // The server no longer knows the sign-in. A signed-out page says so, a signed-in page stays quiet.
+ const gone={'/api/v1/auth/telegram/status/*':()=>reply({detail:'Вход не найден. Начните заново'},404)};
+ t=await open({session:saved(),routes:gone});
+ try{
+  await t.tick();
+  assert.match(t.$('auth-message').textContent,/Вход не найден/);assert.equal(t.$('tg-login-box').hidden,true);
+  assert.equal(t.$('tg-login').disabled,false);assert.equal(t.w.sessionStorage.getItem(FLOW),null);
+ }finally{t.closeAll();}
+ t=await open({me:user(),session:saved(),routes:gone});
+ try{
+  await t.tick();
+  assert.equal(t.$('workspace').hidden,false);assert.equal(t.$('auth-message').hidden,true);
+  assert.equal(t.w.sessionStorage.getItem(FLOW),null);
+ }finally{t.closeAll();}
+ // Blocked storage never breaks the sign-in.
+ t=await open({routes:liveRoutes({status:'pending'})});
+ try{
+  t.w.Storage.prototype.setItem=function(){throw new Error('blocked');};
+  await startLogin(t);await settled();
+  assert.equal(t.$('tg-login-box').hidden,false);
+ }finally{t.closeAll();}
+}
+
+async function deletionLive(){
+ const state={status:'pending'};
+ const routes={
+  '/api/v1/account/delete-request/telegram':()=>reply({login_id:'del-1',deep_link:DEEP,expires_at:new Date(Date.now()+300000).toISOString()},201),
+  '/api/v1/account/delete-request/telegram/*':()=>reply({status:state.status}),
+ };
+ let t=await open({me:user(),routes});
+ try{
+  t.$('open-delete').click();t.$('delete-telegram-start').click();
+  assert.equal(t.openCalls(),1,'the popup opens inside the tap');
+  await settled();
+  assert.equal(t.tabs[0].location.href,DEEP);assert.equal(t.$('delete-telegram-app').getAttribute('href'),APP_DEEP);
+  assert.equal(t.sockets[0].url,'wss://beresta.invalid/api/v1/account/delete-request/telegram/ws/del-1');
+  assert.equal(JSON.parse(t.w.sessionStorage.getItem(FLOW)).purpose,'delete');
+  state.status='requested';t.sockets[0].push({status:'confirmed'});await settled();
+  assert.match(t.$('delete-status').textContent,/Запрос принят/);assert.equal(t.w.sessionStorage.getItem(FLOW),null);
+ }finally{t.closeAll();}
+ // The tab came back from Telegram on a phone: the dialog opens again and finishes.
+ state.status='pending';
+ t=await open({me:user(),routes,session:{[FLOW]:JSON.stringify({id:'del-2',expires:Date.now()+120000,purpose:'delete'})}});
+ try{
+  await settled();
+  assert.equal(t.$('delete-dialog').open,true);assert.equal(t.$('delete-status').textContent,'Завершаем подтверждение…');
+  assert.equal(t.sockets[0].url,'wss://beresta.invalid/api/v1/account/delete-request/telegram/ws/del-2');
+  state.status='requested';t.sockets[0].push({status:'confirmed'});await settled();
+  assert.match(t.$('delete-status').textContent,/Запрос принят/);
+ }finally{t.closeAll();}
+ // A phone navigates this tab, and a closed dialog forgets the flow.
+ state.status='pending';
+ t=await open({me:user(),phone:true,routes});
+ try{
+  t.$('open-delete').click();t.$('delete-telegram-start').click();await settled();
+  assert.equal(t.openCalls(),0);assert.deepEqual(t.navigations,[DEEP]);
+  t.$('delete-dialog').close();
+  assert.equal(t.w.sessionStorage.getItem(FLOW),null);assert.equal(t.timers.size,0);
+ }finally{t.closeAll();}
+}
+
 function staticChecks(){
  const index=read('index.html'),privacy=read('privacy.html');
  for(const [name,html] of [['index.html',index],['privacy.html',privacy]]){
@@ -252,6 +470,12 @@ module.exports=async()=>{
  await recovery();
  await resetPage();
  await policyAndDeletion();
- console.log('Auth checks passed: Telegram sign-in, recovery, reset page, policy banner, deletion.');
+ await oneTapSignIn();
+ await socketPush();
+ await socketFailureFallsBackToPolling();
+ await comingBack();
+ await resumeAfterReload();
+ await deletionLive();
+ console.log('Auth checks passed: Telegram sign-in, one tap, WebSocket push, resume, recovery, reset page, policy banner, deletion.');
 };
 if(require.main===module)module.exports().catch(e=>{console.error(e);process.exitCode=1;});

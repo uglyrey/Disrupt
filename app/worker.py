@@ -1,13 +1,22 @@
-"""Durable at-most-once dispatch. Ambiguous failures never trigger an automatic retry."""
+"""Durable dispatch of AI processing with a few careful automatic retries.
+
+Every paid call is reserved and recorded before it is sent. A failure puts the same job back to `queued` with a
+`not_before` time only when `app.retry_policy` allows it: clear gateway errors up to two retries, an ambiguous call
+(it may have been billed) one retry, bad output one retry, everything else never. Retries are made here and nowhere
+else, spaced out with jitter, capped per person and per deployment, and paused by a circuit breaker when the gateway
+keeps failing. A retry takes the same job and capture, so it does not charge the daily units again. Assistant
+requests (`app/assistant.py`) stay at-most-once.
+"""
 
 import signal
 import threading
 import time
 
 from pydantic import ValidationError
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 
 from app import crypto
+from app.ai_guard import BLOCKED_CODE, OutputGuard
 from app.analytics import record_event
 from app.assistant import run_assistant_once
 from app.audio_contracts import AUDIO_MEDIA_TYPES, AudioReader, SpeechProvider
@@ -29,7 +38,8 @@ from app.models import (
 )
 from app.providers import ProviderError, make_provider, validate_result
 from app.reminders import auto_reminders
-from app.services import ensure_category, lock_account, save_revision
+from app.retry_policy import breaker_open, decide
+from app.services import lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_speech_provider
 from app.usage import UsageRecorder
 
@@ -63,6 +73,7 @@ class Worker:
         self.audio_storage = audio_storage
         self.speech_provider = speech_provider
         self.usage = UsageRecorder(sessions, settings)
+        self.guard = OutputGuard.for_runtime(settings, self.provider)
 
     def original_for_job(self, job_id):
         with self.sessions() as db:
@@ -125,41 +136,69 @@ class Worker:
             raise ProviderError("stt_invalid_response")
         return text
 
+    def record_failure(self, db, job_id, code, *, retry_after=None, expired_before=None, now=None):
+        """Settle one failed attempt in the caller's transaction. Returns "retry", "failed" or None (nothing to do).
+
+        The row is locked, so two workers never settle the same attempt twice. With `expired_before` the job must
+        still hold a lease that ended before that time.
+        """
+        now = time.time() if now is None else now
+        job = db.scalar(
+            select(Job).where(Job.id == job_id).with_for_update().execution_options(populate_existing=True)
+        )
+        if job is None or job.status != "running":
+            return None
+        if expired_before is not None and (job.lease_until is None or job.lease_until >= expired_before):
+            return None
+        delay = decide(db, self.settings, job, code, retry_after, now=now)
+        job.last_error_code, job.last_failed_at = code, now
+        if delay is not None:
+            job.status, job.lease_until = "queued", None
+            job.attempts, job.not_before, job.error_code = (job.attempts or 0) + 1, now + delay, None
+            return "retry"
+        job.status, job.error_code, job.finished_at, job.not_before = "failed", code, now, None
+        capture = db.get(Capture, job.capture_id)
+        record_event(db, job.user_id, "processing_failed", job.id, capture.channel)
+        cancel_processing_reply(db, job.id)
+        return "failed"
+
     def claim(self):
         now = time.time()
         with self.sessions() as db:
-            expired = db.execute(
-                update(Job)
-                .where(Job.status == "running", Job.lease_until < now)
-                .values(status="failed", error_code="execution_unknown", finished_at=now)
-                .returning(Job.id, Job.user_id, Job.capture_id)
-            ).all()
-            if expired:
-                log_error(
-                    "job_lease_expired",
-                    "execution_unknown",
-                    log_file=self.settings.error_log_file,
-                )
-                for expired_id, user_id, capture_id in expired:
-                    capture = db.get(Capture, capture_id)
-                    record_event(db, user_id, "processing_failed", expired_id, capture.channel)
-                    cancel_processing_reply(db, expired_id)
-            job_id = db.scalar(
-                select(Job.id)
-                .where(Job.status == "queued", Job.provider == self.settings.provider)
-                .order_by(Job.created_at, Job.id)
-                .limit(1)
+            expired = db.scalars(select(Job.id).where(Job.status == "running", Job.lease_until < now)).all()
+            for expired_id in expired:
+                # A call that outlived its lease is an ambiguous failure, which the policy may retry once.
+                outcome = self.record_failure(db, expired_id, "execution_unknown", expired_before=now, now=now)
+                if outcome:
+                    log_error(
+                        "job_lease_expired" if outcome == "failed" else "job_lease_expired_retry",
+                        "execution_unknown",
+                        log_file=self.settings.error_log_file,
+                        job_id=expired_id,
+                    )
+            waiting = (
+                Job.status == "queued", Job.provider == self.settings.provider,
+                or_(Job.not_before.is_(None), Job.not_before <= now),
             )
-            if job_id is None:
+            ready = db.execute(
+                select(Job.id, Job.attempts).where(*waiting).order_by(Job.created_at, Job.id).limit(1)
+            ).first()
+            if ready is not None and ready.attempts and breaker_open(db, self.settings, now):
+                # The gateway is struggling. Retries wait, fresh jobs may still try once.
+                ready = db.execute(
+                    select(Job.id, Job.attempts).where(*waiting, Job.attempts == 0)
+                    .order_by(Job.created_at, Job.id).limit(1)
+                ).first()
+            if ready is None:
                 db.commit()
                 return None
             claimed = db.execute(
                 update(Job)
-                .where(Job.id == job_id, Job.status == "queued")
-                .values(status="running", lease_until=now + self.settings.lease_seconds)
+                .where(Job.id == ready.id, Job.status == "queued")
+                .values(status="running", lease_until=now + self.settings.lease_seconds, not_before=None)
             ).rowcount
             db.commit()
-            return job_id if claimed else None
+            return ready.id if claimed else None
 
     def reserve_budget(self, db, user_id):
         global_ok = db.execute(
@@ -183,27 +222,19 @@ class Worker:
             raise ProviderError("budget_exhausted")
         db.commit()  # Reservation survives crashes; an uncertain call still consumes a slot.
 
-    def fail(self, job_id, code, *, exception=None, http_status=None):
-        log_error(
-            "job_failed",
-            code,
-            log_file=self.settings.error_log_file,
-            job_id=job_id,
-            http_status=http_status,
-            exception=exception,
-        )
+    def fail(self, job_id, code, *, exception=None, http_status=None, retry_after=None):
         with self.sessions() as db:
-            changed = db.execute(
-                update(Job)
-                .where(Job.id == job_id, Job.status == "running")
-                .values(status="failed", error_code=code, finished_at=time.time())
-            ).rowcount
-            if changed:
-                job = db.get(Job, job_id)
-                capture = db.get(Capture, job.capture_id)
-                record_event(db, job.user_id, "processing_failed", job_id, capture.channel)
-                cancel_processing_reply(db, job_id)
+            outcome = self.record_failure(db, job_id, code, retry_after=retry_after)
             db.commit()
+        if outcome:
+            log_error(
+                "job_failed" if outcome == "failed" else "job_retry_scheduled",
+                code,
+                log_file=self.settings.error_log_file,
+                job_id=job_id,
+                http_status=http_status,
+                exception=exception,
+            )
 
     def run_once(self):
         job_id = self.claim()
@@ -228,8 +259,16 @@ class Worker:
                     measured(original, categories=tuple(category_context), on_usage=on_usage)
                     if measured else self.provider.structure(original, categories=tuple(category_context))
                 )
-                return validate_result(result, original)
+                checked = validate_result(result, original)
+                rule = self.guard.structured_violation(checked, original)
+                if rule is None:
+                    return checked
+                # The answer repeated a secret, our instructions or a key-like string. Keep only what the person wrote.
+                blocked.append(rule)
+                log_error("ai_output_blocked", rule, log_file=self.settings.error_log_file, job_id=job_id)
+                return self.guard.safe_note(original)
 
+            blocked = []
             result = self.usage.call(job_id, "llm", self.provider, structure)
             now = time.time()
             with self.sessions() as db:
@@ -238,7 +277,8 @@ class Worker:
                     update(Job)
                     .where(Job.id == job_id, Job.status == "running", Job.lease_until >= now)
                     .values(status="succeeded", finished_at=now,
-                            error_code="ungrounded_details_omitted" if result._grounding_details_omitted else None)
+                            error_code=BLOCKED_CODE if blocked else (
+                                "ungrounded_details_omitted" if result._grounding_details_omitted else None))
                 ).rowcount
                 if not completed:
                     db.rollback()
@@ -257,21 +297,7 @@ class Worker:
                     ],
                 )
                 if result.category_name:
-                    existing_id = next(
-                        (
-                            category_id
-                            for name, category_id in category_context.items()
-                            if name.casefold() == result.category_name.casefold()
-                        ),
-                        None,
-                    )
-                    category = (
-                        db.scalar(
-                            select(Category).where(Category.id == existing_id, Category.user_id == user_id)
-                        )
-                        if existing_id
-                        else ensure_category(db, user_id, result.category_name, best_effort=True)
-                    )
+                    category = resolve_ai_category(db, user_id, result.category_name, category_context)
                     note.category_id = category.id if category else None
                 db.add(note)
                 db.flush()
@@ -303,7 +329,7 @@ class Worker:
                 record_event(db, user_id, "processing_completed", job_id, capture.channel)
                 db.commit()
         except ProviderError as exc:
-            self.fail(job_id, exc.code, exception=exc, http_status=exc.http_status)
+            self.fail(job_id, exc.code, exception=exc, http_status=exc.http_status, retry_after=exc.retry_after)
         except ValidationError as exc:
             self.fail(job_id, "provider_invalid_response", exception=exc)
         except Exception as exc:

@@ -167,6 +167,10 @@
 
   /* ---------- Autosave ---------- */
   let timer = 0, retryTimer = 0, running = null, conflict = false, saved = false;
+  // Random tab label. The server never merges versions of two tabs into one history entry.
+  const editor = (window.crypto?.randomUUID ? window.crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g, '');
+  // The note whose editing session is open on the server, until a checkpoint closes it.
+  let openFor = null;
   const delay = () => (Number.isFinite(window.noteAutosaveMs) ? window.noteAutosaveMs : 1000);
   const retryDelay = () => (Number.isFinite(window.noteAutosaveRetryMs) ? window.noteAutosaveRetryMs : 5000);
   const differs = () => Boolean(currentNote) && (title.value !== currentNote.title || body.value !== currentNote.markdown);
@@ -200,7 +204,8 @@
     if (noteBusy) { timer = window.setTimeout(() => { timer = 0; run(); }, 300); return false; }
     setStatus('saving', 'Сохраняется…');
     try {
-      const result = await api(`/api/v1/notes/${id}`, {method: 'PATCH', body: JSON.stringify({...payload, version})});
+      const result = await api(`/api/v1/notes/${id}`, {method: 'PATCH', body: JSON.stringify({...payload, version, editor})});
+      openFor = id;
       if (currentNote !== target) return true;
       Object.assign(target, {version: result.version, title: result.title, markdown: result.markdown,
         updated_at: result.updated_at, structure_confirmed_at: result.structure_confirmed_at});
@@ -233,6 +238,20 @@
     await run();
     return !differs();
   }
+  // The person leaves the note: the server closes the editing session and the next edit starts a new version.
+  // Same text, so the server adds no version. Failures stay silent, the session then closes by its own timeout.
+  async function checkpoint(target = currentNote) {
+    if (!target || openFor !== target.id) return false;
+    if (running) await running;
+    if (openFor !== target.id) return false;
+    openFor = null;
+    try {
+      const result = await api(`/api/v1/notes/${target.id}`, {method: 'PATCH',
+        body: JSON.stringify({title: target.title, markdown: target.markdown, version: target.version, checkpoint: true, editor})});
+      if (result && typeof result.version === 'number') target.version = result.version;
+      return true;
+    } catch { return false; }
+  }
   function onEdit() {
     if (!currentNote) return;
     if (/\n/.test(title.value)) title.value = title.value.replace(/\s*\n\s*/g, ' ');
@@ -243,7 +262,11 @@
   title.addEventListener('input', onEdit);
   body.addEventListener('input', onEdit);
   for (const field of [title, body]) field.addEventListener('blur', () => { if (pending()) flush(); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && pending()) flush(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') return;
+    if (pending()) flush().then(() => checkpoint());
+    else checkpoint();
+  });
   title.addEventListener('keydown', event => {
     if (event.key !== 'Enter' || event.isComposing) return;
     event.preventDefault(); body.focus(); body.setSelectionRange?.(0, 0);
@@ -313,6 +336,6 @@
     try { addText(await clipboard.readText(), 'clipboard'); } catch (_) { pasteFallback(); }
   });
 
-  window.BerestaFocus = {pending, flush, closeAll, open: openTool, close: closeTool, fitTitle, importFile, tools};
+  window.BerestaFocus = {pending, flush, checkpoint, closeAll, open: openTool, close: closeTool, fitTitle, importFile, tools};
   syncAll();
 })();
