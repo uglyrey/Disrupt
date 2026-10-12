@@ -203,4 +203,4 @@ def test_cloudru_sends_date_context_as_data_before_the_text():
     assert set(context) == {"today", "weekday", "timezone", "existing_categories"}
     assert context["timezone"] == "Asia/Yekaterinburg" and context["existing_categories"] == ["Покупки"]
     datetime.strptime(context["today"], "%Y-%m-%d")
-    assert messages[2] == {"role": "user", "content": "Купить хлеб завтра"}
+    assert messages[2] == {"role": "user", "content": json.dumps({"note_text": "Купить хлеб завтра"}, ensure_ascii=False)}

@@ -67,6 +67,8 @@ MANUAL_TTL = 600
 TELEGRAM_UNITS = 4096
 WATCH_TTL = 600
 WATCH_INTERVAL = 3.0
+CHAT_LIMIT, CHAT_WINDOW = 20, 60.0  # messages per chat per minute, buttons are not counted
+CHAT_TABLE_MAX = 2000
 
 
 class Bot:
@@ -77,6 +79,7 @@ class Bot:
         # In-memory only: a restart forgets pending "next message without AI" marks and link watchers.
         self.manual_until = {}
         self.watchers = {}
+        self.recent = {}  # chat_id -> times of recent messages, in memory only
 
     @property
     def web(self):
@@ -153,6 +156,19 @@ class Bot:
                 raise
             logger.warning("bot_reply_unconfirmed code=%s", error.code)
 
+    def throttle(self, chat_id):
+        """Answer ok, warn (the first message over the limit) or drop. Counts messages per chat in memory."""
+        now = self.clock()
+        if len(self.recent) > CHAT_TABLE_MAX:
+            self.recent = {k: v for k, v in self.recent.items() if v and now - v[-1] < CHAT_WINDOW}
+        times = [t for t in self.recent.get(chat_id, ()) if now - t < CHAT_WINDOW]
+        over = len(times) >= CHAT_LIMIT
+        times.append(now)  # Dropped messages count too, so a flood stays blocked until it pauses.
+        self.recent[chat_id] = times
+        if not over:
+            return "ok"
+        return "warn" if len(times) == CHAT_LIMIT + 1 else "drop"
+
     async def handle(self, update):
         callback = update.get("callback_query")
         message = callback.get("message") if isinstance(callback, dict) else update.get("message")
@@ -168,6 +184,12 @@ class Bot:
         ):
             return
         chat_id = chat["id"]
+        if not callback:
+            verdict = self.throttle(chat_id)
+            if verdict != "ok":
+                if verdict == "warn":
+                    await self.notify(chat_id, "Слишком часто. Подожди минуту и отправь ещё раз.")
+                return
         identity = {
             "bot_id": self.settings.bot_id,
             "update_id": update["update_id"],
