@@ -800,6 +800,8 @@ def make_fallback_provider(settings: Settings, *, transport: httpx.BaseTransport
     """
     if not settings.fallback_enabled or settings.provider != "cloudru" or not settings.allow_live_requests:
         return None
+    if not settings.fallback_token:
+        raise ValueError("Fallback is enabled but the relay token is missing (NOTES_FALLBACK_TOKEN_FILE)")
     base_url = settings.fallback_base_url.rstrip("/")
     return CloudRuProvider(
         settings.fallback_token, settings.fallback_model, base_url=base_url, transport=transport,

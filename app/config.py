@@ -226,7 +226,8 @@ class Settings:
             raise ValueError("NOTES_REVISION_KEEP must be 0 or between 5 and 1000")
         if self.fallback_enabled:
             check_fallback_url(self.fallback_base_url)
-            if len(self.fallback_token) < 32:
+            # Токен нужен только воркеру. Веб-процесс его не получает, поэтому пустой токен допустим.
+            if self.fallback_token and len(self.fallback_token) < 32:
                 raise ValueError("Fallback relay token must contain at least 32 characters")
             if not self.fallback_model or not self.fallback_stt_model:
                 raise ValueError("Fallback needs a chat model and a speech model")
@@ -308,7 +309,7 @@ class Settings:
         if fallback_token_file and fallback_token:
             raise ValueError("Use either NOTES_FALLBACK_TOKEN or NOTES_FALLBACK_TOKEN_FILE")
         fallback_enabled = flag("NOTES_FALLBACK_ENABLED", False)
-        if fallback_enabled and fallback_token_file:
+        if fallback_enabled and fallback_token_file and os.path.exists(fallback_token_file):
             fallback_token = read_secret_file(fallback_token_file, maximum=4096)
 
         llm_read_timeout = int(os.environ.get("NOTES_LLM_READ_TIMEOUT_SECONDS", str(LLM_READ_TIMEOUT_SECONDS)))

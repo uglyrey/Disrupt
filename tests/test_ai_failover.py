@@ -223,6 +223,17 @@ def test_fallback_is_off_by_default_and_checks_its_settings(monkeypatch, tmp_pat
     monkeypatch.setenv("NOTES_FALLBACK_TOKEN", RELAY_TOKEN)
     with pytest.raises(ValueError):
         Settings.from_env()
+    # Веб-процесс не получает токен: файла нет, настройки грузятся, а клиент резерва без токена не создаётся.
+    monkeypatch.delenv("NOTES_FALLBACK_TOKEN")
+    monkeypatch.setenv("NOTES_FALLBACK_TOKEN_FILE", str(tmp_path / "missing"))
+    web = Settings.from_env()
+    assert web.fallback_enabled and web.fallback_token == ""
+    live = replace(Settings_for_live(), fallback_token="")
+    with pytest.raises(ValueError):
+        make_fallback_provider(live)
+    monkeypatch.setenv("NOTES_STT_ENABLED", "true")
+    with pytest.raises(ValueError):
+        make_fallback_speech_provider(live)
 
 
 def test_fallback_clients_exist_only_in_live_mode_with_the_switch_on():
