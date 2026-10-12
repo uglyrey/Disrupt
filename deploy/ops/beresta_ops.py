@@ -188,6 +188,9 @@ def _backup(args, remote=None):
         work = Path(directory)
         current = states(command)
         services = [s for s in ("telegram", "scheduler", "worker", "api") if current.get(s, {}).get("State") == "running"]
+        containers = [current[s].get("ID", "") for s in services]
+        if any(not re.fullmatch(r"[0-9a-f]{12,64}", identifier) for identifier in containers):
+            raise Failure("writer_container_id_missing_or_invalid")
         if current.get("db", {}).get("State") != "running":
             raise Failure("database_not_running")
         if "telegram" in current and not args.telegram:
@@ -232,7 +235,9 @@ def _backup(args, remote=None):
             # Start only services that were running. Never start an intentionally disabled bot.
             if services:
                 try:
-                    restart_error = bool(run(command + ["start", *services], check=False).returncode)
+                    # Compose start traverses depends_on and can rerun an obsolete migration image.
+                    # Resume precisely the containers we stopped, without a deployment or migrations.
+                    restart_error = bool(run(["docker", "start", *containers], check=False).returncode)
                 except Failure:
                     restart_error = True
         name = datetime.now(UTC).strftime("beresta-%Y%m%dT%H%M%S-") + os.urandom(4).hex() + ".tar.age"
