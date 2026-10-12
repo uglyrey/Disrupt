@@ -21,15 +21,21 @@ from app.assistant_retrieval import (
     context_for_recommend,
 )
 from app.error_logging import log_error
+from app.fallback_budget import ESTIMATE_VERSION, PROMPT_OVERHEAD_CHARS, llm_max_cost
 from app.limits import ASSISTANT_UNIT_COST, day_window, within_daily_limit
 from app.models import AssistantRequest, Item, Note, ProviderUsage, User, new_id
+from app.provider_router import FALLBACK, PRIMARY
 from app.providers import (
+    ASSISTANT_MAX_TOKENS,
+    ASSISTANT_PROMPTS,
     NOT_FOUND_ANSWER,
     CloudRuProvider,
     MockProvider,
     ProviderError,
+    assistant_input,
     validate_assistant,
 )
+from app.retry_policy import GATEWAY_CODES
 from app.services import lock_account
 
 KINDS = ("ask", "recommend", "digest")
@@ -244,7 +250,9 @@ def model_name(provider):
 def run_assistant_once(worker):
     """Process one queued assistant request. Returns False when nothing was queued.
 
-    The provider is called at most once. An uncertain outcome is stored as failed and never retried.
+    The provider is called at most once. An uncertain outcome is stored as failed and never retried. The only
+    exception is the reserve service (docs/ai-failover-v1.md). When the main gateway does not answer, the same
+    request gets one more try there, after the first call has ended, never in parallel.
     """
     request_id = claim_request(worker)
     if request_id is None:
@@ -262,35 +270,35 @@ def run_assistant_once(worker):
             # Nothing to send. No provider call, so no unit is spent.
             finish_request(worker, request_id, empty_result(kind), units=0)
             return True
-        call = getattr(worker.provider, "assistant_with_usage", None)
-        plain = getattr(worker.provider, "assistant", None)
-        if call is None and plain is None:
-            raise ProviderError("provider_unavailable")
-        with worker.sessions() as db:
-            if worker.settings.provider == "cloudru":
-                worker.reserve_budget(db, user_id)
-            receipt_id = start_receipt(db, request_id, user_id, worker.provider)
-        started = time.monotonic()
+        estimate = None
+        if worker.router is not None:
+            chars = len(ASSISTANT_PROMPTS[kind]) + len(assistant_input(kind, context, question)) + PROMPT_OVERHEAD_CHARS
+            estimate = llm_max_cost(worker.settings, chars, ASSISTANT_MAX_TOKENS[kind])
+        attempt = worker.begin_assistant_attempt(estimate)
         try:
-            def on_usage(values):
-                worker.usage.tokens(receipt_id, values)
-
-            raw = (
-                call(kind, context, question=question, on_usage=on_usage)
-                if call else plain(kind, context, question=question)
-            )
-            result = validate_assistant(kind, raw, context)
-            rule = worker.guard.assistant_violation(result, context, question)
-            if rule:
-                log_error("ai_output_blocked", rule, log_file=worker.settings.error_log_file, job_id=request_id)
-                raise ProviderError(BLOCKED_CODE)
-        except Exception as exc:
-            ambiguous = isinstance(exc, ProviderError) and (
-                exc.code.endswith("_unknown") or exc.code in {"execution_unknown", "provider_unavailable"}
-            )
-            worker.usage.finish(receipt_id, started, "unknown" if ambiguous else "failed")
-            raise
-        worker.usage.finish(receipt_id, started, "succeeded")
+            try:
+                result = call_provider(worker, request_id, user_id, kind, context, question, attempt)
+            except ProviderError as exc:
+                if worker.router is None or attempt.fallback:
+                    raise
+                note_primary_failure(worker, exc.code)
+                if exc.code not in GATEWAY_CODES:
+                    raise
+                # Основной шлюз не ответил. Запрос помощника ничего не меняет, поэтому один раз пробуем резерв.
+                attempt.finish()
+                second = worker.begin_assistant_attempt(estimate, force_fallback=True)
+                if second is None:
+                    raise
+                try:
+                    extend_lease(worker, request_id)
+                    result = call_provider(worker, request_id, user_id, kind, context, question, second, ":fb")
+                finally:
+                    second.finish()
+            else:
+                if worker.router is not None and not attempt.fallback:
+                    worker.router.on_success()
+        finally:
+            attempt.finish()
         finish_request(worker, request_id, result)
     except ProviderError as exc:
         fail_request(worker, request_id, exc.code, exception=exc, http_status=exc.http_status)
@@ -301,15 +309,73 @@ def run_assistant_once(worker):
     return True
 
 
-def start_receipt(db, request_id, user_id, provider):
+def call_provider(worker, request_id, user_id, kind, context, question, attempt, suffix=""):
+    """One model call for the assistant with its receipt. Raises ProviderError, never retries."""
+    provider = worker.fallback_provider if attempt.fallback else worker.provider
+    call = getattr(provider, "assistant_with_usage", None)
+    plain = getattr(provider, "assistant", None)
+    if call is None and plain is None:
+        raise ProviderError("provider_unavailable")
+    with worker.sessions() as db:
+        if worker.settings.provider == "cloudru" and not attempt.fallback:
+            worker.reserve_budget(db, user_id)
+        receipt_id = start_receipt(db, request_id, user_id, provider, attempt=attempt, suffix=suffix)
+    started = time.monotonic()
+    try:
+        def on_usage(values):
+            worker.usage.tokens(receipt_id, values)
+
+        raw = (
+            call(kind, context, question=question, on_usage=on_usage)
+            if call else plain(kind, context, question=question)
+        )
+        result = validate_assistant(kind, raw, context)
+        rule = worker.guard.assistant_violation(result, context, question)
+        if rule:
+            log_error("ai_output_blocked", rule, log_file=worker.settings.error_log_file, job_id=request_id)
+            raise ProviderError(BLOCKED_CODE)
+    except Exception as exc:
+        ambiguous = isinstance(exc, ProviderError) and (
+            exc.code.endswith("_unknown") or exc.code in {"execution_unknown", "provider_unavailable"}
+        )
+        worker.usage.finish(receipt_id, started, "unknown" if ambiguous else "failed")
+        if attempt.spend is not None:
+            worker.usage.settle_stage(receipt_id, "llm", attempt.spend, exc)
+        raise
+    worker.usage.finish(receipt_id, started, "succeeded")
+    if attempt.spend is not None:
+        worker.usage.settle_stage(receipt_id, "llm", attempt.spend)
+    return result
+
+
+def note_primary_failure(worker, code):
+    with worker.sessions() as db:
+        worker.router.on_failure(db, PRIMARY, code, time.time())
+        db.commit()
+
+
+def extend_lease(worker, request_id):
+    with worker.sessions() as db:
+        db.execute(
+            update(AssistantRequest)
+            .where(AssistantRequest.id == request_id, AssistantRequest.status == "running")
+            .values(lease_until=time.time() + worker.settings.lease_seconds)
+        )
+        db.commit()
+
+
+def start_receipt(db, request_id, user_id, provider, *, attempt=None, suffix=""):
     """Receipt and `started_at` are saved before the call. From here the unit counts as spent."""
     lock_account(db, user_id)
     now = time.time()
     mock = type(provider) is MockProvider
+    fallback = attempt is not None and attempt.spend is not None
+    label = FALLBACK if fallback else "mock" if mock else getattr(provider, "provider_label", None) or "injected"
     row = ProviderUsage(
-        id=new_id(), user_id=user_id, operation_id=request_id, request_id=request_id + ":assistant",
-        channel="web", kind="llm", model=model_name(provider), is_test=db.get(User, user_id).is_test,
-        tariff_version="mock-no-billing-v1" if mock else None, status="unknown",
+        id=new_id(), user_id=user_id, operation_id=request_id, request_id=request_id + ":assistant" + suffix,
+        channel="web", kind="llm", model=model_name(provider), provider=label, is_test=db.get(User, user_id).is_test,
+        tariff_version=ESTIMATE_VERSION if fallback else "mock-no-billing-v1" if mock else None, status="unknown",
+        estimated_cost=attempt.spend.estimates.get("llm") if fallback else None,
         cost=Decimal(0) if mock else None, input_tokens=0 if mock else None, output_tokens=0 if mock else None,
         cache_tokens=0 if mock else None, occurred_at=now,
     )

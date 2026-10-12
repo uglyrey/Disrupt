@@ -33,11 +33,13 @@ MIN_SECRET_LENGTH = 12
 SECRET_ENV = (
     "NOTES_CLOUDRU_API_KEY", "NOTES_INTERNAL_API_TOKEN", "NOTES_ANALYTICS_PSEUDONYM_KEY",
     "NOTES_SMTP_BZ_API_KEY", "NOTES_SMTP_PASSWORD", "NOTES_DATABASE_PASSWORD", "NOTES_DATA_KEY",
-    "BERESTA_BOT_TOKEN", "BERESTA_SERVICE_TOKEN",
+    "BERESTA_BOT_TOKEN", "BERESTA_SERVICE_TOKEN", "NOTES_FALLBACK_TOKEN",
+    # Ключа OpenAI в ядре быть не должно. Если он всё же попал в окружение, ответ с ним не пройдёт.
+    "OPENAI_API_KEY",
 )
 # Settings fields that hold a path to a secret file, and the one that holds a comma separated list.
 SECRET_SETTING_FILES = ("data_key_file", "smtp_bz_api_key_file", "smtp_password_file")
-SECRET_SETTING_VALUES = ("internal_api_token", "analytics_pseudonym_key")
+SECRET_SETTING_VALUES = ("internal_api_token", "analytics_pseudonym_key", "fallback_token")
 
 _INVISIBLE = "​‌‍‎‏⁠﻿"
 _STRIP_INVISIBLE = re.compile("[" + _INVISIBLE + "]")
@@ -84,7 +86,7 @@ def _read_file(path):
         return ""
 
 
-def loaded_secrets(settings=None, provider=None):
+def loaded_secrets(settings=None, provider=None, *more_providers):
     """Secret values that are loaded now. Held in memory for comparison, never logged or returned to a caller."""
     found = []
     for name in SECRET_ENV:
@@ -103,9 +105,10 @@ def loaded_secrets(settings=None, provider=None):
         for path in (getattr(settings, "data_old_key_files", "") or "").split(","):
             if path.strip():
                 found.append(_read_file(path.strip()))
-    key = getattr(provider, "_api_key", "")
-    if isinstance(key, str):
-        found.append(key)
+    for client in (provider, *more_providers):
+        key = getattr(client, "_api_key", "")
+        if isinstance(key, str):
+            found.append(key)
     return {value.strip() for value in found if isinstance(value, str) and len(value.strip()) >= MIN_SECRET_LENGTH}
 
 
@@ -129,8 +132,8 @@ class OutputGuard:
         self._prompt_windows = _prompt_windows()
 
     @classmethod
-    def for_runtime(cls, settings=None, provider=None):
-        return cls(loaded_secrets(settings, provider))
+    def for_runtime(cls, settings=None, provider=None, *more_providers):
+        return cls(loaded_secrets(settings, provider, *more_providers))
 
     def violation(self, texts, source=""):
         """Name of the first rule that the texts break, or None. `source` is what the person wrote themselves."""

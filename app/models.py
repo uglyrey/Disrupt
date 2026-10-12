@@ -122,6 +122,10 @@ class Job(Base):
     not_before: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_failed_at: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    # Резервный ИИ (docs/ai-failover-v1.md). provider_used это сервис последней попытки, next_route подсказка
+    # для следующей: openai идти сразу к резерву, cloudru остаться на основном, пусто решает маршрутизатор.
+    provider_used: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    next_route: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class Note(Base):
@@ -154,6 +158,29 @@ class ProviderBudget(Base):
     __tablename__ = "provider_budgets"
     id: Mapped[str] = mapped_column(String(16), primary_key=True)
     reserved_calls: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ProviderRoute(Base):
+    """Состояние основного ИИ-шлюза, общее для всех воркеров. Одна строка на сервис."""
+
+    __tablename__ = "provider_routes"
+    __table_args__ = (CheckConstraint("state IN ('up', 'down')", name="ck_provider_routes_state"),)
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    state: Mapped[str] = mapped_column(String(8), default="up", server_default="up")
+    failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_failure_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    changed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    next_probe_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    probe_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class FallbackSpend(Base):
+    """Сколько резервный ИИ уже потратил и зарезервировал за календарный день. Деньги в миллионных долях доллара."""
+
+    __tablename__ = "fallback_spend"
+    day: Mapped[str] = mapped_column(String(10), primary_key=True)
+    committed_micro_usd: Mapped[int] = mapped_column(BigInteger, default=0, server_default="0")
+    updated_at: Mapped[float] = mapped_column(Float, default=time.time)
 
 
 class TelegramIdentity(Base):
@@ -368,6 +395,8 @@ class ProviderUsage(Base):
     channel: Mapped[str] = mapped_column(String(16))
     kind: Mapped[str] = mapped_column(String(16))
     model: Mapped[str] = mapped_column(String(200))
+    # Какой сервис ответил: cloudru, openai (резерв), mock. Пусто у записей до резервного ИИ.
+    provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
     tariff_version: Mapped[str | None] = mapped_column(String(100), nullable=True)
     status: Mapped[str] = mapped_column(String(32))
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)

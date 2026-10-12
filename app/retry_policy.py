@@ -29,6 +29,9 @@ BAD_OUTPUT_CODES = frozenset({"provider_invalid_response", "provider_incomplete_
 # Failures that show the gateway is unwell. They feed the circuit breaker.
 GATEWAY_CODES = CLEAR_CODES | AMBIGUOUS_CODES
 
+# Задание, чья последняя попытка шла на резерв (docs/ai-failover-v1.md), предохранитель основного шлюза не считает.
+FALLBACK_PROVIDER = "openai"
+
 HOUR = 3600
 MAX_BREAKER_ROWS = 500
 
@@ -95,7 +98,10 @@ def breaker_open(db, settings, now):
     horizon = settings.retry_breaker_window_seconds + settings.retry_breaker_pause_seconds
     stamps = db.scalars(
         select(Job.last_failed_at)
-        .where(Job.last_failed_at >= now - horizon, Job.last_error_code.in_(GATEWAY_CODES))
+        .where(
+            Job.last_failed_at >= now - horizon, Job.last_error_code.in_(GATEWAY_CODES),
+            or_(Job.provider_used.is_(None), Job.provider_used != FALLBACK_PROVIDER),
+        )
         .order_by(Job.last_failed_at.desc()).limit(MAX_BREAKER_ROWS)
     ).all()
     stamps.reverse()
@@ -105,14 +111,25 @@ def breaker_open(db, settings, now):
     return False
 
 
-def decide(db, settings, job, code, retry_after=None, *, now=None, rng=random.random):
-    """Seconds until the next attempt of `job` after failure `code`, or None for a final failure."""
+def decide(db, settings, job, code, retry_after=None, *, now=None, rng=random.random, failover=False):
+    """Seconds until the next attempt of `job` after failure `code`, or None for a final failure.
+
+    `failover` means the failed attempt went to the main gateway and the reserve service is ready. The next
+    attempt then goes to the reserve at once. It still counts as one attempt and obeys the hourly caps,
+    but neither the pause table nor the breaker of the main gateway apply to it.
+    """
     now = time.time() if now is None else now
     if not settings.ai_retries_enabled:
         return None
     kind = classify(code)
     if kind is None:
         return None
+    if failover:
+        if retries_in_last_hour(db, now, job.user_id) >= settings.retry_user_per_hour:
+            return None
+        if retries_in_last_hour(db, now) >= settings.retry_global_per_hour:
+            return None
+        return 0.0
     delay = backoff(settings, kind, job.attempts or 0, retry_after, rng=rng)
     if delay is None:
         return None
