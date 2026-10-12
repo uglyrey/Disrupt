@@ -4,3 +4,5 @@ services:
     restart: "no"
     environment:
       BERESTA_BOT_NETWORK_ENABLED: "false"
+  ai-relay:
+    restart: "no"

@@ -4,6 +4,9 @@ set -eu
 test "$(id -u)" = 0
 ip -4 -o addr show dev beresta | grep -q ' inet 10\.77\.0\.2/'
 install -m 755 deploy/host/bot-compose /usr/local/sbin/beresta-bot
+# Reserve AI relay firewall script. Prepared only; the owner enables it (docs/ai-failover-v1.md).
+install -m 755 deploy/host/beresta-relay-firewall /usr/local/sbin/beresta-relay-firewall
+install -m 644 deploy/host/beresta-relay-firewall.service /etc/systemd/system/beresta-relay-firewall.service
 install -d -m 700 secrets
 python3 - <<'PY'
 import os

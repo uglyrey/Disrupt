@@ -1,8 +1,13 @@
 #!/bin/sh
 set -eu
 cd /opt/beresta/current
+# The owner creates /etc/beresta/ai-failover to give the worker the relay token (docs/ai-failover-v1.md).
+failover=""
+if [ -f /etc/beresta/ai-failover ]; then
+    failover="-f deploy/compose.ai-failover.yaml"
+fi
 # The owner removes the maintenance overlay only after DNS and HTTPS are ready.
 if [ ! -f /etc/beresta/domain-ready ]; then
-    exec docker compose --env-file .env.production -p beresta-pilot -f compose.production.yaml -f deploy/compose.core-private.yaml -f deploy/compose.limits.yaml -f deploy/compose.pre-domain.yaml "$@"
+    exec docker compose --env-file .env.production -p beresta-pilot -f compose.production.yaml -f deploy/compose.core-private.yaml -f deploy/compose.limits.yaml -f deploy/compose.pre-domain.yaml $failover "$@"
 fi
-exec docker compose --env-file .env.production -p beresta-pilot -f compose.production.yaml -f deploy/compose.core-private.yaml -f deploy/compose.limits.yaml "$@"
+exec docker compose --env-file .env.production -p beresta-pilot -f compose.production.yaml -f deploy/compose.core-private.yaml -f deploy/compose.limits.yaml $failover "$@"

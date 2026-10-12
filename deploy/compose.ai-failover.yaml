@@ -1,0 +1,11 @@
+# Gives the worker the relay token for the reserve AI. The API and other services never get it.
+# Used when /etc/beresta/ai-failover exists (see deploy/host/core-compose and docs/ai-failover-v1.md).
+services:
+  worker:
+    environment:
+      NOTES_FALLBACK_TOKEN_FILE: /run/secrets/ai_relay_token
+    secrets:
+      - ai_relay_token
+secrets:
+  ai_relay_token:
+    file: ./secrets/ai_relay_token.txt
