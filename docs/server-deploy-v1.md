@@ -65,3 +65,7 @@ Restore допускает `--identity -`. Владелец может пере�
 [Каталог Cloud.ru](https://cloud.ru/docs/foundation-models/ug/topics/overview__available__models) перечисляет Whisper. [Публичная спецификация Cloud.ru](https://cloud.ru/docs/foundation-models/ug/topics/api-ref__specs) описывает только models и chat completions. Multipart-формат кандидата взят из [OpenAI Audio API](https://developers.openai.com/api/reference/resources/audio/subresources/transcriptions/methods/create). Совместимость программного шлюза с этим методом является предположением и не проверена.
 
 STT остаётся выключенным. Для включения владелец должен получить подтверждённый протокол и модель шлюза, затем явно задать `NOTES_STT_ENABLED=true`, `NOTES_STT_PROTOCOL_CONFIRMED=true` и `NOTES_STT_MODEL`. Worker Compose передаёт эти настройки, по умолчанию они выключены. Проверка шлюза и включение описаны в [voice-text-replies-v1.md](voice-text-replies-v1.md), разовая проверка `python -m app.stt_readiness`. Не включать их на основании одного названия модели в каталоге.
+
+## Резервный ИИ
+
+Резервный ИИ через OpenAI выключен по умолчанию. Он требует посредника в Хельсинки и токена на ядре. Порядок включения, проверки и потолок расхода в [ai-failover-v1.md](ai-failover-v1.md). До публичного запуска нужно пересмотреть политику конфиденциальности, потому что тексты и аудио при падении основного шлюза уходят в OpenAI.
