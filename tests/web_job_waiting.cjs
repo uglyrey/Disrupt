@@ -115,6 +115,14 @@ module.exports = async function checkJobWaiting() {
     assert.match(s.$('message').textContent,/Неподтверждённые выводы, задачи или сроки не добавлены/);
     assert.match(s.$('jobs').textContent,/Неподтверждённые выводы, задачи или сроки не добавлены/);
   } finally { s?.dom.window.close(); }
+  try {
+    s = await scenario(); s.job.status = 'succeeded'; s.job.note_id = 'blocked-note';
+    s.job.error_code = 'ai_output_blocked'; s.finish();
+    await until(() => !s.$('note-card').hidden && !s.$('title').disabled);
+    assert.match(s.$('message').textContent,/ИИ ответил странно, заметка сохранена без обработки/);
+    assert.match(s.$('jobs').textContent,/ИИ ответил странно, заметка сохранена без обработки/);
+    assert.doesNotMatch(s.$('jobs').textContent,/Неподтверждённые/);
+  } finally { s?.dom.window.close(); }
   for (const audio of [false,true]) {
     try {
       s = await scenario({audio,pauseResultRead:true});
@@ -159,6 +167,19 @@ module.exports = async function checkJobWaiting() {
       assert.equal(s.calls.filter(c => c.path === '/api/v1/captures/text').length,1);
     } finally { s?.dom.window.close(); }
   }
+  try {
+    // The server scheduled an automatic retry. The job stays queued and carries retry_at.
+    s = await scenario();
+    s.job.status = 'queued'; s.job.attempts = 1; s.job.retry_at = Math.floor(Date.now()/1000) + 300; s.finish();
+    await until(() => s.$('job-status').textContent.includes('Попробуем ещё раз в'));
+    assert.match(s.$('job-status').textContent,/^Сервис ИИ не ответил\. Попробуем ещё раз в \d{1,2}:\d{2}.*\. Запись сохранена\.$/);
+    await until(() => /Попробуем ещё раз в/.test(s.$('jobs').textContent));
+    assert.match(s.$('jobs').textContent,/Запись сохранена\./,'History rows show the same waiting text');
+    assert.equal(s.$('capture-submit').disabled,false);
+    assert.equal(s.$('thought').disabled,false);
+    assert.equal(s.calls.filter(c => c.path === '/api/v1/captures/text').length,1);
+    assert.equal(s.calls.filter(c => c.path === `/api/v1/jobs/${s.job.id}`).length,1,'The job is followed, not abandoned');
+  } finally { s?.dom.window.close(); }
   try {
     s = await scenario(); s.$('thought').value = 'Draft during status outage'; s.failPoll();
     await until(() => s.$('message').textContent.includes('Исходник сохранён. Не удалось обновить статус'));

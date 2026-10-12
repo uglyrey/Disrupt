@@ -104,7 +104,7 @@
 
 ## Коды ошибок
 
-Те же, что у обычных записей, плюс `ungrounded_quote` (цитата не найдена в заметке), `budget_exhausted`, `execution_unknown` и `internal_error`.
+Те же, что у обычных записей, плюс `ungrounded_quote` (цитата не найдена в заметке), `ai_output_blocked` (ответ повторил секрет или инструкции, см. `docs/ai-security-v1.md`), `budget_exhausted`, `execution_unknown` и `internal_error`.
 
 ## Интерфейс
 

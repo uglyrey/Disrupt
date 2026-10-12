@@ -125,6 +125,8 @@ class AudioJobResponse(StrictModel):
     original_text: str
     created_at: float
     finished_at: float | None
+    attempts: int
+    retry_at: float | None
 
 
 class AudioMetadata(StrictModel):
@@ -211,6 +213,10 @@ class NoteEdit(StrictModel):
     version: Counter
     title: str = Field(min_length=1, max_length=200)
     markdown: str = Field(min_length=1, max_length=24000)
+    # Человек закончил правку: следующее сохранение начнёт новую версию в истории.
+    checkpoint: bool = False
+    # Случайная метка вкладки. Версии разных вкладок в историю не склеиваются.
+    editor: str | None = Field(default=None, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
     @field_validator("title", "markdown")
     @classmethod

@@ -36,6 +36,12 @@ def response_tokens(data):
     return Tokens(prompt, output, cache)
 
 
+def receipt_request_id(job, kind):
+    """One receipt per real attempt. The first attempt keeps the old id, retry N adds `:rN`."""
+    base = job.id + ":" + kind
+    return base if not job.attempts else f"{base}:r{job.attempts}"
+
+
 class UsageRecorder:
     def __init__(self, sessions, settings):
         self.sessions, self.settings = sessions, settings
@@ -58,7 +64,7 @@ class UsageRecorder:
                 provider.model_name if isinstance(provider, (CloudRuProvider, CloudRuSpeechProvider)) else "injected"
             )
             row = ProviderUsage(
-                id=new_id(), user_id=job.user_id, operation_id=job.id, request_id=job.id + ":" + kind,
+                id=new_id(), user_id=job.user_id, operation_id=job.id, request_id=receipt_request_id(job, kind),
                 session_id=event.session_id if event else None, channel=capture.channel,
                 is_test=db.get(User, job.user_id).is_test or bool(event and event.is_test),
                 kind=kind, model=model, tariff_version="mock-no-billing-v1" if mock else None,

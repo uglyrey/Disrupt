@@ -10,12 +10,13 @@ import secrets
 import time
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, WebSocket
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
 from app.error_logging import log_error
+from app.live import CLOSE_UNAUTHORIZED, Gone, Step, login_message, serve
 from app.mailer import MAIL_DISABLED_TEXT, MailDisabled, MailError
 from app.models import (
     EmailVerification,
@@ -258,6 +259,22 @@ def build_router(database, settings):
         response.delete_cookie(BINDING_COOKIE, path=BINDING_PATH)
         return {**payload, "status": "ok", "new_account": created}
 
+    @router.websocket("/api/v1/auth/telegram/ws/{login_id}")
+    async def telegram_login_socket(websocket: WebSocket, login_id: str):
+        """Tells the page that the bot answered. The page then calls the status endpoint, which signs it in."""
+        binding = websocket.cookies.get(BINDING_COOKIE, "")
+
+        def check(db):
+            row = db.get(TelegramLogin, login_id) if len(login_id) <= 36 else None
+            if (
+                row is None or row.purpose != "login" or not binding or len(binding) > 200
+                or not hmac.compare_digest(hash_token(binding).encode(), row.binding_hash.encode())
+            ):
+                raise Gone()
+            return Step(*login_message(row, time.time()))
+
+        await serve(websocket, check)
+
     # Password recovery
 
     @router.post("/api/v1/auth/recovery/telegram")
@@ -457,6 +474,22 @@ def build_router(database, settings):
             raise HTTPException(409, "Это подтверждение уже использовано. Начните заново")
         request_deletion(db, db.get(User, session.user_id), response)
         return {"status": "requested"}
+
+    @router.websocket("/api/v1/account/delete-request/telegram/ws/{login_id}")
+    async def delete_telegram_socket(websocket: WebSocket, login_id: str):
+        """Same push for the deletion confirmation. The account is the signed-in one."""
+
+        def check(db):
+            try:
+                session = get_login_session(websocket, db)
+            except HTTPException:
+                raise Gone(CLOSE_UNAUTHORIZED) from None
+            row = db.get(TelegramLogin, login_id) if len(login_id) <= 36 else None
+            if row is None or row.purpose != "delete" or row.user_id != session.user_id:
+                raise Gone()
+            return Step(*login_message(row, time.time()), owner=session.user_id)
+
+        await serve(websocket, check)
 
     @router.post("/api/v1/account/delete-request/cancel")
     def delete_cancel(request: Request, db=Depends(database)):

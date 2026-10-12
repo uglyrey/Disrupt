@@ -253,12 +253,129 @@ def snapshot(db, note):
     }
 
 
-def save_revision(db, note):
-    db.add(Revision(note_id=note.id, version=note.version, snapshot=snapshot(db, note)))
+# Только версия вида "edit" (правка текста человеком) может объединяться с соседней правкой.
+DEFAULT_COALESCE_SECONDS = 600
+DEFAULT_SESSION_MAX_SECONDS = 3600
+DEFAULT_REVISION_KEEP = 50
+
+
+def _now():
+    return time.time()
+
+
+def save_revision(db, note, kind="change", settings=None):
+    """Новая версия в истории. Любой вид, кроме правки текста, всегда отдельная запись."""
+    marked = {**snapshot(db, note), "_kind": kind}
+    db.add(Revision(note_id=note.id, version=note.version, snapshot=marked, created_at=_now()))
+    prune_revisions(db, note.id, settings)
+
+
+def _latest_revision(db, note_id):
+    return db.scalar(select(Revision).where(Revision.note_id == note_id).order_by(Revision.version.desc()).limit(1))
+
+
+def save_text_revision(db, note, *, actor=None, checkpoint=False, settings=None):
+    """Версия после правки названия или текста. Автосохранения одной сессии правок живут в одной записи.
+
+    Запись продолжается, если прошлая версия тоже правка текста, не закрыта, сделана тем же редактором
+    сразу перед этой, не старше окна объединения, а сессия не длиннее потолка. Иначе начинается новая.
+    """
+    coalesce = DEFAULT_COALESCE_SECONDS if settings is None else settings.revision_coalesce_seconds
+    longest = DEFAULT_SESSION_MAX_SECONDS if settings is None else settings.revision_session_max_seconds
+    now = _now()
+    marked = {**snapshot(db, note), "_kind": "edit", "_sid": actor, "_started": now}
+    last = _latest_revision(db, note.id)
+    old = last.snapshot if last is not None else {}
+    if checkpoint:
+        marked["_closed"] = True
+    if (
+        last is not None and coalesce > 0 and actor is not None
+        and old.get("_kind") == "edit" and not old.get("_closed") and old.get("_sid") == actor
+        and last.version == note.version - 1
+        and now - last.created_at < coalesce
+        and now - old.get("_started", last.created_at) < longest
+    ):
+        marked["_started"] = old.get("_started", last.created_at)
+        marked["_before"] = old.get("_before")
+        last.snapshot = marked
+        last.version = note.version
+        last.created_at = now
+        return last
+    if last is not None:
+        marked["_before"] = {"title": old.get("title"), "markdown": old.get("markdown")}
+    revision = Revision(note_id=note.id, version=note.version, snapshot=marked, created_at=now)
+    db.add(revision)
+    prune_revisions(db, note.id, settings)
+    return revision
+
+
+def close_edit_session(db, note_id):
+    """Закрывает открытую сессию правок: следующая правка начнёт новую версию."""
+    last = _latest_revision(db, note_id)
+    if last is None or last.snapshot.get("_kind") != "edit" or last.snapshot.get("_closed"):
+        return False
+    last.snapshot = {**last.snapshot, "_closed": True}
+    return True
+
+
+def prune_revisions(db, note_id, settings=None):
+    """Хранит не больше revision_keep версий. Удаляет самые старые правки текста, первую версию оставляет."""
+    keep = DEFAULT_REVISION_KEEP if settings is None else settings.revision_keep
+    if keep <= 0:
+        return 0
+    db.flush()
+    total = db.scalar(select(func.count()).select_from(Revision).where(Revision.note_id == note_id))
+    if total <= keep:
+        return 0
+    rows = db.scalars(select(Revision).where(Revision.note_id == note_id).order_by(Revision.version)).all()
+    removed = 0
+    for row in rows:
+        if total - removed <= keep:
+            break
+        if row.version > 1 and row.snapshot.get("_kind") == "edit":
+            db.delete(row)
+            removed += 1
+    return removed
+
+
+def changed_chars(before, after):
+    """Сколько знаков затронула правка. Общее начало и конец не считаются."""
+    if before == after:
+        return 0
+    limit = min(len(before), len(after))
+    head = 0
+    while head < limit and before[head] == after[head]:
+        head += 1
+    tail = 0
+    while tail < limit - head and before[-1 - tail] == after[-1 - tail]:
+        tail += 1
+    return max(len(before) - head - tail, len(after) - head - tail)
+
+
+def revision_views(rows):
+    """Строки истории для API. Идут версии одной заметки, от новой к старой."""
+    views = []
+    for index, row in enumerate(rows):
+        data = {k: v for k, v in row.snapshot.items() if not k.startswith("_")}
+        kind = "original" if row.version == 1 else row.snapshot.get("_kind", "change")
+        older = rows[index + 1].snapshot if index + 1 < len(rows) else row.snapshot.get("_before")
+        changed = None
+        if kind == "edit" and older:
+            changed = changed_chars(
+                f"{older.get('title') or ''}\n{older.get('markdown') or ''}",
+                f"{data.get('title') or ''}\n{data.get('markdown') or ''}",
+            )
+        views.append({
+            "version": row.version, "created_at": row.created_at,
+            "started_at": row.snapshot.get("_started", row.created_at),
+            "kind": kind, "changed_chars": changed, **data,
+        })
+    return views
 
 
 def advance_note(db, note, expected_version, **changes):
     lock_account(db, note.user_id)
+    note_id = note.id
     changed = db.execute(
         update(Note)
         .where(Note.id == note.id, Note.user_id == note.user_id, Note.version == expected_version)
@@ -267,6 +384,9 @@ def advance_note(db, note, expected_version, **changes):
     ).rowcount
     if not changed:
         db.rollback()
+        # Конфликт значит, что рядом правит другая вкладка. Сессию закрываем, чтобы работа каждой стороны осталась в истории.
+        if close_edit_session(db, note_id):
+            db.commit()
         raise HTTPException(409, "Заметка уже изменена. Обновите её перед сохранением")
     db.refresh(note)
 
@@ -277,15 +397,28 @@ def confirm_structure(db, note):
     record_event(db, note.user_id, "structure_confirmed", f"{note.id}:{note.version}", subject_id=note.id)
 
 
-def edit_note(db, note, expected_version, **changes):
+def edit_note(db, note, expected_version, *, actor=None, checkpoint=False, settings=None, **changes):
     advance_note(db, note, expected_version, **changes)
-    if "title" in changes or "markdown" in changes:
+    text_edit = "title" in changes or "markdown" in changes
+    if text_edit:
         confirm_structure(db, note)
         record_event(db, note.user_id, "note_edited", f"{note.id}:{note.version}", subject_id=note.id)
     db.flush()
-    save_revision(db, note)
+    if text_edit:
+        save_text_revision(db, note, actor=actor, checkpoint=checkpoint, settings=settings)
+    else:
+        save_revision(db, note, "conclusion", settings)
     db.commit()
     return note
+
+
+def checkpoint_note(db, note, expected_version, *, title, markdown):
+    """Закрывает сессию правок без новой версии, если текст не изменился. False, если текст другой или версия устарела."""
+    if note.version != expected_version or note.title != title or note.markdown != markdown:
+        return False
+    close_edit_session(db, note.id)
+    db.commit()
+    return True
 
 
 def reminder_proposals(db, user_id, items, settings=None, now=None):
@@ -424,6 +557,53 @@ def ensure_category(db, user_id, name, *, best_effort=False):
     return category
 
 
+MAX_AI_CATEGORIES = 15
+AI_CATEGORY_MAX_LENGTH = 40
+_CATEGORY_URL = re.compile(r"://|www\.|\b[\w-]+\.(?:com|ru|org|net|io|me|рф|su)\b", re.IGNORECASE)
+_CATEGORY_QUOTES = frozenset("«»„“”‘’\"'`")
+
+
+def category_key(name):
+    return name.casefold().replace("ё", "е")
+
+
+def clean_ai_category_name(raw):
+    """Name the model proposed in a safe form, or None when it is not a usable category name."""
+    if not isinstance(raw, str):
+        return None
+    name = raw.strip()
+    if not name or any(char in name for char in "\r\n\x00") or any(char in _CATEGORY_QUOTES for char in name):
+        return None
+    name = " ".join(name.split())
+    if len(name) > AI_CATEGORY_MAX_LENGTH or not any(char.isalpha() for char in name) or _CATEGORY_URL.search(name):
+        return None
+    return name[0].upper() + name[1:]
+
+
+def resolve_ai_category(db, user_id, proposed, known):
+    """Category for a note the model has just structured, or None.
+
+    `known` maps the names the model was shown to their ids. A match there wins even if the
+    category was renamed meanwhile. Otherwise the name is cleaned and matched ignoring case and ё/е.
+    From MAX_AI_CATEGORIES categories on, the model may only reuse existing ones.
+    """
+    name = clean_ai_category_name(proposed)
+    if name is None:
+        return None
+    key = category_key(name)
+    existing_id = next((category_id for known_name, category_id in known.items() if category_key(known_name) == key), None)
+    if existing_id:
+        return db.scalar(select(Category).where(Category.id == existing_id, Category.user_id == user_id))
+    lock_account(db, user_id)
+    rows = db.scalars(select(Category).where(Category.user_id == user_id).order_by(Category.id)).all()
+    for category in rows:
+        if category_key(category.name) == key:
+            return category
+    if len(rows) >= MAX_AI_CATEGORIES:
+        return None
+    return ensure_category(db, user_id, name, best_effort=True)
+
+
 def rename_category(db, category, name, version):
     lock_account(db, category.user_id)
     conflict = next(
@@ -448,6 +628,37 @@ def rename_category(db, category, name, version):
     record_event(db, category.user_id, "category_changed", f"{category.id}:{category.version}")
     db.commit()
     return category
+
+
+def delete_category(db, category, version):
+    """Delete a category. Its notes and items stay and move to "no category".
+
+    Each note goes through advance_note, so its version and revision history stay consistent.
+    """
+    user_id = category.user_id
+    lock_account(db, user_id)
+    current = db.scalar(select(Category.version).where(Category.id == category.id, Category.user_id == user_id))
+    if current is None:
+        db.rollback()
+        raise HTTPException(404, "Категория не найдена")
+    if current != version:
+        db.rollback()
+        raise HTTPException(409, "Категория уже изменена. Обновите её перед удалением")
+    notes = db.scalars(
+        select(Note).where(Note.user_id == user_id, Note.category_id == category.id).order_by(Note.id)
+    ).all()
+    for note in notes:
+        advance_note(db, note, note.version, category_id=None)
+        record_event(db, user_id, "category_changed", f"{note.id}:{note.version}")
+        db.flush()
+        save_revision(db, note)
+    db.execute(
+        update(Item).where(Item.user_id == user_id, Item.category_id == category.id).values(category_id=None),
+        execution_options={"synchronize_session": False},
+    )
+    record_event(db, user_id, "category_deleted", f"{category.id}:{current}")
+    db.delete(category)
+    db.commit()
 
 
 def change_note_category(db, note, category_id, version):
@@ -615,6 +826,9 @@ def job_view(db, job, *, capture=None, note_id=None):
         "original_text": capture.original_text,
         "created_at": job.created_at,
         "finished_at": job.finished_at,
+        # Automatic retries. retry_at is set only while the job waits for its next attempt.
+        "attempts": job.attempts or 0,
+        "retry_at": job.not_before if job.status == "queued" and job.attempts else None,
     }
 
 

@@ -22,6 +22,14 @@ def stream_deadline_seconds(read_timeout: int) -> int:
     return min(read_timeout * 2, 300)
 
 
+def parse_seconds_list(name: str, value: str) -> tuple[int, ...]:
+    """Comma separated pauses in seconds, for example 60,300."""
+    try:
+        return tuple(int(part) for part in value.split(",") if part.strip())
+    except ValueError:
+        raise ValueError(f"{name} must be a comma separated list of whole seconds") from None
+
+
 def read_secret_file(path: str, *, maximum: int = 16384) -> str:
     value = Path(path).read_text(encoding="utf-8")
     if len(value) > maximum:
@@ -82,7 +90,34 @@ class Settings:
     # Ждём ответ модели не дольше этого времени на одно чтение. Потоковый режим включают только после ручной проверки.
     llm_read_timeout_seconds: int = LLM_READ_TIMEOUT_SECONDS
     llm_stream: bool = False
+    # Автоповторы ИИ. Подробности в docs/ai-reliability-v1.md. Повторы делает только воркер.
+    ai_retries_enabled: bool = True
+    # Сколько секунд ждать перед каждым повтором. Число пауз равно числу повторов.
+    retry_clear_delays: tuple[int, ...] = (60, 300)
+    retry_ambiguous_delays: tuple[int, ...] = (120,)
+    retry_bad_output_delays: tuple[int, ...] = (60,)
+    retry_jitter: float = 0.2
+    retry_after_max_seconds: int = 900
+    retry_user_per_hour: int = 10
+    retry_global_per_hour: int = 60
+    # Предохранитель шлюза. Столько сбоев (разных записей) за окно останавливают все повторы на паузу.
+    retry_breaker_failures: int = 5
+    retry_breaker_window_seconds: int = 300
+    retry_breaker_pause_seconds: int = 600
     delivery_lease_seconds: int = 60
+    # История версий заметки. Подробности в docs/note-revisions-v1.md.
+    # Правки текста в паузе до этого срока попадают в одну версию. 0 отключает объединение.
+    revision_coalesce_seconds: int = 600
+    # Одна сессия правок не длится дольше этого времени.
+    revision_session_max_seconds: int = 3600
+    # Сколько версий хранить у одной заметки. Первая версия не удаляется. 0 отключает чистку.
+    revision_keep: int = 50
+    # WebSocket для входа и привязки Telegram. Подробности в docs/telegram-live-v1.md. Лимиты считаются на процесс.
+    ws_poll_seconds: float = 1.0
+    ws_max_seconds: float = 360.0
+    ws_per_ip: int = 3
+    ws_per_account: int = 3
+    ws_handshakes_per_minute: int = 20
     error_log_file: str = "data/errors.log"
     audio_storage_path: str = "data/audio"
     audio_ffmpeg_path: str = "ffmpeg"
@@ -140,6 +175,27 @@ class Settings:
             raise ValueError("New account unit limit and registrations per day must not be negative")
         if min(self.daily_unit_limit, self.text_unit_cost, self.audio_unit_base, self.audio_unit_per_minute) < 0:
             raise ValueError("Daily unit limit and unit costs must not be negative")
+        for name, delays in (
+            ("NOTES_RETRY_CLEAR_DELAYS", self.retry_clear_delays),
+            ("NOTES_RETRY_AMBIGUOUS_DELAYS", self.retry_ambiguous_delays),
+            ("NOTES_RETRY_BAD_OUTPUT_DELAYS", self.retry_bad_output_delays),
+        ):
+            if len(delays) > 3 or any(not 1 <= value <= 3600 for value in delays):
+                raise ValueError(f"{name} must hold up to 3 pauses of 1 to 3600 seconds")
+        if not 0 <= self.retry_jitter <= 0.5:
+            raise ValueError("NOTES_RETRY_JITTER_PERCENT must be between 0 and 50")
+        if not 0 <= self.retry_after_max_seconds <= 3600:
+            raise ValueError("NOTES_RETRY_AFTER_MAX_SECONDS must be between 0 and 3600")
+        if not 0 <= self.revision_coalesce_seconds <= 86400 or not 60 <= self.revision_session_max_seconds <= 86400:
+            raise ValueError("Revision coalesce and session seconds are out of range")
+        if self.revision_keep != 0 and not 5 <= self.revision_keep <= 1000:
+            raise ValueError("NOTES_REVISION_KEEP must be 0 or between 5 and 1000")
+        if min(self.retry_user_per_hour, self.retry_global_per_hour) < 0:
+            raise ValueError("Retry caps must not be negative")
+        if self.retry_breaker_failures < 1 or not (
+            1 <= self.retry_breaker_window_seconds <= 3600 and 1 <= self.retry_breaker_pause_seconds <= 7200
+        ):
+            raise ValueError("Retry breaker needs at least 1 failure, a window up to 3600 s and a pause up to 7200 s")
         try:
             ZoneInfo(self.limit_timezone)
         except (ZoneInfoNotFoundError, ValueError, OSError):
@@ -245,6 +301,23 @@ class Settings:
             audio_unit_per_minute=int(os.environ.get("NOTES_AUDIO_UNIT_PER_MINUTE", str(cls.audio_unit_per_minute))),
             limit_timezone=os.environ.get("NOTES_LIMIT_TIMEZONE", cls.limit_timezone),
             error_log_file=os.environ.get("NOTES_ERROR_LOG_FILE", "data/errors.log"),
+            ai_retries_enabled=flag("NOTES_AI_RETRIES_ENABLED", True),
+            retry_clear_delays=parse_seconds_list(
+                "NOTES_RETRY_CLEAR_DELAYS", os.environ.get("NOTES_RETRY_CLEAR_DELAYS", "60,300")),
+            retry_ambiguous_delays=parse_seconds_list(
+                "NOTES_RETRY_AMBIGUOUS_DELAYS", os.environ.get("NOTES_RETRY_AMBIGUOUS_DELAYS", "120")),
+            retry_bad_output_delays=parse_seconds_list(
+                "NOTES_RETRY_BAD_OUTPUT_DELAYS", os.environ.get("NOTES_RETRY_BAD_OUTPUT_DELAYS", "60")),
+            retry_jitter=int(os.environ.get("NOTES_RETRY_JITTER_PERCENT", "20")) / 100,
+            retry_after_max_seconds=int(os.environ.get("NOTES_RETRY_AFTER_MAX_SECONDS", "900")),
+            revision_coalesce_seconds=int(os.environ.get("NOTES_REVISION_COALESCE_SECONDS", "600")),
+            revision_session_max_seconds=int(os.environ.get("NOTES_REVISION_SESSION_MAX_SECONDS", "3600")),
+            revision_keep=int(os.environ.get("NOTES_REVISION_KEEP", "50")),
+            retry_user_per_hour=int(os.environ.get("NOTES_RETRY_USER_PER_HOUR", "10")),
+            retry_global_per_hour=int(os.environ.get("NOTES_RETRY_GLOBAL_PER_HOUR", "60")),
+            retry_breaker_failures=int(os.environ.get("NOTES_RETRY_BREAKER_FAILURES", "5")),
+            retry_breaker_window_seconds=int(os.environ.get("NOTES_RETRY_BREAKER_WINDOW_SECONDS", "300")),
+            retry_breaker_pause_seconds=int(os.environ.get("NOTES_RETRY_BREAKER_PAUSE_SECONDS", "600")),
             delivery_lease_seconds=int(os.environ.get("NOTES_DELIVERY_LEASE_SECONDS", "60")),
             audio_storage_path=os.environ.get("NOTES_AUDIO_STORAGE_PATH", cls.audio_storage_path),
             audio_ffmpeg_path=os.environ.get("NOTES_AUDIO_FFMPEG_PATH", cls.audio_ffmpeg_path),

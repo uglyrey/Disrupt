@@ -1,5 +1,6 @@
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -165,7 +166,7 @@ def test_error_preserves_original_without_retry(app, client):
     register(client)
     job = submit(client).json()
     provider = Failing()
-    worker = Worker(app.state.sessions, app.state.settings, provider)
+    worker = Worker(app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), provider)
     assert worker.run_once()
     assert not worker.run_once()
     after = client.get("/api/v1/jobs/" + job["id"]).json()
@@ -185,7 +186,7 @@ def test_ungrounded_quote_is_rejected(app, client):
 
     register(client)
     job = submit(client).json()
-    Worker(app.state.sessions, app.state.settings, BadProvider()).run_once()
+    Worker(app.state.sessions, replace(app.state.settings, ai_retries_enabled=False), BadProvider()).run_once()
     assert client.get("/api/v1/jobs/" + job["id"]).json()["error_code"] == "ungrounded_quote"
     assert client.get("/api/v1/notes").json() == []
 
@@ -197,7 +198,7 @@ def test_expired_running_job_never_replayed(app, client):
         row = db.get(Job, job["id"])
         row.status, row.lease_until = "running", time.time() - 1
         db.commit()
-    assert not Worker(app.state.sessions, app.state.settings).run_once()
+    assert not Worker(app.state.sessions, replace(app.state.settings, ai_retries_enabled=False)).run_once()
     after = client.get("/api/v1/jobs/" + job["id"]).json()
     assert after["error_code"] == "execution_unknown"
     assert after["original_text"] == DEMO_TEXT
