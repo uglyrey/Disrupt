@@ -67,7 +67,7 @@ def test_cost_formula_follows_settings():
 
 def test_defaults_and_environment(monkeypatch):
     settings = Settings()
-    assert (settings.daily_unit_limit, settings.text_unit_cost) == (30, 1)
+    assert (settings.daily_unit_limit, settings.text_unit_cost) == (100, 1)
     assert (settings.audio_unit_base, settings.audio_unit_per_minute) == (2, 1)
     assert settings.limit_timezone == "Europe/Moscow"
     for name, value in {
@@ -124,10 +124,10 @@ def test_units_count_only_today_and_only_ai(app, client):
         settings = app.state.settings
         assert units_used(db, settings, user["id"], now) == 1 + 3
         assert units_used(db, settings, user["id"], moscow(2026, 10, 9, 23, 59, 59)) == 1
-        assert within_daily_limit(db, settings, user["id"], 26, now)
-        assert not within_daily_limit(db, settings, user["id"], 27, now)
+        assert within_daily_limit(db, settings, user["id"], 96, now)
+        assert not within_daily_limit(db, settings, user["id"], 97, now)
         state = daily_state(db, settings, user["id"], now)
-    assert state["daily_units_used"] == 4 and state["daily_units_remaining"] == 26
+    assert state["daily_units_used"] == 4 and state["daily_units_remaining"] == 96
     assert state["limit_resets_at"] == "2026-10-11T00:00:00+03:00"
 
 

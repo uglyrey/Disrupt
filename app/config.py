@@ -64,10 +64,13 @@ class Settings:
     cloudru_base_url: str = PROGRAM_BASE_URL
     live_call_limit: int = 0
     live_user_call_limit: int = 0
+    gateway_budget_file: str = ""
+    budget_reserve_rub: int = 25000
+    budget_attempt_reserve_rub: int = 250
     max_pending_per_user: int = 10
-    daily_unit_limit: int = 30
+    daily_unit_limit: int = 100
     # Новый аккаунт моложе суток тратит ИИ осторожнее. 0 отключает этот потолок.
-    new_account_unit_limit: int = 10
+    new_account_unit_limit: int = 100
     registrations_per_ip_per_day: int = 20
     api_docs_enabled: bool = False
     text_unit_cost: int = 1
@@ -107,6 +110,8 @@ class Settings:
     mail_from: str = ""
 
     def __post_init__(self):
+        if self.budget_reserve_rub < 0 or self.budget_attempt_reserve_rub <= 0:
+            raise ValueError("Budget reserve must not be negative; attempt reserve must be positive")
         parse_networks(self.admin_allowed_networks)
         if self.data_encryption not in {"off", "required"}:
             raise ValueError("NOTES_DATA_ENCRYPTION must be off or required")
@@ -220,6 +225,9 @@ class Settings:
             cloudru_base_url=os.environ.get("NOTES_CLOUDRU_BASE_URL", PROGRAM_BASE_URL),
             live_call_limit=int(os.environ.get("NOTES_LIVE_CALL_LIMIT", "0")),
             live_user_call_limit=int(os.environ.get("NOTES_LIVE_USER_CALL_LIMIT", "0")),
+            gateway_budget_file=os.environ.get("NOTES_GATEWAY_BUDGET_FILE", ""),
+            budget_reserve_rub=int(os.environ.get("NOTES_BUDGET_RESERVE_RUB", str(cls.budget_reserve_rub))),
+            budget_attempt_reserve_rub=int(os.environ.get("NOTES_BUDGET_ATTEMPT_RESERVE_RUB", str(cls.budget_attempt_reserve_rub))),
             daily_unit_limit=int(os.environ.get("NOTES_DAILY_UNIT_LIMIT", str(cls.daily_unit_limit))),
             new_account_unit_limit=int(
                 os.environ.get("NOTES_NEW_ACCOUNT_UNIT_LIMIT", str(cls.new_account_unit_limit))

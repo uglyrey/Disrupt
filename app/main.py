@@ -21,6 +21,7 @@ from app.audio_storage import AudioStorage
 from app.config import Settings, parse_networks
 from app.db import make_database
 from app.error_logging import log_error
+from app.gateway_budget import available as money_available
 from app.integration import IntegrationRejection
 from app.limits import daily_state
 from app.mailer import build_mailer
@@ -370,6 +371,7 @@ def create_app(
             "user_used": user.live_calls,
             "user_limit": settings.live_user_call_limit,
             "user_remaining": max(0, settings.live_user_call_limit - user.live_calls),
+            "processing_paused": not money_available(settings, used),
             **daily,
         }
 

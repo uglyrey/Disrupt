@@ -187,7 +187,7 @@ async function loadProviderUsage() {
   if (limitHit && limitHit.resetsAt !== limitResetsAt) limitHit = null;
   // A long voice note can cost more than what is left. Units that remain stay usable for text.
   if (limitHit && daily !== null && daily > 0) limitHit = null;
-  const appLimit = !usage.simulation && (usage.global_remaining === 0 || usage.user_remaining === 0);
+  const appLimit = !usage.simulation && (usage.global_remaining === 0 || usage.user_remaining === 0 || usage.processing_paused === true);
   const spent = daily === 0 || limitHit !== null;
   const exhausted = appLimit || spent;
   // The banner stays empty for the real provider. It speaks only for the demo and for limits.

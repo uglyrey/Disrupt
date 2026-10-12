@@ -5523,6 +5523,16 @@
       },
       "AdminSummary": {
         "properties": {
+          "budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatewayBudget"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "cards": {
             "$ref": "#/components/schemas/Cards"
           },
@@ -6932,6 +6942,117 @@
           "conversion"
         ],
         "title": "FunnelStep"
+      },
+      "GatewayBudget": {
+        "properties": {
+          "currency": {
+            "type": "string",
+            "const": "RUB",
+            "title": "Currency"
+          },
+          "source": {
+            "type": "string",
+            "const": "gateway_key_info",
+            "title": "Source"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "spent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spent"
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remaining"
+          },
+          "reserve": {
+            "type": "string",
+            "title": "Reserve"
+          },
+          "pilot_remaining": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pilot Remaining"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "fresh": {
+            "type": "boolean",
+            "title": "Fresh"
+          },
+          "processing_paused": {
+            "type": "boolean",
+            "title": "Processing Paused"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "daily_unit_limit": {
+            "type": "integer",
+            "title": "Daily Unit Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "currency",
+          "source",
+          "configured",
+          "total",
+          "spent",
+          "remaining",
+          "reserve",
+          "pilot_remaining",
+          "checked_at",
+          "fresh",
+          "processing_paused",
+          "model",
+          "daily_unit_limit"
+        ],
+        "title": "GatewayBudget"
       },
       "HTTPValidationError": {
         "properties": {

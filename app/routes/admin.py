@@ -18,8 +18,10 @@ from app import admin_auth as auth
 from app.admin_export import build_archive
 from app.admin_metrics import aggregate, export_csv
 from app.admin_models import AdminAccount, AdminAudit
-from app.contracts import AdminSummary
+from app.contracts import AdminSummary, GatewayBudget
 from app.feedback_models import Feedback
+from app.gateway_budget import view as budget_view
+from app.models import ProviderBudget
 from app.routes.feedback import FeedbackUpdate, FeedbackView, view
 from app.schemas import StrictModel
 
@@ -121,6 +123,8 @@ def build_router(database, static, settings):
         usage_offset: int = Query(0, ge=0),
     ):
         result, next_offset = aggregate(db, start, end, channel, source, key, usage_limit=usage_limit, usage_offset=usage_offset)
+        budget = db.get(ProviderBudget, "cloudru")
+        result.budget = GatewayBudget.model_validate(budget_view(settings, budget.reserved_calls if budget else 0))
         if next_offset is not None:
             response.headers["X-Next-Usage-Offset"] = str(next_offset)
         return result

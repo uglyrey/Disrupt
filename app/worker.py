@@ -15,6 +15,7 @@ from app.audio_storage import AudioStorage
 from app.config import Settings
 from app.db import make_database
 from app.error_logging import log_error
+from app.gateway_budget import available as money_available
 from app.models import (
     Capture,
     Category,
@@ -162,6 +163,11 @@ class Worker:
             return job_id if claimed else None
 
     def reserve_budget(self, db, user_id):
+        if self.settings.gateway_budget_file:
+            budget = db.scalar(select(ProviderBudget).where(ProviderBudget.id == "cloudru").with_for_update())
+            if budget is None or not money_available(self.settings, budget.reserved_calls):
+                db.rollback()
+                raise ProviderError("budget_exhausted")
         global_ok = db.execute(
             update(ProviderBudget)
             .where(
@@ -316,7 +322,8 @@ class Worker:
             return True
         with self.sessions() as db:
             budget = db.get(ProviderBudget, "cloudru")
-            return budget is not None and budget.reserved_calls < self.settings.live_call_limit
+            return (budget is not None and budget.reserved_calls < self.settings.live_call_limit
+                    and money_available(self.settings, budget.reserved_calls))
 
 
 def main():
