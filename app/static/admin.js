@@ -62,7 +62,7 @@
   function clear() {
     applied = null; next = null;
     $('dashboard').hidden = true;
-    for (const id of ['cards','daily','funnel','retention','costs','token-costs','accounting-status','cost-context','quality','usage']) $(id).replaceChildren();
+    for (const id of ['cards','daily','funnel','retention','costs','token-costs','accounting-status','cost-context','quality','usage','budget-cards','budget-status']) $(id).replaceChildren();
     $('export').disabled = true; $('next').disabled = true; $('previous').disabled = true;
   }
   function status(message, error = false) { $('status').textContent = message; $('status').className = error ? 'error' : ''; }
@@ -73,6 +73,20 @@
     return {from, to, channel, source};
   }
   function render(data, slice, currentOffset) {
+    const budget = data.budget;
+    if (budget && budget.configured) {
+      if (budget.currency !== 'RUB') throw new Error('schema');
+      cards('budget-cards', [['Выделено',money(budget.total)],['Потрачено',money(budget.spent)],
+        ['Осталось на ключе',money(budget.remaining)],['Резерв на следующие этапы',money(budget.reserve)],
+        ['Доступно для пилота',money(budget.pilot_remaining)]]);
+      $('budget-status').textContent = 'Весь ключ за всё время, включая тестовые аккаунты и STT. Даты фильтра не влияют на баланс. ' +
+        (budget.checked_at ? 'Данные шлюза на ' + timestamp(budget.checked_at) + '. ' : 'Баланс ещё не получен. ') +
+        (!budget.fresh ? 'Данные устарели или недоступны. ' : '') +
+        (budget.processing_paused ? 'Новые обращения к модели приостановлены для защиты бюджета. ' : '') +
+        'Модель ' + text(budget.model) + ' · ' + count(budget.daily_unit_limit) + ' единиц в день.';
+    } else {
+      $('budget-status').textContent = 'Получение баланса ключа ещё не подключено.';
+    }
     if (![data.daily, data.funnel, data.usage].every(Array.isArray) || data.usage.length > 50) throw new Error('schema');
     const c = data.cards, q = data.quality, costs = q.costs, r = data.retention;
     if (costs.currency !== 'RUB') throw new Error('schema');

@@ -210,8 +210,8 @@ def test_dashboard_counts_on_a_synthetic_dataset(app, client):
     assert data["reminders"]["upcoming_7d"] == 2
     assert data["reminders"]["next_timezone"] == "Europe/Moscow"
     assert datetime.fromisoformat(data["reminders"]["next_at"]).timestamp() == pytest.approx(soon, abs=1)
-    assert data["ai"]["units_used"] == 3 and data["ai"]["units_limit"] == 30
-    assert data["ai"]["units_remaining"] == 27 and data["ai"]["resets_at"]
+    assert data["ai"]["units_used"] == 3 and data["ai"]["units_limit"] == 100
+    assert data["ai"]["units_remaining"] == 97 and data["ai"]["resets_at"]
     assert "Секрет" not in week.text
 
     month = client.get("/api/v1/dashboard").json()
@@ -234,7 +234,7 @@ def test_dashboard_for_a_new_account_is_empty_and_validates_days(app, client):
     assert data["tasks"] == {"open": 0, "completed": 0, "completed_in_period": 0, "completion_rate": None}
     assert data["captures"]["total"] == 0 and data["categories"] == []
     assert data["reminders"] == {"upcoming_7d": 0, "next_at": None, "next_timezone": None}
-    assert data["ai"]["units_used"] == 0 and data["ai"]["units_remaining"] == 30
+    assert data["ai"]["units_used"] == 0 and data["ai"]["units_remaining"] == 100
     assert client.get("/api/v1/dashboard", params={"days": 0}).status_code == 422
     assert client.get("/api/v1/dashboard", params={"days": 367}).status_code == 422
     assert client.get("/api/v1/dashboard", params={"days": "x"}).status_code == 422

@@ -38,6 +38,13 @@ async function reload(fn){if(fn)nextResponse=fn;$('filters').dispatchEvent(new w
 (async()=>{
   w.eval(authJs);w.eval(js);await settled();
   assert.equal($('login-view').hidden,true);assert.equal($('admin-app').hidden,false);
+  await reload(()=>reply({...fixture,budget:{configured:true,currency:'RUB',total:'75000.00',spent:'5.13',
+    remaining:'74994.87',reserve:'25000.00',pilot_remaining:'49994.87',checked_at:'2026-10-07T08:55:00Z',
+    fresh:true,processing_paused:false,model:'claude-opus-4.7',daily_unit_limit:100}}));
+  assert.match($('budget-cards').textContent,/Потрачено/);
+  assert.match($('budget-cards').textContent,/5[,.]13/);
+  assert.match($('budget-status').textContent,/Даты фильтра не влияют/);
+  await reload();
   assert.equal($('dashboard').hidden,false);
   assert.equal($('to').value,'2026-10-06');
   assert.equal(calls[0].url.searchParams.get('usage_limit'),'50');
@@ -87,6 +94,7 @@ async function reload(fn){if(fn)nextResponse=fn;$('filters').dispatchEvent(new w
     await reload(()=>reply(null,code));
     assert.equal($('dashboard').hidden,true);
     assert.equal($('usage').textContent,'');
+    assert.equal($('budget-cards').textContent,'');
     assert.equal($('export').disabled,true);
     // Only an expired session sends the page back to the sign-in form.
     assert.equal($('login-view').hidden,code!==401);assert.equal($('admin-app').hidden,code===401);

@@ -8,15 +8,18 @@ x-backend-environment: &backend-environment
   NOTES_DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
   NOTES_PROVIDER: cloudru
   NOTES_ALLOW_LIVE_REQUESTS: ${NOTES_ALLOW_LIVE_REQUESTS:-false}
-  NOTES_CLOUDRU_MODEL: ${NOTES_CLOUDRU_MODEL:-deepseek-v4-flash}
+  NOTES_CLOUDRU_MODEL: ${NOTES_CLOUDRU_MODEL:-claude-opus-4.7}
   NOTES_CLOUDRU_BASE_URL: ${NOTES_CLOUDRU_BASE_URL:-https://shared1.multitool.works:4000/v1}
   NOTES_LIVE_CALL_LIMIT: ${NOTES_LIVE_CALL_LIMIT:-100}
   NOTES_LIVE_USER_CALL_LIMIT: ${NOTES_LIVE_USER_CALL_LIMIT:-10}
   NOTES_LLM_READ_TIMEOUT_SECONDS: ${NOTES_LLM_READ_TIMEOUT_SECONDS:-150}
   NOTES_LLM_STREAM: ${NOTES_LLM_STREAM:-false}
-  NOTES_DAILY_UNIT_LIMIT: ${NOTES_DAILY_UNIT_LIMIT:-30}
+  NOTES_DAILY_UNIT_LIMIT: ${NOTES_DAILY_UNIT_LIMIT:-100}
   # Аккаунт моложе суток тратит ИИ не больше этого числа единиц в день. 0 отключает потолок.
-  NOTES_NEW_ACCOUNT_UNIT_LIMIT: ${NOTES_NEW_ACCOUNT_UNIT_LIMIT:-10}
+  NOTES_NEW_ACCOUNT_UNIT_LIMIT: ${NOTES_NEW_ACCOUNT_UNIT_LIMIT:-100}
+  NOTES_GATEWAY_BUDGET_FILE: ${NOTES_GATEWAY_BUDGET_FILE:-}
+  NOTES_BUDGET_RESERVE_RUB: ${NOTES_BUDGET_RESERVE_RUB:-25000}
+  NOTES_BUDGET_ATTEMPT_RESERVE_RUB: ${NOTES_BUDGET_ATTEMPT_RESERVE_RUB:-250}
   # Сколько аккаунтов можно создать с одного адреса за сутки.
   NOTES_REGISTRATIONS_PER_IP_PER_DAY: ${NOTES_REGISTRATIONS_PER_IP_PER_DAY:-20}
   # /docs, /redoc и /openapi.json закрыты. Открывайте только на время отладки.
@@ -80,6 +83,7 @@ services:
     build: .
     volumes:
       - audio-originals:/app/data/audio
+      - ./data/billing:/app/data/billing:ro
     restart: unless-stopped
     command:
       - python
@@ -109,6 +113,7 @@ services:
     build: .
     volumes:
       - audio-originals:/app/data/audio:ro
+      - ./data/billing:/app/data/billing:ro
     restart: "no"
     command: ["python", "-m", "app.worker"]
     environment:

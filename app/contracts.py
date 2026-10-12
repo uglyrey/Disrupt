@@ -222,7 +222,24 @@ class Quality(StrictModel):
     costs: Costs
 
 
+class GatewayBudget(StrictModel):
+    currency: Literal["RUB"]
+    source: Literal["gateway_key_info"]
+    configured: bool
+    total: str | None
+    spent: str | None
+    remaining: str | None
+    reserve: str
+    pilot_remaining: str | None
+    checked_at: str | None
+    fresh: bool
+    processing_paused: bool
+    model: str
+    daily_unit_limit: int
+
+
 class AdminSummary(StrictModel):
+    budget: GatewayBudget | None = None
     cards: Cards
     daily: list[DailyMetrics]
     funnel: list[FunnelStep]

@@ -517,6 +517,10 @@ class CloudRuProvider:
         """One chat call. Returns (message content, finish_reason). Never retries."""
         from app.usage import response_tokens
 
+        if self._model == "claude-opus-4.7":
+            # Opus 4.7 rejects non-default sampling parameters with HTTP 400.
+            payload = {key: value for key, value in payload.items() if key != "temperature"}
+
         if self._stream:
             payload = {**payload, "stream": True, "stream_options": {"include_usage": True}}
         # No SDK retries, redirects, discovery, telemetry, or alternate endpoints.
@@ -618,7 +622,7 @@ class CloudRuProvider:
                     "model": self._model,
                     "temperature": 0.2,
                     "max_tokens": 4000,
-                    "response_format": {"type": "json_object"},
+                    "response_format": self.response_format(StructuredNote),
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
                         *(
@@ -650,6 +654,28 @@ class CloudRuProvider:
     def assistant(self, kind, context, *, question=None):
         return self.assistant_with_usage(kind, context, question=question, on_usage=lambda _: None)
 
+    def response_format(self, result_type):
+        if self._model != "claude-opus-4.7":
+            return {"type": "json_object"}
+
+        def supported(value):
+            if isinstance(value, list):
+                return [supported(item) for item in value]
+            if not isinstance(value, dict):
+                return value
+            # Native constrained output supports structure; business bounds stay in our validator.
+            excluded = {"default", "minLength", "maxLength", "minItems", "maxItems", "pattern", "format",
+                        "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"}
+            output = {key: supported(item) for key, item in value.items() if key not in excluded}
+            if output.get("type") == "object":
+                output["additionalProperties"] = False
+                output["required"] = list(output.get("properties", {}))
+            return output
+
+        return {"type": "json_schema", "json_schema": {
+            "name": result_type.__name__, "strict": True, "schema": supported(result_type.model_json_schema()),
+        }}
+
     def assistant_with_usage(self, kind, context, *, question=None, on_usage):
         """One strict JSON call for the assistant. Same gateway, timeout and no retries as structuring."""
         if kind not in ASSISTANT_PROMPTS:
@@ -660,7 +686,7 @@ class CloudRuProvider:
                     "model": self._model,
                     "temperature": 0.2,
                     "max_tokens": ASSISTANT_MAX_TOKENS[kind],
-                    "response_format": {"type": "json_object"},
+                    "response_format": self.response_format(ASSISTANT_MODELS[kind]),
                     "messages": [
                         {"role": "system", "content": ASSISTANT_PROMPTS[kind]},
                         {"role": "user", "content": assistant_input(kind, context, question)},
