@@ -93,6 +93,7 @@ def get_login_session(request: Request, db, *, write=False) -> LoginSession:
     )
     if session is None:
         raise HTTPException(401, "Сессия истекла. Войдите снова")
+    request.state.analytics_user_id = session.user_id
     if write:
         check_origin(request)
         if not hmac.compare_digest(request.headers.get("x-csrf-token", "").encode(), session.csrf_token.encode()):

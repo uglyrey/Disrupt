@@ -123,7 +123,7 @@ def test_controlled_aggregate_with_two_channels_duplicate_test_and_pending(app, 
     assert cards["returning_users"] == 0
     assert cards["ai_activation"] == cards["manual_activation"] == {"numerator": 1, "denominator": 2, "value": 50.0}
     assert cards["activation_pending"] == 0
-    assert cards["completed_scenario"] == 2 and cards["returns"] == 1
+    assert cards["completed_scenario"] == 2 and cards["returns"] == 2
     assert [row["dau"] for row in result["daily"]] == [1, 2]
     assert [row["users"] for row in result["funnel"]] == [2, 2, 2, 1, 1]
     assert result["retention"] == {"d1": {"numerator": 1, "denominator": 1, "value": 100.0},

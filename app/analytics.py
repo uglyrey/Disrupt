@@ -10,6 +10,7 @@ from app.models import ProductEvent, User, new_id
 
 BACKGROUND_EVENTS = {"processing_completed", "processing_failed", "reminder_sent", "reminder_failed", "reminder_result"}
 BACKGROUND_EVENTS.update({"processing_reply_sent", "processing_reply_failed", "processing_reply_result"})
+BACKGROUND_EVENTS.add("assistant_recommendation_requested")
 
 
 def record_event(db, user_id, name, operation_id, channel="web", *, occurred_at=None, subject_id=None, outcome=None):

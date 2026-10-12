@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, or_, select
 
 from app.analytics import record_event
+from app.components import record as record_component
 from app.models import Capture, Item, Job, Note, Outbox, Reminder, TelegramIdentity
 from app.reminder_proposals import label_for
 from app.reminders import AUTO_KEY_PREFIX
@@ -329,6 +330,9 @@ def record_delivery_result(db, delivery_id, body):
     if row.status not in {"authorized", "unknown"}:
         raise HTTPException(409, "Попытка не была разрешена")
     row.status, row.result_hash = body.status, digest
+    record_component(db, row.user_id, attempt_id(row), "telegram_send", "telegram",
+                     status="succeeded" if body.status == "sent" else "unknown" if body.status == "unknown" else "failed",
+                     error_code=body.error_code, occurred_at=row.authorized_at)
     row.telegram_message_id, row.error_code = body.telegram_message_id, body.error_code
     row.retry_at = time.time() + body.retry_after_seconds if body.status == "retryable" else None
     reminder = db.get(Reminder, row.reminder_id) if row.reminder_id is not None else None

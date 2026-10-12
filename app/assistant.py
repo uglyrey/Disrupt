@@ -14,11 +14,14 @@ from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
+from app.analytics import record_event
 from app.assistant_retrieval import (
     context_for_ask,
     context_for_digest,
     context_for_recommend,
 )
+from app.components import finish as finish_component
+from app.components import record as record_component
 from app.error_logging import log_error
 from app.limits import ASSISTANT_UNIT_COST, day_window, within_daily_limit
 from app.models import AssistantRequest, Item, Note, ProviderUsage, User, new_id
@@ -80,6 +83,8 @@ def create_request(db, settings, user_id, kind, key, *, question=None, days=None
     )
     try:
         db.add(row)
+        event = "assistant_recommendation_requested" if kind == "recommend" else "assistant_requested"
+        record_event(db, user_id, event, row.id, outcome="queued")
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -203,6 +208,8 @@ def fail_request(worker, request_id, code, *, exception=None, http_status=None):
             .where(AssistantRequest.id == request_id, AssistantRequest.status == "running")
             .values(status="failed", error_code=code, finished_at=time.time())
         )
+        failed = db.get(AssistantRequest, request_id)
+        finish_component(db, failed.user_id, request_id, "assistant_worker", "failed", code)
         db.commit()
 
 
@@ -220,6 +227,9 @@ def finish_request(worker, request_id, result, *, units=None):
             )
             .values(**values)
         ).rowcount
+        if done:
+            completed = db.get(AssistantRequest, request_id)
+            finish_component(db, completed.user_id, request_id, "assistant_worker", "succeeded")
         db.commit()
     if not done:
         fail_request(worker, request_id, "execution_unknown")
@@ -253,6 +263,8 @@ def run_assistant_once(worker):
             if row.status != "running" or row.lease_until < time.time():
                 raise ProviderError("execution_unknown")
             kind, user_id, question = row.kind, row.user_id, row.question
+            record_component(db, user_id, request_id, "assistant_worker", status="unknown",
+                             is_test=worker.settings.provider != "cloudru")
             context = build_context(db, row)
             row.input_note_ids = context.note_ids
             db.commit()
@@ -308,6 +320,9 @@ def start_receipt(db, request_id, user_id, provider):
         cache_tokens=0 if mock else None, occurred_at=now,
     )
     db.add(row)
+    if isinstance(provider, CloudRuProvider):
+        kind = db.get(AssistantRequest, request_id).kind
+        record_component(db, user_id, request_id, "assistant_" + kind + "_prompt")
     started = db.execute(
         update(AssistantRequest)
         .where(AssistantRequest.id == request_id, AssistantRequest.status == "running",
