@@ -14,7 +14,12 @@ jobs:
           node-version: '22'
       - run: npm install --prefix "$RUNNER_TEMP/w" --no-audit --no-fund --ignore-scripts jsdom@26.0.0
       - run: |
+          : > summary.txt
           for t in $(ls tests/web_*.cjs | xargs -n1 basename | sed 's/\.cjs$//'); do
-            echo "== $t"; NODE_PATH=$RUNNER_TEMP/w/node_modules timeout 300 node tests/$t.cjs > out_$t.txt 2>&1; echo "exit $?" >> out_$t.txt
-            python3 -c "import sys;n=sys.argv[1];d=open('out_'+n+'.txt').read();print('::warning title='+n+'::'+d[-4000:].replace('%','%25').replace('\r','').replace('\n','%0A'))" $t
+            NODE_PATH=$RUNNER_TEMP/w/node_modules timeout 300 node tests/$t.cjs > out_$t.txt 2>&1; code=$?
+            echo "$t exit $code" >> summary.txt
+            case $t in web_structure|web_mobile_guide|web_notes_manage)
+              python3 -c "import sys;n=sys.argv[1];d=open('out_'+n+'.txt').read();print('::warning title='+n+'::'+d[-4000:].replace('%','%25').replace('\r','').replace('\n','%0A'))" $t;;
+            esac
           done
+          python3 -c "d=open('summary.txt').read();print('::warning title=summary::'+d.replace('%','%25').replace('\n','%0A'))"
