@@ -10,7 +10,7 @@ module.exports=async function(){
   w.URL.createObjectURL=()=>"blob:synthetic-image";w.URL.revokeObjectURL=()=>{};w.confirm=()=>true;w.berestaId=()=>id;
   let held=null,calls=0,fail=false;
   w.api=async(p,options)=>{calls++;assert.equal(options.headers['Idempotency-Key'],id);if(fail&&calls===1)throw new TypeError('Lost ack');if(held)await held;return {id,url,width:10,height:10,byte_size:12};};
-  w.BerestaFocus={pending:()=>false,flush:async()=>{}};
+  w.BerestaFocus={pending:()=>false,flush:async()=>{},closeAll:()=>{}};
   w.BerestaMd={mode:()=>'read',setMode:()=>{},applyEdit:(field,result)=>{field.value=result.value;},refresh:()=>w.renderMarkdownInto(w.document.getElementById('preview'),w.document.getElementById('markdown').value,{images:true})};
   w.eval(read('note-images.js'));
   const images=w.BerestaImages,field=w.document.getElementById('markdown'),preview=w.document.getElementById('preview');
