@@ -317,6 +317,10 @@ function renderMarkdownInto(preview, text, options = {}) {
   };
   lines.forEach((line,index) => {
     if (!line.trim()) { startBlock(); return; }
+    const picture = window.BerestaImages?.parse(line);
+    if (picture && preview.id === 'preview') {
+      startBlock(); preview.append(window.BerestaImages.render(picture,index,Boolean(options.images))); return;
+    }
     let match;
     if ((match = line.match(/^(#{1,3})\s+(.+)$/))) {
       startBlock();

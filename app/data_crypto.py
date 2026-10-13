@@ -20,7 +20,7 @@ from app import crypto, models  # noqa: F401  (модели нужны, чтоб
 from app.audio_storage import audio_aad
 from app.config import Settings
 from app.db import Base, make_database
-from app.encrypted_types import EncryptedJSON, encrypted_columns, raw_values
+from app.encrypted_types import EncryptedBinary, EncryptedJSON, encrypted_columns, raw_values
 
 BATCH = 200
 
@@ -31,11 +31,18 @@ def _json_state(value):
 
 
 def _classify(column, value):
+    if isinstance(column.type, EncryptedBinary):
+        if not crypto.is_encrypted_bytes(value):
+            return "plain"
+        ring = crypto.state().ring
+        return "current" if ring is not None and crypto.audio_key_id(value) == ring.current_id else "old"
     return _json_state(value) if isinstance(column.type, EncryptedJSON) else crypto.key_state(value)
 
 
 def _target(column, value, label):
     """Новое значение для хранения: открытое шифруем, чужой ключ меняем на текущий."""
+    if isinstance(column.type, EncryptedBinary):
+        return crypto.encrypt_bytes(crypto.decrypt_bytes(value, label), label)
     if isinstance(column.type, EncryptedJSON):
         if isinstance(value, str) and crypto.is_encrypted(value):
             return crypto.encrypt_json(crypto.decrypt_json(value, label), label)
@@ -50,7 +57,8 @@ def _batches(db, table, column, *, lock=True):
     primary = table.c["id"]
     last = None
     while True:
-        query = select(primary, column).where(column.is_not(None)).order_by(primary).limit(BATCH)
+        count = 10 if isinstance(column.type, EncryptedBinary) else BATCH
+        query = select(primary, column).where(column.is_not(None)).order_by(primary).limit(count)
         if last is not None:
             query = query.where(primary > last)
         rows = db.execute(query.with_for_update() if lock else query).all()

@@ -46,6 +46,7 @@ from app.models import (
     User,
     new_id,
 )
+from app.note_images import ImageMergeUnavailable
 from app.notes_manage import MergeSourcesChanged, complete_merge, merge_sources_alive
 from app.provider_router import FALLBACK, PRIMARY, Attempt, ProviderRouter
 from app.providers import (
@@ -455,6 +456,8 @@ class Worker:
                         complete_merge(db, db.get(Job, job_id), note, created)
                     except MergeSourcesChanged:
                         raise ProviderError("merge_source_missing") from None
+                    except ImageMergeUnavailable:
+                        raise ProviderError("merge_images_unavailable") from None
                 else:
                     try:
                         # The note matters more than its reminders: a failure here leaves the note as it is.

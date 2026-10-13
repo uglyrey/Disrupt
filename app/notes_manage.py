@@ -380,6 +380,9 @@ def request_merge(db, user_id, note_ids, key, settings):
     if found is not None:
         return found
     notes = [owned_note(db, note_id, user_id) for note_id in ids]
+    from app.note_images import check_merge_space
+    if not check_merge_space(db, notes, user_id):
+        raise HTTPException(429, "Для объединения нужно место. Максимум 20 картинок в результате и 50 МБ на аккаунте")
     text = merge_text(notes)
     if len(text) > MAX_MERGE_CHARS:
         raise HTTPException(422, "Заметки слишком длинные для объединения. Выберите меньше заметок или сократите их.")
@@ -445,6 +448,8 @@ def complete_merge(db, job, note, new_items, now=None):
     if not ids or len(by_id) != len(set(ids)):
         raise MergeSourcesChanged()
     sources = [by_id[note_id] for note_id in ids]
+    from app.note_images import carry_merge_images
+    carry_merge_images(db, sources, note)
 
     if note.category_id is None:
         votes = Counter(source.category_id for source in sources if source.category_id)
