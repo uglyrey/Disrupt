@@ -19,7 +19,12 @@ from app.contracts import (
     ResultRequest,
     ResultResponse,
 )
-from app.deliveries import authorize_delivery, claim_deliveries, record_delivery_result
+from app.deliveries import (
+    add_reminder_set_message,
+    authorize_delivery,
+    claim_deliveries,
+    record_delivery_result,
+)
 from app.integration import IntegrationRejection
 from app.limits import telegram_state
 from app.models import (
@@ -147,8 +152,12 @@ def handle_telegram_action(db, body):
     item = db.get(Item, reminder.item_id) if reminder and reminder.item_id else None
     if (
         reminder is None or reminder.user_id != identity.user_id
+        or db.scalar(select(Note.id).where(
+            Note.id == reminder.note_id, Note.user_id == identity.user_id, Note.deleted_at.is_(None),
+        )) is None
         or (reminder.item_id is not None and (
             item is None or item.user_id != identity.user_id or item.note_id != reminder.note_id or item.kind != "task"
+            or item.deleted_at is not None
         ))
         or delivery.authorized_at is None or delivery.status not in {"authorized", "sent", "unknown", "cancelled"}
     ):
@@ -169,7 +178,9 @@ def handle_telegram_action(db, body):
     if item is None:
         reminder.status = "completed"
         return {"status": "completed"}
-    note = db.scalar(select(Note).where(Note.id == item.note_id, Note.user_id == identity.user_id))
+    note = db.scalar(select(Note).where(
+        Note.id == item.note_id, Note.user_id == identity.user_id, Note.deleted_at.is_(None),
+    ))
     if note is None:
         raise IntegrationRejection(409, "action_expired", "Запись больше недоступна")
     complete_item(db, identity, item, note)
@@ -299,6 +310,8 @@ def build_router(database, settings):
             if not isinstance(result, Note):
                 db.add(Outbox(job_id=result.id, user_id=identity.user_id, bot_id=identity.bot_id,
                               chat_id=identity.chat_id, generation=1, status="pending"))
+            if isinstance(result, Note):
+                add_reminder_set_message(db, result, identity, settings)
             # A stable capture link works before the asynchronous note exists.
             saved = {
                 "capture_id": result.capture_id,

@@ -1,0 +1,56 @@
+/* Markdown notes: reading view, editing view with a small toolbar, "Аа" button of the new-note field. Loaded after focus.css. */
+.md-toolbar[hidden],#note-card #markdown[hidden],#note-card #preview[hidden],.thought-format .md-toolbar[hidden]{display:none}
+
+/* Reading view. It sits where the textarea sits and looks like the same page. */
+#note-card #preview{display:block;min-height:max(320px,56vh);margin:0;padding:8px 0 40px;border-radius:0;background:transparent;color:#2a3b30;font-size:18px;line-height:1.8;cursor:text;overflow-wrap:anywhere}
+#note-card #preview:hover{background:transparent}
+#note-card #preview:focus-visible{outline:2px solid var(--accent);outline-offset:6px;border-radius:6px}
+#note-card #preview:empty::before{content:"Пока пусто. Нажмите, чтобы написать.";color:#646d66}
+#preview p{margin:0 0 .8em}
+#preview h1,#preview h2,#preview h3{margin:1.2em 0 .4em;line-height:1.3;letter-spacing:-.02em;color:#1f3328}
+#preview>:first-child{margin-top:0}
+#preview h1{font-size:1.55em}
+#preview h2{font-size:1.3em}
+#preview h3{font-size:1.1em}
+#preview ul,#preview ol{margin:0 0 .8em;padding-left:1.5em}
+#preview li{margin:0;padding:.12em 0;line-height:1.65}
+#preview li>ul,#preview li>ol{margin:.15em 0 .2em}
+#preview li.md-task{display:flex;align-items:baseline;gap:.55em;margin-left:-1.5em;list-style:none}
+#preview li.md-task>ul,#preview li.md-task>ol{flex:1 0 100%;margin-left:2em}
+#preview .md-task input[type=checkbox]{flex:none;width:1.05em;height:1.05em;margin:0;accent-color:var(--accent);cursor:pointer;align-self:center}
+#preview .md-task input[type=checkbox]:disabled{cursor:default}
+#preview .md-task-text{min-width:0}
+#preview .md-task-text.is-done{color:#6a766d;text-decoration:line-through}
+#preview blockquote{margin:0 0 .8em;padding:.1em 0 .1em 1em;border-left:3px solid #c9d8c1;color:#4a5d50}
+#preview hr{margin:1.4em 0;border:0;border-top:1px solid var(--line)}
+#preview code{padding:.08em .35em;border-radius:5px;background:#eef2e8;font-size:.9em}
+#preview a{color:#2f6a43;text-decoration:underline;text-underline-offset:2px}
+
+/* Toolbar */
+.md-toolbar{display:flex;align-items:center;gap:2px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.md-toolbar::-webkit-scrollbar{display:none}
+.note-body>.md-toolbar{position:sticky;top:0;z-index:5;margin:0 0 6px;padding:6px 0;border-bottom:1px solid var(--line);background:var(--paper)}
+.md-tool{display:grid;flex:none;place-items:center;width:38px;height:38px;min-height:0;padding:0;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--tool-ink,#4f6a58);font:inherit;cursor:pointer}
+.md-tool:hover:not(:disabled){background:var(--tool-hover,#eef2e8);color:#1f3a2a}
+.md-tool:focus-visible,.md-done:focus-visible,.thought-format-btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.md-glyph{font-size:16px;font-weight:700;line-height:1}
+.md-glyph-italic{font-family:Georgia,serif;font-style:italic;font-weight:600}
+.md-glyph-heading{font-size:15px;letter-spacing:-.02em}
+.md-done{flex:none;min-height:34px;height:34px;margin-left:auto;padding:0 14px;border:1px solid #c9d8c1;border-radius:9px;background:#eef4e8;color:#1f3a2a;font-size:14px;font-weight:600;cursor:pointer;position:sticky;right:0;box-shadow:-10px 0 8px -4px var(--paper)}
+.md-done:hover{background:#e3ebdb}
+
+/* New-note field */
+.thought-format{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px;margin:0 0 6px}
+.thought-format-btn{min-height:32px;padding:0 10px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--tool-ink,#4f6a58);font-size:15px;font-weight:600;cursor:pointer}
+.thought-format-btn:hover,.thought-format-btn[aria-expanded=true]{background:var(--tool-hover,#eef2e8);color:#1f3a2a}
+.thought-format .md-toolbar{flex:1 1 auto;min-width:0;justify-content:flex-start}
+
+/* On a wide screen the editor column scrolls and keeps 48px of padding on top. The bar sticks above that padding. */
+@media(min-width:1100px){.note-body>.md-toolbar{top:-48px}}
+
+@media(max-width:640px){
+  #note-card #preview{min-height:max(260px,50vh);font-size:16.5px}
+  .md-tool{width:42px;height:42px}
+  .thought-format .md-toolbar{flex-basis:100%;order:2}
+}
+@media(prefers-reduced-motion:no-preference){.md-tool,.md-done{transition:background-color .12s}}

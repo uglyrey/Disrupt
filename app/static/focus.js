@@ -50,7 +50,11 @@
     const inside = entry.pop.contains(document.activeElement);
     entry.pop.hidden = true; entry.btn.setAttribute('aria-expanded', 'false');
     get('pop-scrim').hidden = true; document.body.classList.remove('has-pop');
-    if (restore && (inside || !document.activeElement || document.activeElement === document.body)) entry.btn.focus();
+    if (restore && (inside || !document.activeElement || document.activeElement === document.body)) {
+      // On a phone the note tools sit in a list that is closed now. The menu button takes the focus (mobile-menu.js).
+      const menus = window.BerestaMenus;
+      if (menus && menus.phoneNote() && entry.tool.closest('#note-tools')) menus.focusNoteButton(); else entry.btn.focus();
+    }
   }
   function closeAll() { closeTool({restore: false}); }
   for (const entry of tools.values()) {
@@ -336,6 +340,6 @@
     try { addText(await clipboard.readText(), 'clipboard'); } catch (_) { pasteFallback(); }
   });
 
-  window.BerestaFocus = {pending, flush, checkpoint, closeAll, open: openTool, close: closeTool, fitTitle, importFile, tools};
+  window.BerestaFocus = {pending, flush, checkpoint, closeAll, open: openTool, close: closeTool, fitTitle, grow, importFile, tools};
   syncAll();
 })();

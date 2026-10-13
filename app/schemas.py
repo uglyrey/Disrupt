@@ -118,6 +118,8 @@ class TextCapture(StrictModel):
 class AudioJobResponse(StrictModel):
     id: str
     capture_id: str
+    kind: Literal["capture", "merge"] = "capture"
+    merge_note_ids: list[str] | None = None
     status: Literal["queued", "running", "succeeded", "failed"]
     provider: Literal["mock", "cloudru"]
     error_code: str | None
@@ -479,3 +481,61 @@ class IntegrationErrorDetail(StrictModel):
 class IntegrationError(StrictModel):
     error: IntegrationErrorDetail
     operation_id: str
+
+
+# ---- Trash, merge, manual links, guides (docs/notes-manage-v1.md) ----
+
+class MergeRequest(StrictModel):
+    note_ids: list[Annotated[str, Field(min_length=1, max_length=36)]] = Field(min_length=2, max_length=5)
+    idempotency_key: str = Field(min_length=1, max_length=90, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+class NoteLinkCreate(StrictModel):
+    note_id: str = Field(min_length=1, max_length=36)
+
+
+class LinkedNote(StrictModel):
+    note_id: str
+    title: str
+    category_id: str | None
+    updated_at: float
+    created_at: float
+
+
+class NoteLinksResponse(StrictModel):
+    note_id: str
+    links: list[LinkedNote]
+
+
+class TrashNote(StrictModel):
+    id: str
+    title: str
+    version: int
+    deleted_at: float
+    purge_at: float
+    category_id: str | None
+    merged_into: str | None
+    merged_into_title: str | None
+
+
+class TrashResponse(StrictModel):
+    trash_days: int
+    notes: list[TrashNote]
+
+
+GuideName = Literal["note_tools", "categories"]
+
+
+class GuideUpdate(StrictModel):
+    guide: GuideName
+    step: int = Field(ge=0, le=100)
+    done: bool
+
+
+class GuideState(StrictModel):
+    step: int
+    done: bool
+
+
+class GuidesResponse(StrictModel):
+    guides: dict[str, GuideState]

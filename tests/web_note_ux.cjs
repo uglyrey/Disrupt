@@ -258,7 +258,7 @@ async function noteScreen() {
     assert.equal($('confirm-structure').disabled, false);
     // The text is a plain field, always open for typing. The old edit step and its buttons are gone.
     assert.equal($('markdown').hidden, false); assert.equal($('preview').hidden, true);
-    assert.equal($('markdown').placeholder, 'Пишите…'); assert.equal($('markdown').value, '## План\nПозвонить');
+    assert.match($('markdown').placeholder, /^Пишите как есть\./); assert.equal($('markdown').value, '## План\nПозвонить');
     for (const id of ['note-edit-start', 'note-save', 'note-edit-cancel', 'note-edit-actions']) assert.equal($(id), null, id);
     w.noteAutosaveMs = 5;
     const wait = ms => new Promise(resolve => w.setTimeout(resolve, ms));

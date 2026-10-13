@@ -1,3 +1,4 @@
+import logging
 import math
 import re
 import time
@@ -46,6 +47,17 @@ def saved_without_ai(db, capture):
         ProductEvent.user_id == capture.user_id, ProductEvent.name == "capture_saved",
         ProductEvent.operation_id == capture.id, ProductEvent.outcome == LIMIT_OUTCOME,
     )) is not None
+
+
+def add_requested_reminders(db, note, text, settings):
+    """A note saved without AI still gets a reminder for an explicit «напомни ...». It is deterministic and free."""
+    from app.reminders import request_reminders  # reminders.py imports this module
+
+    try:
+        with db.begin_nested():
+            request_reminders(db, note, text, settings)
+    except Exception as exc:  # The note is saved either way. Only the error type is logged, never the text.
+        logging.getLogger(__name__).warning("manual_request_reminder_failed %s", type(exc).__name__)
 
 
 def capture_text(db, user_id, text, key, settings, *, processing_mode="ai", channel="web", commit=True):
@@ -109,6 +121,7 @@ def capture_text(db, user_id, text, key, settings, *, processing_mode="ai", chan
         db.add(result)
         db.flush()
         if processing_mode == "manual":
+            add_requested_reminders(db, result, text, settings)
             save_revision(db, result)
         record_event(db, user_id, "capture_saved", capture.id, channel, outcome=LIMIT_OUTCOME if limited else None)
         if commit:
@@ -210,10 +223,16 @@ def create_audio_capture(
     return job
 
 
-def owned_note(db, note_id, user_id):
+def owned_note(db, note_id, user_id, *, state="active"):
+    """The user's note. A note in the trash is invisible (404) unless the caller asks for state="trashed" or "any"."""
     if "\x00" in note_id:
         raise HTTPException(404, "Заметка не найдена")
-    note = db.scalar(select(Note).where(Note.id == note_id, Note.user_id == user_id))
+    statement = select(Note).where(Note.id == note_id, Note.user_id == user_id)
+    if state == "active":
+        statement = statement.where(Note.deleted_at.is_(None))
+    elif state == "trashed":
+        statement = statement.where(Note.deleted_at.is_not(None))
+    note = db.scalar(statement)
     if note is None:
         raise HTTPException(404, "Заметка не найдена")
     return note
@@ -239,7 +258,7 @@ def snapshot(db, note):
     )
     items = db.scalars(
         select(Item)
-        .where(Item.note_id == note.id, Item.user_id == note.user_id)
+        .where(Item.note_id == note.id, Item.user_id == note.user_id, Item.deleted_at.is_(None))
         .order_by(Item.position, Item.id)
     ).all()
     return {
@@ -487,7 +506,7 @@ def capture_view(db, capture):
     return {
         "capture_id": capture.id, "original_text": capture.original_text,
         "processing_mode": capture.processing_mode, **audio_metadata(db, capture),
-        "note_id": db.scalar(select(Note.id).where(Note.capture_id == capture.id)),
+        "note_id": db.scalar(select(Note.id).where(Note.capture_id == capture.id, Note.deleted_at.is_(None))),
         "job": job_view(db, job) if job else None,
     }
 
@@ -675,7 +694,9 @@ def change_note_category(db, note, category_id, version):
 def create_item(db, note, body):
     advance_note(db, note, body.version)
     count = db.scalar(
-        select(func.count()).select_from(Item).where(Item.note_id == note.id, Item.user_id == note.user_id)
+        select(func.count()).select_from(Item).where(
+            Item.note_id == note.id, Item.user_id == note.user_id, Item.deleted_at.is_(None),
+        )
     )
     if count >= MAX_ITEMS:
         raise HTTPException(429, "В записи может быть не больше 30 элементов")
@@ -746,7 +767,9 @@ def edit_item(db, note, item_id, body):
         raise HTTPException(422, "Выполненной можно отметить только задачу")
     advance_note(db, note, body.version)
     item = db.scalar(
-        select(Item).where(Item.id == item_id, Item.note_id == note.id, Item.user_id == note.user_id)
+        select(Item).where(
+            Item.id == item_id, Item.note_id == note.id, Item.user_id == note.user_id, Item.deleted_at.is_(None),
+        )
     )
     if item is None:
         raise HTTPException(404, "Элемент не найден")
@@ -770,7 +793,7 @@ def edit_item(db, note, item_id, body):
 def search_notes(db, user_id, *, q=None, category_id=None, channel=None, input_kind=None, limit=20, offset=0):
     if q and "\x00" in q:
         raise HTTPException(422, "Уберите нулевой символ из поиска")
-    statement = select(Note).where(Note.user_id == user_id)
+    statement = select(Note).where(Note.user_id == user_id, Note.deleted_at.is_(None))
     if category_id == "none":
         statement = statement.where(Note.category_id.is_(None))
     elif category_id is not None:
@@ -788,7 +811,9 @@ def search_notes(db, user_id, *, q=None, category_id=None, channel=None, input_k
         return db.scalars(statement.offset(offset).limit(limit + 1)).all()
     # Тексты зашифрованы в базе, поэтому SQL по ним искать нельзя. Фильтруем в Python после расшифровки.
     item_texts = {}
-    for note_id, text in db.execute(select(Item.note_id, Item.text).where(Item.user_id == user_id)):
+    for note_id, text in db.execute(
+        select(Item.note_id, Item.text).where(Item.user_id == user_id, Item.deleted_at.is_(None))
+    ):
         item_texts.setdefault(note_id, []).append(text)
     wanted, found = offset + limit + 1, []
     rows = db.execute(statement.add_columns(Capture.original_text, Capture.transcript))
@@ -805,7 +830,8 @@ def saved_audio_view(db, capture):
     """Web answer for audio saved without AI. Same keys as a job, no job id, plus the flag."""
     return {
         "id": None, "capture_id": capture.id, "job_id": None, "status": "saved", "provider": "manual",
-        "error_code": None, "note_id": db.scalar(select(Note.id).where(Note.capture_id == capture.id)),
+        "error_code": None,
+        "note_id": db.scalar(select(Note.id).where(Note.capture_id == capture.id, Note.deleted_at.is_(None))),
         "original_text": capture.original_text, "created_at": capture.created_at, "finished_at": None,
         "ai_limit_exceeded": True,
     }
@@ -815,10 +841,12 @@ def job_view(db, job, *, capture=None, note_id=None):
     """One job. A list passes the capture and note it already loaded, so the list costs two queries, not 2 per job."""
     if capture is None:
         capture = db.get(Capture, job.capture_id)
-        note_id = db.scalar(select(Note.id).where(Note.capture_id == job.capture_id))
+        note_id = db.scalar(select(Note.id).where(Note.capture_id == job.capture_id, Note.deleted_at.is_(None)))
     return {
         "id": job.id,
         "capture_id": job.capture_id,
+        "kind": job.kind or "capture",
+        "merge_note_ids": job.merge_note_ids if job.kind == "merge" else None,
         "status": job.status,
         "provider": job.provider,
         "error_code": job.error_code,
@@ -837,5 +865,7 @@ def job_views(db, jobs):
     if not ids:
         return []
     captures = {c.id: c for c in db.scalars(select(Capture).where(Capture.id.in_(ids)))}
-    notes = dict(db.execute(select(Note.capture_id, Note.id).where(Note.capture_id.in_(ids))).all())
+    notes = dict(db.execute(
+        select(Note.capture_id, Note.id).where(Note.capture_id.in_(ids), Note.deleted_at.is_(None))
+    ).all())
     return [job_view(db, job, capture=captures[job.capture_id], note_id=notes.get(job.capture_id)) for job in jobs]

@@ -56,20 +56,26 @@ def build_dashboard(db, settings, user_id, days, now=None):
     ai = sum(1 for row in in_period if row.processing_mode == "ai")
 
     note_stamps = db.scalars(select(Note.created_at).where(
-        Note.user_id == user_id, Note.created_at >= period_start,
+        Note.user_id == user_id, Note.deleted_at.is_(None), Note.created_at >= period_start,
     )).all()
     per_day = {first_day + timedelta(days=offset): 0 for offset in range(days)}
     for stamp in note_stamps:
         day = local_day(stamp, zone)
         if day in per_day:
             per_day[day] += 1
-    total_notes = db.scalar(select(func.count()).select_from(Note).where(Note.user_id == user_id))
+    total_notes = db.scalar(select(func.count()).select_from(Note).where(
+        Note.user_id == user_id, Note.deleted_at.is_(None),
+    ))
 
+    alive_notes = select(Note.id).where(Note.user_id == user_id, Note.deleted_at.is_(None))
     kinds = db.execute(
         select(Note.category_id, Item.kind, Item.status, func.count())
         .select_from(Item)
         .join(Note, (Note.id == Item.note_id) & (Note.user_id == Item.user_id))
-        .where(Item.user_id == user_id, Item.kind.in_(["task", "idea"]))
+        .where(
+            Item.user_id == user_id, Item.kind.in_(["task", "idea"]), Item.deleted_at.is_(None),
+            Note.deleted_at.is_(None),
+        )
         .group_by(Note.category_id, Item.kind, Item.status)
     ).all()
     task_open = sum(n for _, kind, status, n in kinds if kind == "task" and status == "open")
@@ -84,12 +90,14 @@ def build_dashboard(db, settings, user_id, days, now=None):
     done_now = (
         set(db.scalars(select(Item.id).where(
             Item.user_id == user_id, Item.kind == "task", Item.status == "completed", Item.id.in_(done_ids),
+            Item.deleted_at.is_(None), Item.note_id.in_(alive_notes),
         )).all())
         if done_ids else set()
     )
 
     note_counts = dict(db.execute(
-        select(Note.category_id, func.count()).where(Note.user_id == user_id).group_by(Note.category_id)
+        select(Note.category_id, func.count())
+        .where(Note.user_id == user_id, Note.deleted_at.is_(None)).group_by(Note.category_id)
     ).all())
     categories = []
     for category in db.scalars(select(Category).where(Category.user_id == user_id)):
@@ -102,7 +110,10 @@ def build_dashboard(db, settings, user_id, days, now=None):
     categories.sort(key=lambda row: (-row["notes"], row["name"].casefold(), row["category_id"]))
 
     horizon = now + UPCOMING_DAYS * 86400
-    pending = (Reminder.user_id == user_id, Reminder.status == "confirmed", Reminder.scheduled_at > now)
+    pending = (
+        Reminder.user_id == user_id, Reminder.status == "confirmed", Reminder.scheduled_at > now,
+        Reminder.note_id.in_(alive_notes),
+    )
     upcoming = db.scalar(
         select(func.count()).select_from(Reminder).where(*pending, Reminder.scheduled_at <= horizon)
     )

@@ -1,0 +1,33 @@
+/* Tip bubbles next to buttons (guide.js) and the hint in empty text fields. Loaded last. */
+
+/* Hint for empty fields: several lines, quiet, readable */
+#thought::placeholder,#note-card #markdown::placeholder{color:#6b7a6e;opacity:1;line-height:1.7}
+#thought::placeholder{font-size:15px}
+
+.guide-bubble{position:fixed;left:0;top:0;z-index:90;box-sizing:border-box;width:min(300px,calc(100vw - 24px));padding:14px 16px 12px;border-radius:14px;background:#24372d;color:#fff;box-shadow:0 18px 40px -14px #14211a99,0 2px 8px #14211a33;font-size:14px;line-height:1.5}
+.guide-bubble[hidden]{display:none}
+.guide-text{margin:0;color:#fff;font-size:14px;line-height:1.5}
+.guide-text strong{font-weight:700}
+.guide-foot{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px 10px;margin-top:12px}
+.guide-count{grid-column:1;grid-row:1;color:#cfe0c8;font-size:12.5px;font-weight:600}
+.guide-bubble .guide-never,.guide-bubble .guide-next{min-height:34px;margin:0;padding:0 12px;border-radius:9px;font-size:13px;font-weight:600;line-height:1.2;cursor:pointer}
+.guide-bubble .guide-next{grid-column:2;grid-row:1}
+.guide-bubble .guide-never{grid-column:1/-1;grid-row:2;justify-self:start;margin-left:-12px;border:1px solid transparent;background:transparent;color:#cfe0c8;text-decoration:underline;text-underline-offset:2px}
+.guide-bubble .guide-never:hover:not(:disabled){background:#ffffff1f;color:#fff;filter:none}
+.guide-bubble .guide-next{border:1px solid #fff;background:#fff;color:#1f3328}
+.guide-bubble .guide-next:hover:not(:disabled){background:#e9f1e3;color:#1f3328;filter:none}
+.guide-bubble .guide-never:focus-visible,.guide-bubble .guide-next:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.guide-arrow{position:absolute;width:12px;height:12px;background:#24372d;transform:rotate(45deg)}
+.guide-bubble[data-placement=bottom] .guide-arrow{top:-6px;left:var(--guide-arrow,24px)}
+.guide-bubble[data-placement=top] .guide-arrow{bottom:-6px;left:var(--guide-arrow,24px)}
+.guide-bubble[data-placement=right] .guide-arrow{left:-6px;top:var(--guide-arrow,18px)}
+.guide-bubble[data-placement=left] .guide-arrow{right:-6px;top:var(--guide-arrow,18px)}
+/* Phone: a sheet at the bottom, the page stays usable above it */
+.guide-bubble[data-placement=sheet]{left:8px!important;right:8px!important;top:auto!important;bottom:calc(8px + env(safe-area-inset-bottom,0px));width:auto!important}
+.guide-bubble[data-placement=sheet] .guide-arrow{display:none}
+.guide-target{outline:2px solid #d29a2a;outline-offset:3px;border-radius:10px}
+.category-more.guide-target{opacity:1}
+@media(prefers-reduced-motion:no-preference){
+  .guide-bubble{animation:guide-in .18s ease-out}
+  @keyframes guide-in{from{opacity:0}to{opacity:1}}
+}
