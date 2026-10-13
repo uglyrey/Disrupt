@@ -523,6 +523,34 @@ async function guideOnPhone() {
   } finally { await closeWindow(u); }
 }
 
+// A tool that CSS takes off the screen (note-actions.css does it for «Связанные заметки») gets no tip on a phone.
+async function guideSkipsCssHidden() {
+  const t = boot({phone: true, guides: fresh()}); const {w, $} = t;
+  try {
+    const style = w.document.createElement('style');
+    style.textContent = '.tool[data-tool="related"]{display:none!important}';
+    w.document.head.append(style);
+    // A neighbour in the list makes focus.js show the tool, only the style keeps it off the screen.
+    const li = w.document.createElement('li'); li.textContent = 'Сосед';
+    $('related-list').append(li); $('view-related').hidden = false;
+    await signedIn(t);
+    await openFirst(t);
+    const tool = w.document.querySelector('.tool[data-tool="related"]');
+    assert.equal(tool.hidden, false, 'the tool is shown by focus.js');
+    assert.equal(w.getComputedStyle(tool).display, 'none', 'and taken away by the style');
+    await t.until(() => w.BerestaGuide.active() === 'note_tools', 'tour starts on a phone');
+    const total = Number(/из (\d+)/.exec(countText(t))[1]);
+    assert.equal(total, 7, 'menu button and six tools, no related tool');
+    const leads = [leadText(t)];
+    while (w.BerestaGuide.active()) {
+      w.document.querySelector('.guide-next').click();
+      if (w.BerestaGuide.active()) leads.push(leadText(t));
+    }
+    assert.equal(leads.length, total);
+    assert.ok(!leads.includes('Связанные заметки.'));
+  } finally { await closeWindow(t); }
+}
+
 module.exports = async () => {
   page();
   await namesAndLinks();
@@ -533,6 +561,7 @@ module.exports = async () => {
   await guideFlow();
   await guideCategories();
   await guideOnPhone();
+  await guideSkipsCssHidden();
   console.log('Phone menus and guide checks passed: renames, bot links, general and note menus, links in notes, empty-field hint, tips with progress and fallback.');
 };
 if (require.main === module) module.exports().catch(error => { console.error(error); process.exitCode = 1; });
