@@ -18,7 +18,7 @@
   }
 
   function clearHash() {
-    try { history.replaceState(null, '', location.pathname + location.search); } catch { location.hash = ''; }
+    try { history.replaceState(history.state, '', location.pathname + location.search); } catch { location.hash = ''; }
   }
 
   function openDialog(id) {
