@@ -103,6 +103,8 @@ class Percentage(StrictModel):
 
 
 class Cards(StrictModel):
+    saved_users: int = Field(default=0, ge=0)
+    ready_users: int = Field(default=0, ge=0)
     registrations: int
     dau: int
     unique_users: int
@@ -239,6 +241,7 @@ class GatewayBudget(StrictModel):
 
 
 class AdminSummary(StrictModel):
+    contest: dict | None = None
     budget: GatewayBudget | None = None
     cards: Cards
     daily: list[DailyMetrics]

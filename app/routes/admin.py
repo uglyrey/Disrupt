@@ -19,6 +19,7 @@ from app.admin_export import build_archive
 from app.admin_metrics import aggregate, export_csv
 from app.admin_models import AdminAccount, AdminAudit
 from app.admin_providers import ai_providers
+from app.contest_metrics import report as contest_report
 from app.contracts import AdminSummary, AiProviders, GatewayBudget
 from app.feedback_models import Feedback
 from app.gateway_budget import view as budget_view
@@ -126,17 +127,21 @@ def build_router(database, static, settings):
         result, next_offset = aggregate(db, start, end, channel, source, key, usage_limit=usage_limit, usage_offset=usage_offset)
         budget = db.get(ProviderBudget, "cloudru")
         result.budget = GatewayBudget.model_validate(budget_view(settings, budget.reserved_calls if budget else 0))
+        result.contest = contest_report(db, start, end, source=source, channel=channel,
+                                        counted_components=tuple(settings.contest_counted_components.split(",")))
         if next_offset is not None:
             response.headers["X-Next-Usage-Offset"] = str(next_offset)
         return result
 
     @router.get("/admin-api/v1/ai-providers", response_model=AiProviders, responses=errors)
-    def providers(
-        db=Depends(admin_database),
-        start: str = Query(alias="from", pattern=DATE),
-        end: str = Query(alias="to", pattern=DATE),
-    ):
+    def providers(db=Depends(admin_database), start: str = Query(alias="from", pattern=DATE),
+                  end: str = Query(alias="to", pattern=DATE)):
         return ai_providers(db, settings, start, end)
+
+    @router.get("/admin-api/v1/contest", responses=errors)
+    def contest(db=Depends(admin_database)):
+        return contest_report(db, settings.contest_start, settings.contest_end,
+                              counted_components=tuple(settings.contest_counted_components.split(",")))
 
     @router.get("/admin-api/v1/export", response_class=Response, responses={
         **errors, 200: {"description": "UTF-8 CSV of aggregates", "content": {"text/csv": {"schema": {"type": "string"}}}},
@@ -169,7 +174,9 @@ def build_router(database, static, settings):
         start: str = Query(alias="from", pattern=DATE),
         end: str = Query(alias="to", pattern=DATE),
     ):
-        data, stats = build_archive(db, start, end, key, stable_key=stable_key)
+        data, stats = build_archive(db, start, end, key, stable_key=stable_key,
+                                    counted_components=tuple(settings.contest_counted_components.split(",")),
+                                    contest_period=(settings.contest_start, settings.contest_end))
         auth.audit(db, "export_zip", admin_id=request.state.admin_id, ip=auth.client_ip(request),
                    details={"from": start, "to": end, **stats})
         db.commit()

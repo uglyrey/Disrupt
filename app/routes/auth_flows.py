@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
+from app.attribution import read as acquisition_source
 from app.error_logging import log_error
 from app.live import CLOSE_UNAUTHORIZED, Gone, Step, login_message, serve
 from app.mailer import MAIL_DISABLED_TEXT, MailDisabled, MailError
@@ -189,6 +190,8 @@ def build_router(database, settings):
         require_consent(body.accept_policy, body.policy_version)
         require_adult(body.confirm_age)
         row, token, binding = new_login(db, "login", policy_version=body.policy_version)
+        row.source = acquisition_source(body.source_token, settings, default="telegram")
+        db.commit()
         response.set_cookie(
             BINDING_COOKIE, binding, httponly=True, secure=settings.secure_cookies, samesite="lax",
             max_age=LOGIN_SECONDS, path=BINDING_PATH,
@@ -237,6 +240,7 @@ def build_router(database, settings):
             if created:
                 user = User(
                     username=free_username(db, row),
+                    source=row.source,
                     # Nobody knows this password. The owner of the Telegram account sets a real one through recovery.
                     password_hash=hash_password(secrets.token_urlsafe(48)),
                 )

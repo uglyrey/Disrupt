@@ -18,6 +18,41 @@ from tests.test_notes import submit
 
 
 @pytest.mark.skipif(not os.environ.get("TEST_POSTGRES_URL"), reason="Local PostgreSQL is not configured")
+def test_postgresql_metrics_archive_error_union(monkeypatch):
+    import csv
+    import io
+    import zipfile
+    from datetime import datetime, timezone
+
+    from app.admin_export import build_archive
+    from app.db import make_database
+    from app.models import RequestError, User, new_id
+
+    url = os.environ["TEST_POSTGRES_URL"]
+    assert make_url(url).host in {"127.0.0.1", "localhost", "::1"}
+    monkeypatch.setenv("NOTES_DATABASE_URL", url)
+    command.upgrade(Config("alembic.ini"), "head")
+    engine, sessions = make_database(url)
+    now = datetime(2026, 10, 3, tzinfo=timezone.utc).timestamp()
+    try:
+        with sessions() as db:
+            user = User(id=new_id(), username="pg_export_" + uuid.uuid4().hex, password_hash="synthetic")
+            db.add(user)
+            db.flush()
+            db.add(RequestError(user_id=user.id, route="/api/v1/notes/{note_id}", method="GET",
+                                status_code=404, error_code="not_found", occurred_at=now - 86400))
+            db.flush()
+            content, _ = build_archive(db, "2026-10-01", "2026-10-02", b"pg-export-test-key" * 2, now=now)
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                rows = list(csv.DictReader(io.StringIO(archive.read("errors.csv").decode("utf-8-sig")),
+                                           delimiter=";"))
+            assert any(row["source"] == "http" and row["status_code"] == "404" for row in rows)
+            db.rollback()
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.skipif(not os.environ.get("TEST_POSTGRES_URL"), reason="Local PostgreSQL is not configured")
 def test_postgresql_migration_and_note_roundtrip(monkeypatch):
     url = os.environ["TEST_POSTGRES_URL"]
     assert make_url(url).host in {"127.0.0.1", "localhost", "::1"}
