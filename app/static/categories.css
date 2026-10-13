@@ -9,6 +9,7 @@
 .category-item:not([data-category-id])>.category-button{padding-right:12px}
 .category-more{position:absolute;right:4px;top:50%;margin-top:-14px;display:grid;place-items:center;width:28px;height:28px;min-height:28px;padding:0;border:0;border-radius:8px;background:transparent;color:#526353;opacity:0}
 .category-item:hover>.category-more,.category-item:focus-within>.category-more,.category-more[aria-expanded=true]{opacity:1}
+.category-item:has(>.category-button[aria-pressed=true])>.category-more{opacity:.75}
 .category-more:hover:not(:disabled),.category-more[aria-expanded=true]{background:#d5dfcf!important;color:#274632!important}
 .category-add:focus-visible,.category-more:focus-visible,.category-menu-item:focus-visible,.category-edit input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .category-edit{margin:0;padding:2px 0}

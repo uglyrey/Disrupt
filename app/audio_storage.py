@@ -312,6 +312,16 @@ class AudioStorage:
             raise
         return target
 
+    def delete(self, key):
+        """Erase one original for good. A file that is already gone is fine. Only the trash purge calls this."""
+        self._writable()
+        if not isinstance(key, str) or not key.endswith(".audio") or _key(key[:-6]) != key:
+            raise AudioStorageUnavailable("invalid_audio_key")
+        try:
+            (self.root / key).unlink(missing_ok=True)
+        except OSError:
+            raise AudioStorageUnavailable("storage_unavailable") from None
+
     @contextmanager
     def open_original(self, key):
         if not isinstance(key, str) or not key.endswith(".audio") or _key(key[:-6]) != key:

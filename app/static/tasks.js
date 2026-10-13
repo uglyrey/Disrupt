@@ -55,7 +55,7 @@
   }
   function setBusy(on) {
     busy = on;
-    for (const box of $('tasks-list').querySelectorAll('input')) box.disabled = on;
+    for (const box of $('tasks-list').querySelectorAll('input,.tk-trash')) box.disabled = on;
   }
 
   function rowNode(row) {
@@ -81,7 +81,11 @@
     };
     meta.append(link);
     main.append(meta);
-    item.append(box, main);
+    const trash = el('button', '', 'tk-trash'); trash.type = 'button';
+    trash.title = 'Удалить задачу'; trash.setAttribute('aria-label', `Удалить задачу «${row.text}»`);
+    trash.append(trashIcon());
+    trash.onclick = () => remove(row);
+    item.append(box, main, trash);
     return item;
   }
   function render() {
@@ -173,6 +177,48 @@
         return;
       }
       box.checked = row.status === 'completed';
+      say(failure(error));
+      message(failure(error));
+    }
+  }
+
+  function trashIcon() {
+    const ns = 'http://www.w3.org/2000/svg', icon = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
+    for (const [key, value] of Object.entries({viewBox: '0 0 24 24', width: 16, height: 16, 'aria-hidden': 'true', focusable: 'false'})) icon.setAttribute(key, value);
+    for (const [key, value] of Object.entries({d: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.7, 'stroke-linecap': 'round', 'stroke-linejoin': 'round'})) path.setAttribute(key, value);
+    icon.append(path);
+    return icon;
+  }
+  // The task goes to the trash of its note. A toast for six seconds offers to undo it.
+  async function remove(row) {
+    if (busy) return;
+    const mine = ++run;
+    setBusy(true);
+    try {
+      const note = await api(`/api/v1/notes/${row.note_id}/items/${row.id}?version=${row.note_version}`, {method: 'DELETE'});
+      if (mine !== run) return;
+      for (const other of rows) if (other.note_id === row.note_id && other !== row) other.note_version = note.version;
+      const index = rows.indexOf(row);
+      rows.splice(index, 1);
+      const key = row.status === 'completed' ? 'completed' : 'open';
+      counts = {...counts, [key]: Math.max(0, counts[key] - 1)};
+      setBusy(false); render();
+      say('Задача удалена.');
+      const buttons = $('tasks-list').querySelectorAll('.tk-trash');
+      (buttons[Math.min(index, buttons.length - 1)] || $('tasks-filter').querySelector('[aria-pressed=true]'))?.focus();
+      const actions = window.BerestaNoteActions;
+      if (actions) actions.toast('Задача удалена.', 'Отменить', async () => {
+        await api(`/api/v1/notes/${row.note_id}/items/${row.id}/restore`, {method: 'POST'});
+        await load('Задача вернулась в список.');
+      });
+    } catch (error) {
+      if (mine !== run) return;
+      setBusy(false);
+      if (error && error.status === 409) {
+        message('Заметка уже изменилась. Обновили список, попробуйте ещё раз.');
+        await load('Заметка уже изменилась, список обновлён. Удалите задачу ещё раз.');
+        return;
+      }
       say(failure(error));
       message(failure(error));
     }

@@ -42,6 +42,7 @@ from app.routes.brain import build_router as brain_router
 from app.routes.digests import build_router as digests_router
 from app.routes.feedback import build_router as feedback_router
 from app.routes.internal import build_router as internal_router
+from app.routes.notes_manage import build_router as notes_manage_router
 from app.routes.reminders import build_router as reminders_router
 from app.routes.review import build_router as review_router
 from app.routes.structure import build_router as structure_router
@@ -307,6 +308,7 @@ def create_app(
     app.include_router(transcripts_router(database))
     app.include_router(brain_router(database, settings))
     app.include_router(digests_router(database))
+    app.include_router(notes_manage_router(database, settings, audio_storage))
     app.include_router(assistant_router(database, settings))
     app.include_router(auth_flows_router(database, settings))
     from app.routes.email_auth import build_router as email_auth_router

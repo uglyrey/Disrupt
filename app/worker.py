@@ -46,6 +46,7 @@ from app.models import (
     User,
     new_id,
 )
+from app.notes_manage import MergeSourcesChanged, complete_merge, merge_sources_alive
 from app.provider_router import FALLBACK, PRIMARY, Attempt, ProviderRouter
 from app.providers import (
     STRUCTURE_MAX_TOKENS,
@@ -55,7 +56,7 @@ from app.providers import (
     make_provider,
     validate_result,
 )
-from app.reminders import auto_reminders
+from app.reminders import auto_reminders, request_reminders
 from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide, routing_code
 from app.services import lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_fallback_speech_provider, make_speech_provider
@@ -343,6 +344,12 @@ class Worker:
                 exception=exception,
             )
 
+    def merge_sources_gone(self, job_id):
+        """True when a merge job lost one of its notes (deleted or merged elsewhere). Nothing is sent to the model then."""
+        with self.sessions() as db:
+            job = db.get(Job, job_id)
+            return job.kind == "merge" and not merge_sources_alive(db, job)
+
     def run_once(self):
         job_id = self.claim()
         if job_id is None:
@@ -357,11 +364,13 @@ class Worker:
                 record_component(db, claimed_job.user_id, component_id, "capture_worker", channel,
                                  status="unknown", is_test=self.settings.provider != "cloudru")
                 db.commit()
+            if self.merge_sources_gone(job_id):
+                raise ProviderError("merge_source_missing")
             attempt = self.begin_attempt(job_id)
             original = self.original_for_job(job_id, attempt)
             with self.sessions() as db:
                 job = db.get(Job, job_id)
-                capture_id, user_id = job.capture_id, job.user_id
+                capture_id, user_id, job_kind = job.capture_id, job.user_id, job.kind
                 category_context = {
                     category.name: category.id
                     for category in db.scalars(
@@ -422,30 +431,40 @@ class Worker:
                     note.category_id = category.id if category else None
                 db.add(note)
                 db.flush()
+                created = []
                 for position, item in enumerate(result.items):
-                    db.add(
-                        Item(
-                            user_id=user_id,
-                            note_id=note.id,
-                            kind=item.kind,
-                            text=item.text,
-                            source_quote=item.source_quote,
-                            due_text=item.due_text,
-                            due_at=None,
-                            status="open",
-                            version=1,
-                            position=position,
-                        )
+                    row = Item(
+                        user_id=user_id,
+                        note_id=note.id,
+                        kind=item.kind,
+                        text=item.text,
+                        source_quote=item.source_quote,
+                        due_text=item.due_text,
+                        due_at=None,
+                        status="open",
+                        version=1,
+                        position=position,
                     )
+                    db.add(row)
+                    created.append(row)
                 db.flush()
+                if job_kind == "merge":
+                    # Open tasks, reminders and links of the originals move over, the originals go to the trash.
+                    # The reminders of the originals are already settled, so the note gets no new automatic ones.
+                    try:
+                        complete_merge(db, db.get(Job, job_id), note, created)
+                    except MergeSourcesChanged:
+                        raise ProviderError("merge_source_missing") from None
+                else:
+                    try:
+                        # The note matters more than its reminders: a failure here leaves the note as it is.
+                        with db.begin_nested():
+                            auto_reminders(db, note, self.settings)
+                            request_reminders(db, note, original, self.settings)
+                    except Exception as exc:
+                        log_error("auto_reminder_failed", "internal_error", log_file=self.settings.error_log_file,
+                                  job_id=job_id, exception=exc)
                 save_revision(db, note)
-                try:
-                    # The note matters more than its reminders: a failure here leaves the note as it is.
-                    with db.begin_nested():
-                        auto_reminders(db, note, self.settings)
-                except Exception as exc:
-                    log_error("auto_reminder_failed", "internal_error", log_file=self.settings.error_log_file,
-                              job_id=job_id, exception=exc)
                 capture = db.get(Capture, capture_id)
                 record_event(db, user_id, "processing_completed", job_id, capture.channel)
                 finish_component(db, user_id, component_id, "capture_worker", "succeeded")

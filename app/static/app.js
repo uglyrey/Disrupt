@@ -45,6 +45,7 @@ const errors = {
   stt_invalid_response:'Не удалось получить расшифровку. Аудио сохранено, можно вписать текст вручную.',
   stt_failed:'Не удалось распознать запись. Оригинал сохранён.',
   audio_storage_unavailable:'Не удалось прочитать аудио. Попробуйте открыть оригинал позже.',
+  merge_source_missing:'Одну из заметок уже удалили или изменили. Ничего не объединено.',
 };
 const omittedNotice = 'Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.';
 const blockedNotice = 'ИИ ответил странно, заметка сохранена без обработки.';
@@ -247,24 +248,118 @@ async function loadNotes(reset = true) {
   }
   notesOffset += list.length; $('more-notes').hidden = !headers.has('X-Next-Notes-Offset');
 }
-function renderMarkdown(text) { renderMarkdownInto($('preview'),text); }
+function renderMarkdown(text, options) { renderMarkdownInto($('preview'),text,options); }
 // Also used by brain.js for assistant answers.
-function renderMarkdownInto(preview, text) {
-  preview.replaceChildren();
-  // Deliberately small renderer: text nodes only, no raw HTML or executable links.
-  let list = null;
-  for (const line of text.split('\n')) {
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    const bullet = line.match(/^[-*]\s+(.+)$/);
-    if (bullet) {
-      if (!list) { list = document.createElement('ul'); preview.append(list); }
-      list.append(element('li',bullet[1]));
+// Deliberately small renderer. It builds text nodes and a fixed set of tags, never raw HTML, and links only open http and https.
+// Bare http(s):// and www. addresses in the text become links too.
+// Every block carries its source line in data-line, so the note view can put the caret on the clicked line.
+// options.onToggle(line, checked) makes task checkboxes live. Without it they are shown but disabled.
+function markdownSafeUrl(raw) {
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+  } catch { return null; }
+}
+// A bare address in the text. Trailing punctuation belongs to the sentence, a closing bracket only when it has no opener.
+function trimBareUrl(raw) {
+  let url = raw;
+  for (;;) {
+    const tail = url[url.length - 1];
+    if (/[.,;:!?'"»”’\]}>]/.test(tail)) url = url.slice(0,-1);
+    else if (tail === ')' && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) url = url.slice(0,-1);
+    else return url;
+  }
+}
+function renderInlineMarkdown(parent, text) {
+  // 1 code, 2 and 3 bold, 4 italic with a star, 5 and 6 italic with underscores (5 is the character before), 7 and 8 link,
+  // 9 and 10 a bare address (9 is the character before).
+  const pattern = /`([^`]+)`|\*\*(.+?)\*\*|__(.+?)__|\*([^\s*](?:.*?[^\s*])?)\*|(^|[^\w])_([^\s_](?:.*?[^\s_])?)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)\)|(^|[^\w@./:-])((?:https?:\/\/|www\.)[^\s<>]+)/g;
+  let last = 0, match;
+  while ((match = pattern.exec(text))) {
+    const lead = match[6] !== undefined ? match[5].length : match[10] !== undefined ? match[9].length : 0;
+    if (match.index + lead > last) parent.append(document.createTextNode(text.slice(last,match.index + lead)));
+    last = pattern.lastIndex;
+    if (match[1] !== undefined) parent.append(element('code',match[1]));
+    else if (match[2] !== undefined || match[3] !== undefined) {
+      const strong = document.createElement('strong'); renderInlineMarkdown(strong,match[2] ?? match[3]); parent.append(strong);
+    } else if (match[4] !== undefined || match[6] !== undefined) {
+      const em = document.createElement('em'); renderInlineMarkdown(em,match[4] ?? match[6]); parent.append(em);
+    } else if (match[10] !== undefined) {
+      const shown = trimBareUrl(match[10]), href = shown ? markdownSafeUrl(/^www\./i.test(shown) ? `https://${shown}` : shown) : null;
+      if (href) {
+        const link = element('a',shown); link.href = href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        parent.append(link);
+        last = pattern.lastIndex = match.index + lead + shown.length;
+      } else parent.append(document.createTextNode(match[10]));
     } else {
-      list = null;
-      if (heading) preview.append(element(`h${heading[1].length}`, heading[2]));
-      else if (line.trim()) preview.append(element('p',line));
+      const href = markdownSafeUrl(match[8]);
+      if (href) {
+        const link = element('a',match[7]); link.href = href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        parent.append(link);
+      } else parent.append(document.createTextNode(match[0]));
     }
   }
+  if (last < text.length) parent.append(document.createTextNode(text.slice(last)));
+}
+function renderMarkdownInto(preview, text, options = {}) {
+  preview.replaceChildren();
+  const lines = String(text).replace(/\r\n?/g,'\n').split('\n');
+  const listLine = /^(\s*)([-*+•]|\d{1,9}[.)])[ \t]+(.*)$/;
+  const rule = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
+  let paragraph = null, quote = null, stack = [];
+  const startBlock = () => { paragraph = null; quote = null; stack = []; };
+  // One text line inside a paragraph or a quote. Soft line breaks stay as breaks.
+  const addLine = (block, line, index) => {
+    if (block.childNodes.length) block.append(document.createElement('br'));
+    const span = document.createElement('span'); span.dataset.line = String(index);
+    renderInlineMarkdown(span,line.trim()); block.append(span);
+  };
+  lines.forEach((line,index) => {
+    if (!line.trim()) { startBlock(); return; }
+    let match;
+    if ((match = line.match(/^(#{1,3})\s+(.+)$/))) {
+      startBlock();
+      const heading = document.createElement(`h${match[1].length}`); heading.dataset.line = String(index);
+      renderInlineMarkdown(heading,match[2].trim()); preview.append(heading);
+    } else if (rule.test(line)) {
+      startBlock();
+      const hr = document.createElement('hr'); hr.dataset.line = String(index); preview.append(hr);
+    } else if ((match = line.match(/^\s*>\s?(.*)$/))) {
+      paragraph = null; stack = [];
+      if (!quote) { quote = document.createElement('blockquote'); preview.append(quote); }
+      addLine(quote,match[1],index);
+    } else if ((match = line.match(listLine))) {
+      paragraph = null; quote = null;
+      const width = match[1].replace(/\t/g,'  ').length, ordered = /\d/.test(match[2]);
+      while (stack.length && stack[stack.length - 1].width > width) stack.pop();
+      let top = stack[stack.length - 1], fresh = !top || width > top.width;
+      if (top && top.width === width && top.ordered !== ordered) { stack.pop(); top = stack[stack.length - 1]; fresh = true; }
+      if (fresh) {
+        const list = document.createElement(ordered ? 'ol' : 'ul');
+        if (ordered && parseInt(match[2],10) !== 1) list.start = parseInt(match[2],10);
+        (top && top.list.lastElementChild ? top.list.lastElementChild : preview).append(list);
+        top = {width, ordered, list}; stack.push(top);
+      }
+      const item = document.createElement('li'); item.dataset.line = String(index);
+      const task = match[3].match(/^\[([ xX])\][ \t]+(.*)$/) || match[3].match(/^\[([ xX])\]()$/);
+      if (task) {
+        item.className = 'md-task';
+        const box = document.createElement('input'); box.type = 'checkbox'; box.checked = task[1] !== ' ';
+        box.dataset.line = String(index); box.setAttribute('aria-label','Выполнено');
+        if (typeof options.onToggle === 'function') box.addEventListener('change',() => options.onToggle(index,box.checked));
+        else box.disabled = true;
+        item.append(box);
+        const label = document.createElement('span'); label.className = 'md-task-text';
+        if (box.checked) label.classList.add('is-done');
+        renderInlineMarkdown(label,task[2]); item.append(label);
+      } else renderInlineMarkdown(item,match[3]);
+      top.list.append(item);
+    } else {
+      quote = null; stack = [];
+      if (!paragraph) { paragraph = document.createElement('p'); preview.append(paragraph); }
+      addLine(paragraph,line,index);
+    }
+  });
 }
 function hasDrafts(except = null) {
   if (except !== 'reminder' && window.BerestaReminders?.dirty()) return true;
@@ -405,11 +500,13 @@ function retryNote(job) {
 async function loadJobs() {
   const jobs = await api('/api/v1/jobs'); $('jobs').replaceChildren();
   for (const job of jobs) {
-    const row = element('div','','job');
-    row.append(element('p',`${statusLabels[job.status]} · ${new Date(job.created_at*1000).toLocaleString('ru-RU')}`));
+    const row = element('div','','job'), merge = job.kind === 'merge';
+    row.append(element('p',`${merge ? 'Объединение заметок · ' : ''}${statusLabels[job.status]} · ${new Date(job.created_at*1000).toLocaleString('ru-RU')}`));
     if (job.status === 'failed') {
-      row.append(element('p',errors[job.error_code] || `Не удалось обработать запись. Она сохранена. Код: ${job.error_code}.`));
-      if (job.original_text && job.original_text.trim()) {
+      row.append(element('p',merge ? (window.BerestaNoteActions ? window.BerestaNoteActions.mergeFailure(job) : 'Объединить не получилось. Заметки остались как были.')
+        : errors[job.error_code] || `Не удалось обработать запись. Она сохранена. Код: ${job.error_code}.`));
+      // A merge is not a text to send again: the notes are picked anew in «Объединить с…».
+      if (!merge && job.original_text && job.original_text.trim()) {
         const actions = element('div','','actions');
         const again = element('button','Отправить ещё раз с ИИ'), manual = element('button','Сохранить без ИИ','quiet');
         again.type = manual.type = 'button'; again.dataset.retry = 'ai'; manual.dataset.retry = 'manual';
@@ -425,10 +522,12 @@ async function loadJobs() {
     if (job.note_id) {
       const button = element('button','Открыть заметку','quiet');
       button.onclick = () => openNote(job.note_id,{userAction:true}).catch(e => message(e.message)); row.append(button);
-    } else row.append(element('pre',job.original_text));
-    const original = element('button','Открыть исходник','quiet');
-    original.onclick = () => openCapture(job.capture_id,{userAction:true}).catch(e => message(e.message));
-    row.append(original);
+    } else if (!merge) row.append(element('pre',job.original_text));
+    if (!merge) {
+      const original = element('button','Открыть исходник','quiet');
+      original.onclick = () => openCapture(job.capture_id,{userAction:true}).catch(e => message(e.message));
+      row.append(original);
+    }
     $('jobs').append(row);
   }
   return jobs;

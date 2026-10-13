@@ -110,6 +110,8 @@ class Settings:
     audio_unit_base: int = 2
     audio_unit_per_minute: int = 1
     limit_timezone: str = "Europe/Moscow"
+    # Когда напомнить, если человек попросил напомнить, но время не назвал. Секунды, 0 отключает.
+    reminder_default_delay_seconds: int = 3600
     session_seconds: int = 86400
     lease_seconds: int = 120
     # Ждём ответ модели не дольше этого времени на одно чтение. Потоковый режим включают только после ручной проверки.
@@ -154,6 +156,8 @@ class Settings:
     revision_session_max_seconds: int = 3600
     # Сколько версий хранить у одной заметки. Первая версия не удаляется. 0 отключает чистку.
     revision_keep: int = 50
+    # Корзина. Удалённая заметка лежит столько дней, потом планировщик стирает её насовсем. Подробности в docs/notes-manage-v1.md.
+    trash_days: int = 30
     # WebSocket для входа и привязки Telegram. Подробности в docs/telegram-live-v1.md. Лимиты считаются на процесс.
     ws_poll_seconds: float = 1.0
     ws_max_seconds: float = 360.0
@@ -247,6 +251,8 @@ class Settings:
             raise ValueError("Revision coalesce and session seconds are out of range")
         if self.revision_keep != 0 and not 5 <= self.revision_keep <= 1000:
             raise ValueError("NOTES_REVISION_KEEP must be 0 or between 5 and 1000")
+        if not 1 <= self.trash_days <= 3650:
+            raise ValueError("NOTES_TRASH_DAYS must be between 1 and 3650")
         if self.fallback_enabled:
             check_fallback_url(self.fallback_base_url)
             # Токен нужен только воркеру. Веб-процесс его не получает, поэтому пустой токен допустим.
@@ -271,6 +277,8 @@ class Settings:
             1 <= self.retry_breaker_window_seconds <= 3600 and 1 <= self.retry_breaker_pause_seconds <= 7200
         ):
             raise ValueError("Retry breaker needs at least 1 failure, a window up to 3600 s and a pause up to 7200 s")
+        if not 0 <= self.reminder_default_delay_seconds <= 86400:
+            raise ValueError("NOTES_REMINDER_DEFAULT_DELAY must be between 0 and 86400 seconds")
         try:
             ZoneInfo(self.limit_timezone)
         except (ZoneInfoNotFoundError, ValueError, OSError):
@@ -401,6 +409,9 @@ class Settings:
             audio_unit_base=int(os.environ.get("NOTES_AUDIO_UNIT_BASE", str(cls.audio_unit_base))),
             audio_unit_per_minute=int(os.environ.get("NOTES_AUDIO_UNIT_PER_MINUTE", str(cls.audio_unit_per_minute))),
             limit_timezone=os.environ.get("NOTES_LIMIT_TIMEZONE", cls.limit_timezone),
+            reminder_default_delay_seconds=int(
+                os.environ.get("NOTES_REMINDER_DEFAULT_DELAY", str(cls.reminder_default_delay_seconds))
+            ),
             error_log_file=os.environ.get("NOTES_ERROR_LOG_FILE", "data/errors.log"),
             ai_retries_enabled=flag("NOTES_AI_RETRIES_ENABLED", True),
             retry_clear_delays=parse_seconds_list(
@@ -414,6 +425,7 @@ class Settings:
             revision_coalesce_seconds=int(os.environ.get("NOTES_REVISION_COALESCE_SECONDS", "600")),
             revision_session_max_seconds=int(os.environ.get("NOTES_REVISION_SESSION_MAX_SECONDS", "3600")),
             revision_keep=int(os.environ.get("NOTES_REVISION_KEEP", "50")),
+            trash_days=int(os.environ.get("NOTES_TRASH_DAYS", "30")),
             retry_user_per_hour=int(os.environ.get("NOTES_RETRY_USER_PER_HOUR", "10")),
             retry_global_per_hour=int(os.environ.get("NOTES_RETRY_GLOBAL_PER_HOUR", "60")),
             retry_breaker_failures=int(os.environ.get("NOTES_RETRY_BREAKER_FAILURES", "5")),

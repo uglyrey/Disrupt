@@ -53,6 +53,8 @@ x-backend-environment: &backend-environment
   NOTES_AUDIO_UNIT_BASE: ${NOTES_AUDIO_UNIT_BASE:-2}
   NOTES_AUDIO_UNIT_PER_MINUTE: ${NOTES_AUDIO_UNIT_PER_MINUTE:-1}
   NOTES_LIMIT_TIMEZONE: ${NOTES_LIMIT_TIMEZONE:-Europe/Moscow}
+  # Через сколько секунд напомнить, если человек просил напомнить, но не назвал время. 0 отключает.
+  NOTES_REMINDER_DEFAULT_DELAY: ${NOTES_REMINDER_DEFAULT_DELAY:-3600}
   NOTES_AUTO_WORKER: "false"
   # Шифрование текстов и аудио на диске. Ключ лежит в Docker secret. См. docs/encryption-v1.md.
   NOTES_DATA_ENCRYPTION: required
@@ -161,6 +163,9 @@ services:
 
   scheduler:
     build: .
+    # Планировщик стирает голосовые оригиналы заметок, пролежавших в корзине срок хранения.
+    volumes:
+      - audio-originals:/app/data/audio
     restart: unless-stopped
     command: ["python", "-m", "app.scheduler"]
     environment:
