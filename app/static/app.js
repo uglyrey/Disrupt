@@ -45,6 +45,7 @@ const errors = {
   stt_invalid_response:'Не удалось получить расшифровку. Аудио сохранено, можно вписать текст вручную.',
   stt_failed:'Не удалось распознать запись. Оригинал сохранён.',
   audio_storage_unavailable:'Не удалось прочитать аудио. Попробуйте открыть оригинал позже.',
+  merge_source_missing:'Одну из заметок уже удалили или изменили. Ничего не объединено.',
 };
 const omittedNotice = 'Заметка готова. Неподтверждённые выводы, задачи или сроки не добавлены.';
 const blockedNotice = 'ИИ ответил странно, заметка сохранена без обработки.';
@@ -463,11 +464,13 @@ function retryNote(job) {
 async function loadJobs() {
   const jobs = await api('/api/v1/jobs'); $('jobs').replaceChildren();
   for (const job of jobs) {
-    const row = element('div','','job');
-    row.append(element('p',`${statusLabels[job.status]} · ${new Date(job.created_at*1000).toLocaleString('ru-RU')}`));
+    const row = element('div','','job'), merge = job.kind === 'merge';
+    row.append(element('p',`${merge ? 'Объединение заметок · ' : ''}${statusLabels[job.status]} · ${new Date(job.created_at*1000).toLocaleString('ru-RU')}`));
     if (job.status === 'failed') {
-      row.append(element('p',errors[job.error_code] || `Не удалось обработать запись. Она сохранена. Код: ${job.error_code}.`));
-      if (job.original_text && job.original_text.trim()) {
+      row.append(element('p',merge ? (window.BerestaNoteActions ? window.BerestaNoteActions.mergeFailure(job) : 'Объединить не получилось. Заметки остались как были.')
+        : errors[job.error_code] || `Не удалось обработать запись. Она сохранена. Код: ${job.error_code}.`));
+      // A merge is not a text to send again: the notes are picked anew in «Объединить с…».
+      if (!merge && job.original_text && job.original_text.trim()) {
         const actions = element('div','','actions');
         const again = element('button','Отправить ещё раз с ИИ'), manual = element('button','Сохранить без ИИ','quiet');
         again.type = manual.type = 'button'; again.dataset.retry = 'ai'; manual.dataset.retry = 'manual';
@@ -483,10 +486,12 @@ async function loadJobs() {
     if (job.note_id) {
       const button = element('button','Открыть заметку','quiet');
       button.onclick = () => openNote(job.note_id,{userAction:true}).catch(e => message(e.message)); row.append(button);
-    } else row.append(element('pre',job.original_text));
-    const original = element('button','Открыть исходник','quiet');
-    original.onclick = () => openCapture(job.capture_id,{userAction:true}).catch(e => message(e.message));
-    row.append(original);
+    } else if (!merge) row.append(element('pre',job.original_text));
+    if (!merge) {
+      const original = element('button','Открыть исходник','quiet');
+      original.onclick = () => openCapture(job.capture_id,{userAction:true}).catch(e => message(e.message));
+      row.append(original);
+    }
     $('jobs').append(row);
   }
   return jobs;
