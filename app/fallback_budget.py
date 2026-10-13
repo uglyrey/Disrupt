@@ -1,4 +1,4 @@
-"""Дневной потолок расхода на резервный ИИ. Подробности в docs/ai-failover-v1.md.
+"""Дневной потолок расхода на резервный ИИ. Ноль отключает денежный потолок.
 
 Перед каждым обращением к резерву в базе резервируется наибольшая возможная цена вызова, а после ответа
 резерв заменяется настоящей оценкой. Резерв занимается одним условным UPDATE, поэтому два воркера
@@ -82,11 +82,11 @@ class FallbackBudget:
         ) or 0
 
     def exhausted(self, db, now=None) -> bool:
-        return self.spent(db, now) + MIN_CALL_MICRO > self.cap
+        return self.cap > 0 and self.spent(db, now) + MIN_CALL_MICRO > self.cap
 
     def fits(self, db, usd, now=None) -> bool:
         """Поместится ли вызов с такой наибольшей ценой в остаток дня. Подсказка, решает reserve."""
-        return self.spent(db, now) + to_micro(usd) <= self.cap
+        return self.cap == 0 or self.spent(db, now) + to_micro(usd) <= self.cap
 
     def reserve(self, usd, now=None) -> Reservation | None:
         """Занять место под вызов. None, если потолок дня не позволяет."""
@@ -100,9 +100,11 @@ class FallbackBudget:
                         db.flush()
                 except IntegrityError:
                     pass  # Другой воркер создал строку раньше.
+            statement = update(FallbackSpend).where(FallbackSpend.day == day)
+            if self.cap > 0:
+                statement = statement.where(FallbackSpend.committed_micro_usd + amount <= self.cap)
             taken = db.execute(
-                update(FallbackSpend)
-                .where(FallbackSpend.day == day, FallbackSpend.committed_micro_usd + amount <= self.cap)
+                statement
                 .values(committed_micro_usd=FallbackSpend.committed_micro_usd + amount, updated_at=now)
             ).rowcount
             db.commit()

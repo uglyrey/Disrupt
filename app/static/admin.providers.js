@@ -28,8 +28,9 @@
     const primaryHint = down
       ? 'С ' + stamp(data.primary_changed_at) + (data.next_probe_at ? '. Следующая проверка после ' + stamp(data.next_probe_at) : '')
       : 'Все задания идут сюда';
+    const unlimited = Number(data.fallback_cap_usd) === 0;
     const reserve = data.fallback_enabled
-      ? card('Резерв', 'Включён', usd(data.fallback_spent_today_usd) + ' из ' + usd(data.fallback_cap_usd) + ' за сегодня')
+      ? card('Резерв', 'Включён', unlimited ? 'Без денежного лимита Beresta; баланс проверяйте у провайдера' : usd(data.fallback_spent_today_usd) + ' из ' + usd(data.fallback_cap_usd) + ' за сегодня')
       : card('Резерв', 'Выключен', 'Включается настройкой NOTES_FALLBACK_ENABLED');
     state.replaceChildren(card('Cloud.ru', down ? 'Недоступен' : 'Работает', primaryHint, down ? 'incomplete' : undefined), reserve);
     const names = [...new Set([...data.today, ...data.period].map(row => row.provider))];
@@ -65,7 +66,9 @@
       const data = await response.json();
       if (mine !== generation) return;
       render(data);
-      note.textContent = 'Расход резерва оценён по токенам и ценам из настроек, это не счёт OpenAI. Данные на ' + stamp(data.generated_at) + '.';
+      note.textContent = (Number(data.fallback_cap_usd) === 0
+        ? 'Beresta не ограничивает денежный расход резерва. Баланс и списания проверяйте у провайдера. '
+        : 'Расход резерва оценён по токенам и ценам из настроек, это не счёт провайдера. ') + 'Данные на ' + stamp(data.generated_at) + '.';
     } catch (error) {
       if (mine !== generation) return;
       state.replaceChildren();

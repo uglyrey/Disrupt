@@ -604,6 +604,21 @@ def test_the_breaker_pause_does_not_hold_retries_while_a_fallback_is_available(e
 
 # Потолок расхода
 
+def test_zero_cap_disables_only_monetary_limit(app):
+    budget = FallbackBudget(app.state.sessions, replace(app.state.settings, fallback_daily_usd=Decimal(0)))
+    now = time.time()
+    with app.state.sessions() as db:
+        assert budget.exhausted(db, now) is False
+        assert budget.fits(db, Decimal("1000000"), now) is True
+    reservation = budget.reserve(Decimal("1000000"), now)
+    assert reservation is not None
+    budget.settle(reservation, Decimal("1000000"))
+    with app.state.sessions() as db:
+        assert budget.spent(db, now) == to_micro("1000000")
+        assert budget.exhausted(db, now) is False
+    assert budget.reserve(Decimal("1000000"), now) is not None
+
+
 def test_daily_cap_reserves_before_the_call_and_settles_after(app):
     budget = FallbackBudget(app.state.sessions, replace(app.state.settings, fallback_daily_usd=Decimal("0.10")))
     now = time.time()
