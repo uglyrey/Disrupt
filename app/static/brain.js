@@ -84,6 +84,11 @@
     return VIEWS.includes(name) ? name : null;
   }
   function setHash(name) {
+    if (window.BerestaNavigation) {
+      if (name) window.BerestaNavigation.record({kind:name});
+      else if (VIEWS.includes(location.hash.replace(/^#/, ''))) window.BerestaNavigation.record({kind:'library'});
+      return;
+    }
     try {
       if (name) { if (location.hash !== `#${name}`) location.hash = name; }
       else if (VIEWS.includes(location.hash.replace(/^#/, ''))) history.replaceState(null, '', location.pathname + location.search);
@@ -126,6 +131,7 @@
     else setHash(current);
   }
   function route() {
+    if (window.BerestaNavigation) return;  // The history router also handles notes, sources and Back/Forward.
     if ($('workspace').hidden) return;
     const name = hashName();
     if (name === current) return;
@@ -138,11 +144,18 @@
   for (const button of document.querySelectorAll('[data-brain-view]')) button.onclick = () => navigate(button.dataset.brainView);
   // "Все заметки" leaves a screen. Inside the notes workspace it only opens the list on a phone.
   $('nav-notes').onclick = () => {
+    if (window.BerestaNavigation) {
+      if (current) { hideViews(); if ($('note-card').hidden && $('source-card').hidden) $('capture-card').hidden = false; }
+      window.BerestaNavigation.record({kind:'library'});
+      $('workspace').classList.add('library-open'); $('mobile-library-toggle').setAttribute('aria-expanded','true');
+      return;
+    }
     if (current) { setHash(null); route(); return; }
     $('workspace').classList.add('library-open');
     $('mobile-library-toggle').setAttribute('aria-expanded', 'true');
   };
   syncNav();
+  window.BerestaBrain = {show,hide:hideViews,current:() => current};
   window.addEventListener('hashchange', route);
   // Another view (a note, a source, the capture form) took the column: the screens step aside.
   new MutationObserver(() => {
@@ -730,7 +743,8 @@
   document.addEventListener('beresta:note-idle', () => {
     if (!remindFromLink || !noteShown) return;
     remindFromLink = false;
-    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* ignore */ }
+    if (window.BerestaNavigation) window.BerestaNavigation.consumeReminderLink();
+    else try { history.replaceState(null, '', location.pathname + location.search); } catch (_) { /* ignore */ }
     Promise.resolve().then(() => {
       const first = document.querySelector('#items .br-propose');
       if (!first) return;

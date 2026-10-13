@@ -203,6 +203,7 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
     await require('./web_email_auth.cjs')();
     await require('./web_brain.cjs')();
     await require('./web_search_digests.cjs')();
+    await require('./web_navigation.cjs')();
     console.log('Web DOM checks passed: drafts, conflicts, version, XSS, search, pagination, events and category rename.');
   } finally { dom.window.close(); }
 })().catch(error => {console.error(error);process.exitCode = 1;});
