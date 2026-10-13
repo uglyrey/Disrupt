@@ -54,7 +54,7 @@ from app.providers import (
     validate_result,
 )
 from app.reminders import auto_reminders
-from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide
+from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide, routing_code
 from app.services import lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_fallback_speech_provider, make_speech_provider
 from app.usage import UsageRecorder
@@ -219,7 +219,7 @@ class Worker:
             raise ProviderError("stt_invalid_response")
         return text
 
-    def record_failure(self, db, job_id, code, *, retry_after=None, expired_before=None, now=None):
+    def record_failure(self, db, job_id, code, *, http_status=None, retry_after=None, expired_before=None, now=None):
         """Settle one failed attempt in the caller's transaction. Returns "retry", "failed" or None (nothing to do).
 
         The row is locked, so two workers never settle the same attempt twice. With `expired_before` the job must
@@ -233,24 +233,25 @@ class Worker:
             return None
         if expired_before is not None and (job.lease_until is None or job.lease_until >= expired_before):
             return None
+        route_code = routing_code(code, http_status, job.provider_used) if self.router is not None else code
         # Сбой основного шлюза при готовом резерве: следующая попытка сразу идёт на резерв, без обычной паузы.
         failover = False
-        if self.router is not None and code in GATEWAY_CODES and job.provider_used == PRIMARY:
+        if self.router is not None and route_code in GATEWAY_CODES and job.provider_used == PRIMARY:
             estimates, needs_stt = self.job_estimates(db, job)
             failover = (
                 not (needs_stt and self.fallback_speech is None)
-                and self.router.failover_allowed(db, job, code, now, sum(estimates.values()))
+                and self.router.failover_allowed(db, job, route_code, now, sum(estimates.values()))
             )
-        delay = decide(db, self.settings, job, code, retry_after, now=now, failover=failover)
+        delay = decide(db, self.settings, job, route_code, retry_after, now=now, failover=failover)
         job.last_error_code, job.last_failed_at = code, now
         job.last_error_provider = job.provider_used
         if self.router is not None:
-            self.router.on_failure(db, job.provider_used, code, now)
+            self.router.on_failure(db, job.provider_used, route_code, now)
         if delay is not None:
             job.status, job.lease_until = "queued", None
             job.attempts, job.not_before, job.error_code = (job.attempts or 0) + 1, now + delay, None
             # Плохой ответ повторяется у того же сервиса, остальное решает маршрутизатор.
-            job.next_route = FALLBACK if failover else (job.provider_used if classify(code) == BAD_OUTPUT else None)
+            job.next_route = FALLBACK if failover else (job.provider_used if classify(route_code) == BAD_OUTPUT else None)
             return "retry"
         job.status, job.error_code, job.finished_at, job.not_before = "failed", code, now, None
         capture = db.get(Capture, job.capture_id)
@@ -328,7 +329,7 @@ class Worker:
 
     def fail(self, job_id, code, *, exception=None, http_status=None, retry_after=None):
         with self.sessions() as db:
-            outcome = self.record_failure(db, job_id, code, retry_after=retry_after)
+            outcome = self.record_failure(db, job_id, code, http_status=http_status, retry_after=retry_after)
             db.commit()
         if outcome:
             log_error(

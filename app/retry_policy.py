@@ -32,6 +32,17 @@ GATEWAY_CODES = CLEAR_CODES | AMBIGUOUS_CODES
 # Сбои попыток на резерве (docs/ai-failover-v1.md) предохранитель основного шлюза не считает.
 FALLBACK_PROVIDER = "openai"
 
+
+def routing_code(code, http_status, provider):
+    """A Cloud.ru HTTP 400 on our fixed model payload indicates a gateway compatibility failure.
+
+    Preserve the original error for the user and audit trail. Local validation errors and
+    errors from the reserve service must not open the primary circuit.
+    """
+    if provider == "cloudru" and code == "provider_bad_request" and http_status == 400:
+        return "provider_unavailable"
+    return code
+
 HOUR = 3600
 MAX_BREAKER_ROWS = 500
 

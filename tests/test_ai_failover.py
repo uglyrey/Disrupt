@@ -338,6 +338,37 @@ def test_every_gateway_class_error_fails_over(env, code):
     assert context.row(job_id).status == "succeeded" and relay.calls == 1
 
 
+def test_cloud_http_400_uses_the_reserve_but_keeps_the_original_error_code(env):
+    context = env()
+    relay = Relay()
+    worker = context.worker(Script(fail("provider_bad_request", http_status=400)), relay)
+    job_id = context.job()
+    assert worker.run_once()
+    assert (context.row(job_id).status, context.row(job_id).last_error_code,
+            context.row(job_id).next_route) == ("queued", "provider_bad_request", FALLBACK)
+    assert worker.run_once()
+    assert context.row(job_id).status == "succeeded" and relay.calls == 1
+    assert context.route().failures == 1
+
+
+def test_reserve_http_400_remains_terminal(env):
+    context = env()
+    relay = Relay(httpx.Response(400))
+    worker = context.worker(Script(fail("provider_bad_request", http_status=400)), relay)
+    job_id = context.job()
+    assert worker.run_once() and worker.run_once()
+    assert context.row(job_id).status == "failed"
+    assert context.row(job_id).error_code == "provider_bad_request" and relay.calls == 1
+
+
+def test_cloud_http_400_does_not_retry_without_a_reserve(env):
+    context = env()
+    worker = context.worker(Script(fail("provider_bad_request", http_status=400)))
+    job_id = context.job()
+    assert worker.run_once()
+    assert (context.row(job_id).status, context.row(job_id).error_code) == ("failed", "provider_bad_request")
+
+
 @pytest.mark.parametrize("code", [
     "provider_auth", "provider_bad_request", "provider_model_not_found", "provider_conflict", "budget_exhausted",
     "provider_response_too_large", "audio_invalid", "stt_not_configured", "internal_error", "synthetic_new_code",
@@ -895,6 +926,24 @@ def test_assistant_fails_over_once_when_the_gateway_does_not_answer(env):
     assert (second.request_id, second.provider, second.input_tokens) == (request_id + ":assistant:fb", "openai", 2000)
     assert context.committed() == to_micro(second.estimated_cost) > 0
     assert context.route().failures == 1
+
+
+def test_assistant_cloud_http_400_uses_the_reserve(env):
+    context = env()
+    with context.app.state.sessions() as db:
+        user_id = db.scalar(select(User.id))
+    add_note(context.app, user_id, "Запуск", "Дизайн готов.")
+    with context.app.state.sessions() as db:
+        from app.models import Note
+        note_id = db.scalar(select(Note.id))
+    reply = {"summary_markdown": "Итоги", "highlights": [{"note_id": note_id, "quote": "Дизайн готов."}],
+             "open_tasks": [], "themes": ["дизайн"]}
+    relay = Relay(httpx.Response(200, json=chat(content=json.dumps(reply, ensure_ascii=False))))
+    worker = context.worker(Script(fail("provider_bad_request", http_status=400)), relay)
+    request_id = post(context.client, "/digest", "digest-http-400", {}).json()["id"]
+    assert worker.run_once()
+    assert read(context.client, request_id)["status"] == "succeeded"
+    assert relay.calls == 1 and context.route().failures == 1
 
 
 def test_assistant_goes_straight_to_the_fallback_while_the_gateway_is_down(env):

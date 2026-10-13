@@ -35,7 +35,7 @@ from app.providers import (
     assistant_input,
     validate_assistant,
 )
-from app.retry_policy import GATEWAY_CODES
+from app.retry_policy import GATEWAY_CODES, routing_code
 from app.services import lock_account
 
 KINDS = ("ask", "recommend", "digest")
@@ -281,8 +281,9 @@ def run_assistant_once(worker):
             except ProviderError as exc:
                 if worker.router is None or attempt.fallback:
                     raise
-                note_primary_failure(worker, exc.code)
-                if exc.code not in GATEWAY_CODES:
+                route_code = routing_code(exc.code, exc.http_status, PRIMARY)
+                note_primary_failure(worker, route_code)
+                if route_code not in GATEWAY_CODES:
                     raise
                 # Основной шлюз не ответил. Запрос помощника ничего не меняет, поэтому один раз пробуем резерв.
                 attempt.finish()
