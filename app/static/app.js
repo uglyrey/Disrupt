@@ -543,12 +543,14 @@ async function loadJobs() {
 let retryBusy = false;
 async function resendFailedJob(job, mode) {
   if (retryBusy) return;
-  if (noteBusy || captureBusy || recorder || microphonePending || pendingCapture || pendingAudio || selectedAudio) {
+  if (noteBusy || captureBusy || recorder || microphonePending || pendingCapture || pendingAudio || selectedAudio || window.BerestaImages?.hasDraft()) {
     return message('Сначала завершите текущую запись или проверьте её сохранение.');
   }
   retryBusy = true;
+  const account=epoch;
   try {
     const capture = await api(`/api/v1/captures/${encodeURIComponent(job.capture_id)}`);
+    if(epoch!==account)return;
     if (capture.input_kind === 'audio') {
       await openCapture(job.capture_id,{userAction:true});
       if (currentCapture?.capture_id === job.capture_id) {
@@ -563,6 +565,10 @@ async function resendFailedJob(job, mode) {
     $('new-note').click();
     if ($('capture-card').hidden) return;
     $('thought').value = text;
+    if(capture.images?.length){
+      try{if(!await window.BerestaImages.restoreDraft(capture.images))return;}
+      catch(error){message(error.message||'Не удалось перенести картинки. Исходник сохранён, попробуйте ещё раз.');return;}
+    }
     $('capture-form').hidden = false;
     window.BerestaFocus?.closeAll();
     const select = $('processing-mode'), aiOff = select.querySelector('option[value="ai"]').disabled;

@@ -110,6 +110,22 @@
     draftSerial++;syncDraft();window.BerestaFocus?.closeAll();message('Картинка добавлена в новую запись. Нажмите «Сохранить».');
   }
   function clearDraft() {for(const item of draft)URL.revokeObjectURL(item.url);draft=[];draftSerial++;syncDraft();}
+  async function restoreDraft(images) {
+    if(captureBusy||draft.length)return false;
+    const account=epoch,files=[];setCaptureBusy(true);
+    try{
+      for(const image of images){
+        if(!/^\/api\/v1\/note-images\/[0-9a-f-]{36}$/.test(image.url))throw new Error('Не удалось прочитать картинку из исходника.');
+        const response=await fetch(image.url,{credentials:'same-origin'});
+        if(!response.ok)throw new Error('Картинка из исходника недоступна. Обновите страницу и попробуйте ещё раз.');
+        const blob=await response.blob();files.push(new File([blob],'source.webp',{type:'image/webp'}));
+      }
+      if(epoch!==account)return false;
+      if(files.length>20||files.reduce((sum,file)=>sum+file.size,0)>10*1024*1024)throw new Error('Картинки исходника занимают больше 10 МБ. Откройте исходник и перенесите их частями.');
+    }finally{if(epoch===account)setCaptureBusy(false);}
+    if(epoch!==account)return false;
+    addDraft(files);return draft.length===files.length;
+  }
   async function receive(files,isDraft) {
     if(isDraft)return addDraft(files);
     const note=currentNote?.id,account=epoch;
@@ -157,7 +173,7 @@
     const target=event.target.closest('[data-line]'),index=target?Number(target.dataset.line):get('markdown').value.split('\n').length;
     change(dragging.index,dragging.url,()=>move(get('markdown').value,dragging.index,index));dragging=null;
   });
-  window.BerestaImages={parse,encode,move,adjacent,insert,render,upload,addDraft,clearDraft,source,
+  window.BerestaImages={parse,encode,move,adjacent,insert,render,upload,addDraft,clearDraft,restoreDraft,source,
     hasDraft:()=>draft.length>0,draftKey:()=>draftSerial,
     captureBody:(text,mode)=>{const form=new FormData();form.append('text',text);form.append('processing_mode',mode);for(const item of draft)form.append('images',item.file);return form;}};
 })();
