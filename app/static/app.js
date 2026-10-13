@@ -251,6 +251,7 @@ async function loadNotes(reset = true) {
 function renderMarkdown(text, options) { renderMarkdownInto($('preview'),text,options); }
 // Also used by brain.js for assistant answers.
 // Deliberately small renderer. It builds text nodes and a fixed set of tags, never raw HTML, and links only open http and https.
+// Bare http(s):// and www. addresses in the text become links too.
 // Every block carries its source line in data-line, so the note view can put the caret on the clicked line.
 // options.onToggle(line, checked) makes task checkboxes live. Without it they are shown but disabled.
 function markdownSafeUrl(raw) {
@@ -259,12 +260,23 @@ function markdownSafeUrl(raw) {
     return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
   } catch { return null; }
 }
+// A bare address in the text. Trailing punctuation belongs to the sentence, a closing bracket only when it has no opener.
+function trimBareUrl(raw) {
+  let url = raw;
+  for (;;) {
+    const tail = url[url.length - 1];
+    if (/[.,;:!?'"»”’\]}>]/.test(tail)) url = url.slice(0,-1);
+    else if (tail === ')' && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) url = url.slice(0,-1);
+    else return url;
+  }
+}
 function renderInlineMarkdown(parent, text) {
-  // 1 code, 2 and 3 bold, 4 italic with a star, 5 and 6 italic with underscores (5 is the character before), 7 and 8 link.
-  const pattern = /`([^`]+)`|\*\*(.+?)\*\*|__(.+?)__|\*([^\s*](?:.*?[^\s*])?)\*|(^|[^\w])_([^\s_](?:.*?[^\s_])?)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)\)/g;
+  // 1 code, 2 and 3 bold, 4 italic with a star, 5 and 6 italic with underscores (5 is the character before), 7 and 8 link,
+  // 9 and 10 a bare address (9 is the character before).
+  const pattern = /`([^`]+)`|\*\*(.+?)\*\*|__(.+?)__|\*([^\s*](?:.*?[^\s*])?)\*|(^|[^\w])_([^\s_](?:.*?[^\s_])?)_(?![\w])|\[([^\]]+)\]\(([^)\s]+)\)|(^|[^\w@./:-])((?:https?:\/\/|www\.)[^\s<>]+)/g;
   let last = 0, match;
   while ((match = pattern.exec(text))) {
-    const lead = match[6] !== undefined ? match[5].length : 0;
+    const lead = match[6] !== undefined ? match[5].length : match[10] !== undefined ? match[9].length : 0;
     if (match.index + lead > last) parent.append(document.createTextNode(text.slice(last,match.index + lead)));
     last = pattern.lastIndex;
     if (match[1] !== undefined) parent.append(element('code',match[1]));
@@ -272,6 +284,13 @@ function renderInlineMarkdown(parent, text) {
       const strong = document.createElement('strong'); renderInlineMarkdown(strong,match[2] ?? match[3]); parent.append(strong);
     } else if (match[4] !== undefined || match[6] !== undefined) {
       const em = document.createElement('em'); renderInlineMarkdown(em,match[4] ?? match[6]); parent.append(em);
+    } else if (match[10] !== undefined) {
+      const shown = trimBareUrl(match[10]), href = shown ? markdownSafeUrl(/^www\./i.test(shown) ? `https://${shown}` : shown) : null;
+      if (href) {
+        const link = element('a',shown); link.href = href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        parent.append(link);
+        last = pattern.lastIndex = match.index + lead + shown.length;
+      } else parent.append(document.createTextNode(match[10]));
     } else {
       const href = markdownSafeUrl(match[8]);
       if (href) {
