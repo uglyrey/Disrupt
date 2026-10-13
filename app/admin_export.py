@@ -8,7 +8,7 @@ from collections import Counter, defaultdict
 from datetime import date, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import literal, select, union_all
+from sqlalchemy import Integer, cast, literal, select, union_all
 
 from app.admin_metrics import calendar_day, midnight, money, pseudonym, safe_cell, utc
 from app.contest_metrics import ACTIVE, METHOD_VERSION, first_targets, report
@@ -185,7 +185,7 @@ def build_archive(
                 model.id.label("operation"),
                 literal(None).label("route"),
                 literal(None).label("method"),
-                literal(None).label("status_code"),
+                cast(literal(None), Integer).label("status_code"),
             )
             .join(User)
             .where(
