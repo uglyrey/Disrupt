@@ -14,5 +14,5 @@ jobs:
           node-version: '22'
       - run: npm install --prefix "$RUNNER_TEMP/w" --no-audit --no-fund --ignore-scripts jsdom@26.0.0
       - run: |
-          NODE_PATH=$RUNNER_TEMP/w/node_modules timeout 300 node tests/web_structure.cjs > js.txt 2>&1; echo "exit $?" >> js.txt
+          NODE_PATH=$RUNNER_TEMP/w/node_modules timeout 300 node tests/web_structure.cjs > js.txt 2>&1 || echo "exit $?" >> js.txt
           python3 -c "d=open('js.txt').read();print('::error title=jsdom::'+d[-6000:].replace('%','%25').replace('\r','').replace('\n','%0A'))"
