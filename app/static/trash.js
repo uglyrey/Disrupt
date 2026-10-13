@@ -102,7 +102,7 @@
     } catch (error) { say(failure(error)); }
     finally { setBusy(false); }
   }
-  function open() {
+  function open({navigation = true} = {}) {
     if (!actions()) return;
     window.BerestaFocus?.closeAll();
     if (dialog && dialog.isConnected) return;
@@ -112,8 +112,9 @@
     statusLine = el('p', '', 'dialog-status trash-status'); statusLine.setAttribute('role', 'status'); statusLine.setAttribute('aria-live', 'polite');
     listBox = el('div', '', 'trash-body');
     dialog.append(statusLine, listBox);
-    dialog.addEventListener('close', () => { run++; dialog = null; listBox = null; statusLine = null; busy = false; });
+    dialog.addEventListener('close', () => { run++; dialog = null; listBox = null; statusLine = null; busy = false; window.BerestaNavigation?.trashClosed(); });
     actions().openModal(dialog);
+    if (navigation) window.BerestaNavigation?.trashOpened();
     load();
   }
   function install() {

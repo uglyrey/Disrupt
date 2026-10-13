@@ -131,6 +131,7 @@ function showUser(user) {
 // Everything the app loads right after a person gets in, by password, by Telegram or from a saved session.
 async function enterApp(user) {
   showUser(user); await loadProviderUsage(); await loadCategories(); await loadNotes(); await loadJobs(); await openLinkedCapture();
+  await window.BerestaNavigation?.restoreInitial();
 }
 const LIMIT_SPENT = 'Лимит ИИ на сегодня исчерпан. Запись сохранена без ИИ, разобрать её можно завтра.';
 function setMode(text = '') { $('mode').textContent = text; }
@@ -470,7 +471,7 @@ async function recordVisibleResult() {
 }
 document.addEventListener('visibilitychange',() => { recordVisibleResult(); });
 window.addEventListener('focus',() => { recordVisibleResult(); });
-async function openNote(id, {userAction = false, visibleResult = false, search = null, reminder = null, backgroundDraft} = {}) {
+async function openNote(id, {userAction = false, visibleResult = false, search = null, reminder = null, backgroundDraft, navigation = true} = {}) {
   if (noteBusy) return message('Дождитесь сохранения.');
   if (recorder || microphonePending) return message('Сначала завершите запись голоса.');
   if (window.BerestaFocus?.pending()) { await window.BerestaFocus.flush(); if (noteBusy) return message('Дождитесь сохранения.'); }
@@ -485,6 +486,7 @@ async function openNote(id, {userAction = false, visibleResult = false, search =
     if (currentEpoch !== epoch || generation !== viewGeneration) return;
     if (backgroundDraft !== undefined && !jobDraftUnchanged(backgroundDraft)) return;
     renderNote(note); setNoteBusy(true); message();
+    if (navigation) window.BerestaNavigation?.record({kind:'note',id,reminder});
     if (userAction || visibleResult) {
       pendingVisibleResult = {id,body:{operation_id:window.berestaId(),search_operation_id:search,reminder_id:reminder},sending:false};
       recordVisibleResult();
@@ -756,6 +758,7 @@ function leaveNote(question = 'Есть несохранённые правки.
 $('new-note').onclick = () => {
   if (!leaveNote(undefined,() => $('new-note').click())) return;
   $('capture-card').hidden=false; message();
+  window.BerestaNavigation?.record({kind:'new'});
   if (!$('thought').disabled) $('thought').focus();
   loadJobs().catch(e=>message(e.message));
 };
@@ -1162,7 +1165,7 @@ function renderSource(capture) {
   } else { $('audio-player').removeAttribute('src'); $('audio-download').removeAttribute('href'); }
   setTranscriptControls();
 }
-async function openCapture(id, {userAction = false, backgroundDraft} = {}) {
+async function openCapture(id, {userAction = false, backgroundDraft, navigation = true, standalone = false} = {}) {
   if (noteBusy) return message('Дождитесь сохранения.');
   if (recorder || microphonePending) return message('Сначала завершите запись голоса.');
   if (window.BerestaFocus?.pending()) { await window.BerestaFocus.flush(); if (noteBusy) return message('Дождитесь сохранения.'); }
@@ -1173,8 +1176,12 @@ async function openCapture(id, {userAction = false, backgroundDraft} = {}) {
     const capture = await api(`/api/v1/captures/${encodeURIComponent(id)}`);
     if (generation !== viewGeneration || currentEpoch !== epoch) return;
     if (backgroundDraft !== undefined && !jobDraftUnchanged(backgroundDraft)) return;
-    if (currentNote?.capture_id !== id) { currentNote = null; $('note-card').hidden = true; window.BerestaReminders?.hide(); }
+    if (standalone || currentNote?.capture_id !== id) {
+      if (currentNote) window.BerestaFocus?.checkpoint(currentNote);
+      currentNote = null; $('note-card').hidden = true; window.BerestaReminders?.hide();
+    }
     $('capture-card').hidden = true; renderSource(capture);
+    if (navigation) window.BerestaNavigation?.record({kind:'source',id});
     if (userAction) await api(`/api/v1/captures/${encodeURIComponent(id)}/original-opened`,{
       method:'POST',body:JSON.stringify({operation_id:window.berestaId()}),
     });

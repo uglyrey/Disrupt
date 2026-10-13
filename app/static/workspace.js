@@ -5,7 +5,12 @@
   function syncNote() {
     const title = get('title').value || 'Без названия';
     if(get('note-heading-title').textContent !== title)get('note-heading-title').textContent = title;
-    if (currentNote?.id !== lastNote) {lastNote = currentNote?.id; window.BerestaFocus?.closeAll();get('workspace').classList.remove('library-open');get('mobile-library-toggle').setAttribute('aria-expanded','false');}
+    if (currentNote?.id !== lastNote) {
+      lastNote = currentNote?.id; window.BerestaFocus?.closeAll();
+      if (!window.BerestaNavigation || location.hash !== '#notes') {
+        get('workspace').classList.remove('library-open'); get('mobile-library-toggle').setAttribute('aria-expanded','false');
+      }
+    }
     get('workspace').classList.toggle('has-note',!get('note-card').hidden);
     get('workspace').classList.toggle('has-source',!get('source-card').hidden);
     // This observer watches the note card subtree: write the attribute only when it changes,
