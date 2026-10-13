@@ -325,7 +325,7 @@
       done();
     }
     function renderPreview(keepFocusLine = null) {
-      renderMarkdownInto(preview, ta.value, {onToggle: toggleTask});
+      renderMarkdownInto(preview, ta.value, {onToggle: toggleTask, images:true});
       if (keepFocusLine !== null) {
         const box = preview.querySelector(`input[data-line="${keepFocusLine}"]`);
         if (box) box.focus();
@@ -357,7 +357,7 @@
     preview.setAttribute('tabindex', '0');
     preview.setAttribute('aria-label', 'Текст заметки. Нажмите Enter или E, чтобы править');
     preview.addEventListener('click', event => {
-      if (isBusy() || event.target.closest('a, input')) return;
+      if (isBusy() || event.target.closest('a, input, button, select, figure.note-image')) return;
       const selection = window.getSelection && window.getSelection();
       if (selection && !selection.isCollapsed && preview.contains(selection.anchorNode)) return;
       const host = event.target.closest('[data-line]');
@@ -383,6 +383,7 @@
     setMode('read');
     window.BerestaMd.setMode = setMode;
     window.BerestaMd.mode = () => mode;
+    window.BerestaMd.refresh = renderPreview;
   }
 
   window.BerestaMd = {parseLine, enter, tab, autoMarker, toggleInline, setLinePrefix, renumber, ACTIONS, applyEdit, shortcut};

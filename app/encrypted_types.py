@@ -7,7 +7,7 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from sqlalchemy import JSON, Text
+from sqlalchemy import JSON, LargeBinary, Text
 from sqlalchemy.types import TypeDecorator
 
 from app import crypto
@@ -63,11 +63,32 @@ class EncryptedJSON(TypeDecorator):
         return crypto.decrypt_json(value, self.label)
 
 
+class EncryptedBinary(TypeDecorator):
+    """Private attachments. The same key ring and rotation tools as texts and audio."""
+
+    impl = LargeBinary
+    cache_ok = True
+
+    def __init__(self, label: str):
+        super().__init__()
+        self.label = label
+
+    def process_bind_param(self, value, dialect):
+        if value is None or _raw.get() or not crypto.writes_encrypted():
+            return value
+        return crypto.encrypt_bytes(value, self.label)
+
+    def process_result_value(self, value, dialect):
+        if value is None or _raw.get():
+            return value
+        return crypto.decrypt_bytes(value, self.label)
+
+
 def encrypted_columns(metadata):
     """Все столбцы с шифрованием: (таблица, столбец, метка, тип)."""
     found = []
     for table in metadata.sorted_tables:
         for column in table.columns:
-            if isinstance(column.type, (EncryptedText, EncryptedJSON)):
+            if isinstance(column.type, (EncryptedText, EncryptedJSON, EncryptedBinary)):
                 found.append((table, column, column.type.label))
     return found

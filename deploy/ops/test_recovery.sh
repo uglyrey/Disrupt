@@ -44,7 +44,10 @@ import uuid
 from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
-from app.models import User, Capture
+from app.models import User, Capture, Note, NoteImage
+from app.note_images import normalize_image
+from PIL import Image
+import io
 engine = create_engine('postgresql+psycopg://notes:local-demo-only@db:5432/notes')
 # Original preservation test uses synthetic bytes, never a real recording.
 data = b'synthetic original for recovery test'
@@ -57,6 +60,19 @@ with Session(engine) as session:
     session.add(Capture(user_id=user.id, original_text='', idempotency_key='recovery-fixture',
                         input_kind='audio', audio_key=key, audio_sha256=hashlib.sha256(data).hexdigest(),
                         audio_bytes=len(data), audio_seconds=1, audio_media_type='audio/ogg', created_at=time.time()))
+    capture = Capture(user_id=user.id, original_text='synthetic image recovery', idempotency_key='image-fixture')
+    session.add(capture)
+    session.flush()
+    note = Note(user_id=user.id, capture_id=capture.id, title='synthetic image recovery', markdown='fixture',
+                conclusions=[], provider='manual')
+    session.add(note)
+    session.flush()
+    source = io.BytesIO()
+    Image.new('RGB', (16, 12), (80, 120, 160)).save(source, 'PNG')
+    image, width, height = normalize_image(source.getvalue())
+    session.add(NoteImage(note_id=note.id, idempotency_key='image-recovery-fixture',
+                          source_sha256=hashlib.sha256(source.getvalue()).hexdigest(), data=image,
+                          media_type='image/webp', width=width, height=height, byte_size=len(image)))
     session.commit()
 PY
 docker compose -p beresta-ops-ci -f compose.yaml -f "$work/telegram-fixture.yaml" exec -T api python -m app.data_crypto encrypt-existing
@@ -89,6 +105,24 @@ python deploy/ops/beresta_ops.py restore --project beresta-restore-ci \
   --data-key-file "$BERESTA_RECOVERY_TEST_KEY" --audio-verifier-image "$verifier_image"
 test "$(docker compose -p beresta-restore-ci -f deploy/ops/restore.compose.yaml run --rm --no-deps -T --entrypoint cat files /state/offset)" = 42
 test "$(docker compose -p beresta-restore-ci -f deploy/ops/restore.compose.yaml run --rm --no-deps -T --entrypoint cat files /state/delivery.json)" = synthetic-journal
+# Decrypt only a synthetic restored attachment. No application or Telegram sender is started.
+docker run --rm -i --network beresta-restore-ci_recovery \
+  -v "$BERESTA_RECOVERY_TEST_KEY:/run/secrets/data_key:ro" \
+  --entrypoint python "$verifier_image" - <<'PY'
+import io
+from PIL import Image
+from sqlalchemy import create_engine, text
+from app import crypto
+crypto.configure('required', '/run/secrets/data_key')
+engine = create_engine('postgresql+psycopg://notes@db:5432/notes')
+with engine.connect() as db:
+    blob = db.execute(text('SELECT data FROM note_images')).scalar_one()
+    assert crypto.is_encrypted_bytes(blob)
+    with Image.open(io.BytesIO(crypto.decrypt_bytes(blob, 'note_images.data'))) as image:
+        assert image.size == (16, 12) and image.format == 'WEBP'
+engine.dispose()
+print('Encrypted image restored and decoded; no application started')
+PY
 if [ -n "${REMOTE_BOT_CONTEXT:-}" ]; then
   test "$(docker inspect --format '{{.State.Running}}' beresta-remote-bot-ci)" = true
 fi

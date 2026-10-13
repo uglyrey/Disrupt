@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.encrypted_types import EncryptedJSON, EncryptedText
+from app.encrypted_types import EncryptedBinary, EncryptedJSON, EncryptedText
 
 
 def new_id():
@@ -153,6 +153,21 @@ class Note(Base):
     deleted_at: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
     # Если заметку убрало объединение, здесь id новой заметки.
     merged_into: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class NoteImage(Base):
+    __tablename__ = "note_images"
+    __table_args__ = (UniqueConstraint("note_id", "idempotency_key", name="uq_note_images_upload"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    note_id: Mapped[str] = mapped_column(ForeignKey("notes.id", ondelete="CASCADE"), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    media_type: Mapped[str] = mapped_column(String(32))
+    byte_size: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[float] = mapped_column(Float, default=time.time)
+    data: Mapped[bytes] = mapped_column(EncryptedBinary("note_images.data"), deferred=True)
 
 
 class NoteLink(Base):
