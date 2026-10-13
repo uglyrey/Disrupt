@@ -197,6 +197,7 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
     await require('./web_categories.cjs')();
     await require('./web_note_ux.cjs')();
     await require('./web_focus.cjs')();
+    await require('./web_md_editor.cjs')();
     await require('./web_onboarding.cjs')();
     await require('./web_cookies.cjs')();
     await require('./web_auth.cjs')();

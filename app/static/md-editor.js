@@ -24,12 +24,14 @@
     return pos + col;
   }
   // A caret keeps its place inside the line while the line grows or shrinks.
-  function remap(before, after, pos) {
+  // The start of a selection that sits at the start of a line stays there, so the whole line stays selected.
+  function remap(before, after, pos, lineStart = false) {
     const at = locate(before, pos), delta = after[at.line].length - before[at.line].length;
-    return offsetOf(after, at.line, Math.max(0, Math.min(after[at.line].length, at.col + (delta === 0 ? 0 : delta))));
+    const col = lineStart && at.col === 0 ? 0 : at.col + delta;
+    return offsetOf(after, at.line, Math.max(0, Math.min(after[at.line].length, col)));
   }
   function finish(before, after, start, end) {
-    return {value: after.join('\n'), start: remap(before, after, start), end: remap(before, after, end)};
+    return {value: after.join('\n'), start: remap(before, after, start, start !== end), end: remap(before, after, end)};
   }
   // The lines a selection touches. A selection that ends at the very start of a line does not include that line.
   function lineRange(lines, value, start, end) {
@@ -329,7 +331,7 @@
         if (box) box.focus();
       }
     }
-    function setMode(next, {line = null, end = false, focus = true} = {}) {
+    function setMode(next, {line = null, end = false, start = false, focus = true} = {}) {
       mode = next;
       const editing = next === 'edit';
       if (body) body.classList.toggle('is-editing', editing);
@@ -339,7 +341,7 @@
       if (!focus) return;
       ta.focus();
       const lines = ta.value.split('\n');
-      const pos = line !== null && line < lines.length ? offsetOf(lines, line, lines[line].length) : end ? ta.value.length : 0;
+      const pos = start ? 0 : line !== null && line < lines.length ? offsetOf(lines, line, lines[line].length) : end ? ta.value.length : 0;
       ta.setSelectionRange(pos, pos);
     }
     function leave() {
@@ -368,7 +370,7 @@
       }
     });
     title.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && !event.isComposing) setMode('edit', {line: 0});
+      if (event.key === 'Enter' && !event.isComposing) setMode('edit', {start: true});
     });
     document.addEventListener('beresta:note-rendered', () => {
       const id = typeof currentNote !== 'undefined' && currentNote ? currentNote.id : null, same = id !== null && id === shownId;
