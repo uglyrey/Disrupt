@@ -6,7 +6,7 @@
   const $ = id => document.getElementById(id);
   const NS = 'http://www.w3.org/2000/svg';
   const ASSISTANT_COST = 1;
-  const VIEWS = ['overview', 'assistant', 'tasks'];
+  const VIEWS = ['overview', 'assistant', 'tasks', 'search'];
   const monthsShort = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
   const weekdaysShort = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
   const zoneNames = {'Europe/Moscow': 'Москва', 'Europe/Berlin': 'Берлин', 'Asia/Yekaterinburg': 'Екатеринбург',
@@ -118,6 +118,7 @@
   function refresh(name) {
     if (name === 'overview') loadOverview();
     else if (name === 'tasks') window.BerestaTasks?.open();
+    else if (name === 'search') window.BerestaSearch?.open();
     else openAssistant();
   }
   function navigate(name) {
@@ -151,7 +152,7 @@
   }).observe($('workspace'), {attributes: true, attributeFilter: ['hidden'], subtree: true});
   new MutationObserver(() => {
     $('main-nav').hidden = $('workspace').hidden;
-    if ($('workspace').hidden) { hideViews(); window.BerestaTasks?.reset(); usage = null; settingsKnown = false; } else route();
+    if ($('workspace').hidden) { hideViews(); window.BerestaTasks?.reset(); window.BerestaSearch?.reset(); usage = null; settingsKnown = false; } else route();
   }).observe($('workspace'), {attributes: true, attributeFilter: ['hidden']});
   $('category-navigation').addEventListener('click', () => $('workspace').classList.add('library-open'));
 
@@ -390,7 +391,7 @@
   let settingsKnown = false;
   function pollMs() { return typeof window.assistantPollMs === 'number' ? window.assistantPollMs : 2000; }
   function maxWaitMs() { return typeof window.assistantMaxWaitMs === 'number' ? window.assistantMaxWaitMs : 180000; }
-  function stopAll() { window.BerestaTasks?.stop(); for (const kind of Object.keys(state)) { state[kind]++; running[kind] = false; } if (!$('workspace').hidden) syncButtons(); }
+  function stopAll() { window.BerestaTasks?.stop(); window.BerestaSearch?.stop(); for (const kind of Object.keys(state)) { state[kind]++; running[kind] = false; } if (!$('workspace').hidden) syncButtons(); }
   function say(kind, text) { $(slots[kind].status).textContent = text; }
   function noteButton(id, title, className) {
     const button = el('button', title, className); button.type = 'button';

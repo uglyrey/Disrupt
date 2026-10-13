@@ -160,7 +160,7 @@ async function navigationAndHashes() {
     assert.equal($('overview-card').hidden, true); assert.equal($('assistant-card').hidden, true);
     assert.equal($('capture-card').hidden, false);
     assert.equal($('main-nav').hidden, false, 'The header navigation shows once a person is in');
-    assert.deepEqual([...$('main-nav').querySelectorAll('button')].map(b => b.id), ['nav-notes', 'nav-overview', 'nav-assistant', 'nav-tasks']);
+    assert.deepEqual([...$('main-nav').querySelectorAll('button')].map(b => b.id), ['nav-notes', 'nav-search', 'nav-overview', 'nav-assistant', 'nav-tasks']);
     assert.equal(w.document.querySelector('.workspace-nav #nav-overview'), null, 'The sidebar no longer holds the sections');
     $('nav-overview').click();
     assert.equal($('overview-card').hidden, false); assert.equal($('capture-card').hidden, true);
@@ -168,6 +168,10 @@ async function navigationAndHashes() {
     assert.equal($('nav-overview').getAttribute('aria-current'), 'page');
     assert.equal($('nav-notes').hasAttribute('aria-current'), false);
     assert.equal($('workspace').classList.contains('has-view'), true);
+    $('nav-search').click();
+    assert.equal($('search-card').hidden, false); assert.equal($('overview-card').hidden, true);
+    assert.equal(w.location.hash, '#search');
+    assert.equal($('nav-search').getAttribute('aria-current'), 'page');
     $('nav-assistant').click();
     assert.equal($('assistant-card').hidden, false); assert.equal($('overview-card').hidden, true);
     assert.equal(w.location.hash, '#assistant');

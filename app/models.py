@@ -308,6 +308,21 @@ class Outbox(Base):
     message_text: Mapped[str | None] = mapped_column(EncryptedText("outbox.message_text"), nullable=True)
 
 
+class TelegramDigestSettings(Base):
+    """Opt-in local-time recaps. No subscription is created or enabled implicitly."""
+
+    __tablename__ = "telegram_digest_settings"
+    __table_args__ = (CheckConstraint("generation >= 1", name="ck_digest_settings_generation"),)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    morning_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    evening_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    morning_time: Mapped[str] = mapped_column(String(5), default="09:00", server_default="09:00")
+    evening_time: Mapped[str] = mapped_column(String(5), default="20:00", server_default="20:00")
+    timezone: Mapped[str] = mapped_column(String(64), default="Europe/Moscow", server_default="Europe/Moscow")
+    generation: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    updated_at: Mapped[float] = mapped_column(Float, default=time.time)
+
+
 class TelegramLogin(Base):
     """One browser sign-in (or deletion confirmation) answered by the bot. Only hashes are stored."""
 

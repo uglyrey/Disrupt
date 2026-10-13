@@ -1,0 +1,8 @@
+.find-form{display:grid;gap:14px;margin:20px 0}
+.find-form label{margin:0}.find-form input,.find-form select{width:100%;min-width:0}
+.find-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.find-results{display:grid;gap:10px}.find-result{display:grid;gap:8px;width:100%;text-align:left;padding:18px;background:#fff;color:var(--ink);border:1px solid #d5dfcf;border-radius:14px;white-space:normal;overflow-wrap:anywhere}
+.find-result:hover{background:#f4f7ef}.find-result-title{font-size:18px;font-weight:600}.find-result .muted{display:flex;align-items:center;gap:10px;font-size:13px}
+#find-status{min-height:24px}#digest-settings-form{display:grid;gap:14px;margin-top:24px;padding-top:20px;border-top:1px solid #d5dfcf}
+.digest-slot{display:flex;align-items:center;justify-content:space-between;gap:12px}.digest-slot label{display:flex;align-items:center;gap:8px;margin:0}.digest-slot input[type=checkbox]{width:18px;height:18px;min-height:0;margin:0}.digest-slot input[type=time]{width:120px;margin:0}
+@media(max-width:640px){.find-filters{grid-template-columns:1fr}.find-result{padding:14px}.find-result-title{font-size:16px}.find-form .actions{flex-wrap:wrap}}

@@ -39,6 +39,7 @@ from app.routes.assistant import build_router as assistant_router
 from app.routes.audio import build_router as audio_router
 from app.routes.auth_flows import build_router as auth_flows_router
 from app.routes.brain import build_router as brain_router
+from app.routes.digests import build_router as digests_router
 from app.routes.feedback import build_router as feedback_router
 from app.routes.internal import build_router as internal_router
 from app.routes.reminders import build_router as reminders_router
@@ -305,6 +306,7 @@ def create_app(
     app.include_router(audio_router(database, settings, audio_storage, create_audio_capture))
     app.include_router(transcripts_router(database))
     app.include_router(brain_router(database, settings))
+    app.include_router(digests_router(database))
     app.include_router(assistant_router(database, settings))
     app.include_router(auth_flows_router(database, settings))
     from app.routes.email_auth import build_router as email_auth_router

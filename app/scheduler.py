@@ -11,6 +11,7 @@ from sqlalchemy import and_, or_, select
 from app import crypto
 from app.config import Settings
 from app.db import make_database
+from app.digests import enqueue as enqueue_digests
 from app.models import Item, Note, Outbox, Reminder, TelegramIdentity
 from app.services import lock_account
 
@@ -65,7 +66,7 @@ class Scheduler:
                     bot_id=identity.bot_id, chat_id=identity.chat_id, status="pending",
                 ))
             created += 1
-        return created
+        return created + enqueue_digests(self.sessions, limit=max(1, limit - created)) if created < limit else created
 
 
 def main():
