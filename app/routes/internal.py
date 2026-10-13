@@ -19,7 +19,12 @@ from app.contracts import (
     ResultRequest,
     ResultResponse,
 )
-from app.deliveries import authorize_delivery, claim_deliveries, record_delivery_result
+from app.deliveries import (
+    add_reminder_set_message,
+    authorize_delivery,
+    claim_deliveries,
+    record_delivery_result,
+)
 from app.integration import IntegrationRejection
 from app.limits import telegram_state
 from app.models import (
@@ -299,6 +304,8 @@ def build_router(database, settings):
             if not isinstance(result, Note):
                 db.add(Outbox(job_id=result.id, user_id=identity.user_id, bot_id=identity.bot_id,
                               chat_id=identity.chat_id, generation=1, status="pending"))
+            if isinstance(result, Note):
+                add_reminder_set_message(db, result, identity, settings)
             # A stable capture link works before the asynchronous note exists.
             saved = {
                 "capture_id": result.capture_id,

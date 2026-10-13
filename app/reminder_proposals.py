@@ -7,6 +7,8 @@ Rules in short.
 - An explicit day (сегодня, завтра, weekday, date) that is already past gives None.
 - A bare time or daypart ("в 10", "вечером") that is already past rolls to tomorrow.
 - A weekday means the nearest such day after today, never today itself.
+- «к обеду» 13:00, «после обеда» 15:00, «на выходных» the nearest Saturday or Sunday 10:00,
+  «в конце недели» the nearest Friday 18:00. A spoken «в 14.30» and «в 9 часов 30 минут» are clock times.
 - A date without year that passed more than 60 days ago means next year, a recent one gives None.
 """
 
@@ -53,6 +55,15 @@ CLOCK = re.compile(r"\b(\d{1,2}):(\d{2})\b")
 HOUR = re.compile(r"\b(?:в|к|до|около|ровно)\s+(\d{1,2})(?:\s*(?:часов|часа|час|ч))?\b(?!\s*\d)")
 DAYPART = re.compile(r"\b(утром|утра|утро|днем|дня|вечером|вечера|вечер|ночью|ночи|ночь)\b")
 NOON_MIDNIGHT = re.compile(r"\b(?:в|к)\s+(полдень|полночь)\b")
+PAST_DAY = re.compile(r"\b(?:вчера|позавчера)\b")
+LUNCH = re.compile(r"\b(?:(?:к|в)\s+обед[а-я]*|после\s+обеда)\b")
+AFTER_LUNCH = re.compile(r"\bпосле\s+обеда\b")
+WEEKEND = re.compile(r"\b(?:на\s+выходных|в\s+выходные|на\s+выходные)\b")
+WEEK_END = re.compile(r"\b(?:в\s+конце\s+недели|к\s+концу\s+недели|на\s+конец\s+недели)\b")
+SPOKEN_DOT_TIME = re.compile(r"\b(в|около|ровно)\s+(\d{1,2})\.([0-5]\d)\b(?!\.\d)")
+SPOKEN_HOURS_MINUTES = re.compile(
+    r"\b(в|к|около|ровно)\s+(\d{1,2})\s*(?:часов|часа|час|ч)\s+(\d{1,2})\s*(?:минут[а-я]*|мин)\b"
+)
 DAY_WORD = re.compile(r"\b(послезавтра|завтра|сегодня|" + "|".join(sorted(WEEKDAYS, key=len, reverse=True)) + r")\b")
 
 
@@ -61,7 +72,9 @@ def normalize(value):
     text = re.sub(r"[^a-zа-я0-9:./\- ]+", " ", text)
     text = re.sub(r"(?<!\d)[:./-]|[:./-](?!\d)", " ", text)
     words = [str(NUMBER_WORDS.get(word, word)) for word in text.split()]
-    return " ".join(words)
+    text = " ".join(words)
+    text = SPOKEN_HOURS_MINUTES.sub(lambda m: f"{m[1]} {m[2]}:{int(m[3]):02d}", text)
+    return SPOKEN_DOT_TIME.sub(lambda m: f"{m[1]} {m[2]}:{m[3]}", text)
 
 
 def add_months(day, months):
@@ -166,11 +179,53 @@ def find_time(text):
     if spoken:
         hour, minute = clock_time(int(spoken[1]), 0, daypart) or (None, None)
         return hour, minute, True, daypart, False
+    lunch = LUNCH.search(text)
+    if lunch:
+        return (15 if AFTER_LUNCH.search(text) else 13), 0, True, daypart, False
     if daypart in DAYPART_HOUR:
         return DAYPART_HOUR[daypart], 0, True, daypart, False
     if daypart:
         return None, None, True, daypart, False  # "ночью" without an hour is too vague
     return None, None, False, daypart, False
+
+
+SENTENCE_END = re.compile(r"(?<=[.!?…])\s+|\n+")
+
+
+def sentence_spans(text):
+    """(start, end) of every non-empty sentence of text, trimmed. A newline also ends a sentence."""
+    spans, position = [], 0
+    for match in list(SENTENCE_END.finditer(text)) + [None]:
+        end = len(text) if match is None else match.start()
+        start = position
+        while start < end and text[start].isspace():
+            start += 1
+        while end > start and text[end - 1].isspace():
+            end -= 1
+        if end > start:
+            spans.append((start, end))
+        if match is not None:
+            position = match.end()
+    return spans
+
+
+def nearest_day(now, hour, minute, weekdays):
+    """First day, today included, on one of `weekdays` whose time is still ahead."""
+    for offset in range(9):
+        day = now.date() + timedelta(days=offset)
+        if day.weekday() in weekdays and datetime.combine(day, time(hour, minute)) > now:
+            return day
+    return None
+
+
+def mentions_time(value):
+    """True when the text names some time, usable or not. Tells «no time given» from «time that cannot be used»."""
+    if not isinstance(value, str) or not value.strip():
+        return False
+    text = normalize(value)
+    patterns = (RELATIVE, ISO_DATE, NAMED_DATE, DOT_DATE, SLASH_DATE, MONTH_DAY, CLOCK, HOUR, DAYPART,
+                NOON_MIDNIGHT, LUNCH, WEEKEND, WEEK_END, DAY_WORD, PAST_DAY)
+    return any(pattern.search(text) for pattern in patterns)
 
 
 def month_day_candidate(number, hour, minute, now):
@@ -188,6 +243,8 @@ def parse_due_text(due_text, now):
     if not isinstance(due_text, str) or not due_text.strip() or "\x00" in due_text:
         return None
     text = normalize(due_text)
+    if PAST_DAY.search(text):
+        return None
     today = now.date()
     base, rest = parse_relative(text, now)
     if isinstance(base, datetime):
@@ -205,8 +262,9 @@ def parse_due_text(due_text, now):
     hour, minute, found_time, _, _ = find_time(rest)
     if found_time and hour is None:
         return None
+    weekend, week_end = WEEKEND.search(rest), WEEK_END.search(rest)
     if not found_time:
-        hour, minute = DEFAULT_HOUR, 0
+        hour, minute = (10, 0) if weekend else (18, 0) if week_end else (DEFAULT_HOUR, 0)
     day, explicit = None, True
     if isinstance(date_value, int):
         day = month_day_candidate(date_value, hour, minute, now)
@@ -216,7 +274,11 @@ def parse_due_text(due_text, now):
         day = date_value
     else:
         word = DAY_WORD.search(rest)
-        if word is None:
+        if word is None and (weekend or week_end):
+            day = nearest_day(now, hour, minute, {5, 6} if weekend else {4})
+            if day is None:
+                return None
+        elif word is None:
             if not found_time:
                 return None
             day, explicit = today, False

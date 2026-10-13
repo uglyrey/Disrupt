@@ -23,6 +23,7 @@ from app.config import (
     read_secret_file,
     stream_deadline_seconds,
 )
+from app.reminder_proposals import sentence_spans
 from app.schemas import ProposedItem, StrictModel, StructuredNote
 
 SYSTEM_PROMPT = """Ты помогаешь структурировать мысли пользователя. Пиши на языке оригинала.
@@ -47,7 +48,11 @@ task: действие, которое автор должен сделать. i
 Один item на одно конкретное действие: не дроби действие на части и не склеивай разные.
 Задача возникает только из явно названного действия. Сохрани отрицания и сомнения.
 Каждый item содержит точную непустую source_quote из исходника. Не превращай
-дополнительный вывод в задачу. Не создавай напоминания или абсолютные даты.
+дополнительный вывод в задачу. Не придумывай даты.
+Если автор просит напомнить (напомни, напоминание, не забыть, не забудь, поставь
+будильник или таймер, remind me), создай task на это действие. due_text цитата времени из просьбы,
+source_quote всё предложение с ней. Пример: «Завтра в 10 напомни позвонить маме» даёт
+task «Позвонить маме», due_text «Завтра в 10».
 due_text содержит точную цитату срока из исходника либо null, если срока нет.
 Копируй source_quote как есть, без пересказа, изменения регистра или пунктуации.
 Не склеивай разные фрагменты. Если точной цитаты нет, не добавляй такой вывод или item.
@@ -220,6 +225,64 @@ def _grounded_span(value, source, maximum, cache=None):
     return None
 
 
+def _grounded_ranges(value, source, maximum, cache=None):
+    """Every (start, end) of source that the model meant by value, exact matches first."""
+    if not isinstance(value, str) or not value.strip():
+        return []
+    found = []
+    if value in source and len(value) <= maximum:
+        start = source.find(value)
+        while start >= 0:
+            found.append((start, start + len(value)))
+            start = source.find(value, start + 1)
+        return found
+    candidates = _quote_candidates(value)
+    if not candidates:
+        return []
+    if cache is not None and "map" in cache:
+        normalized, starts, ends = cache["map"]
+    else:
+        normalized, starts, ends = _normalized_with_map(source)
+        if cache is not None:
+            cache["map"] = (normalized, starts, ends)
+    for candidate in candidates:
+        at = normalized.find(candidate)
+        while at >= 0:
+            start, end = starts[at], ends[at + len(candidate) - 1]
+            if source[start:end].strip() and end - start <= maximum:
+                found.append((start, end))
+            at = normalized.find(candidate, at + 1)
+        if found:
+            break
+    return found
+
+
+def _extend_quote_to_deadline(quote, due_text, original, cache):
+    """(wider quote, due text) when the deadline sits in the same sentence as the quote but outside it.
+
+    «Завтра в 10 напомни позвонить маме»: the model often quotes only «позвонить маме». Both parts are
+    exact pieces of the original, so the wider quote is the original text from the start of the sentence
+    to the end of the later part. Another sentence never counts. Returns None when nothing fits.
+    """
+    due_ranges = _grounded_ranges(due_text, original, 300, cache)
+    if not due_ranges:
+        return None
+    spans = sentence_spans(original)
+    at = original.find(quote)
+    while at >= 0:
+        q_start, q_end = at, at + len(quote)
+        for sentence_start, sentence_end in spans:
+            if not sentence_start <= q_start < sentence_end:
+                continue
+            for d_start, d_end in due_ranges:
+                if sentence_start <= d_start and d_end <= sentence_end:
+                    end = max(q_end, d_end)
+                    if end - sentence_start <= 3000:
+                        return original[sentence_start:end], original[d_start:d_end]
+        at = original.find(quote, at + 1)
+    return None
+
+
 def repair_structure_quotes(result: StructuredNote, original: str) -> StructuredNote:
     """Keep only supported optional details, without another provider call.
 
@@ -248,6 +311,11 @@ def repair_structure_quotes(result: StructuredNote, original: str) -> Structured
             continue
         normalized += quote != item.source_quote
         due = quote_span(item.due_text, quote, 300) if item.due_text is not None else None
+        if due is None and item.due_text is not None:
+            wider = _extend_quote_to_deadline(quote, item.due_text, original, cache)
+            if wider is not None:
+                quote, due = wider
+                normalized += 1
         dropped_due += item.due_text is not None and due is None
         items.append(item.model_copy(update={"source_quote": quote, "due_text": due}))
     repaired = validate_result(result.model_copy(update={"conclusions": conclusions, "items": items}), original)

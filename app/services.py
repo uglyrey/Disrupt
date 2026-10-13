@@ -1,3 +1,4 @@
+import logging
 import math
 import re
 import time
@@ -46,6 +47,17 @@ def saved_without_ai(db, capture):
         ProductEvent.user_id == capture.user_id, ProductEvent.name == "capture_saved",
         ProductEvent.operation_id == capture.id, ProductEvent.outcome == LIMIT_OUTCOME,
     )) is not None
+
+
+def add_requested_reminders(db, note, text, settings):
+    """A note saved without AI still gets a reminder for an explicit «напомни ...». It is deterministic and free."""
+    from app.reminders import request_reminders  # reminders.py imports this module
+
+    try:
+        with db.begin_nested():
+            request_reminders(db, note, text, settings)
+    except Exception as exc:  # The note is saved either way. Only the error type is logged, never the text.
+        logging.getLogger(__name__).warning("manual_request_reminder_failed %s", type(exc).__name__)
 
 
 def capture_text(db, user_id, text, key, settings, *, processing_mode="ai", channel="web", commit=True):
@@ -109,6 +121,7 @@ def capture_text(db, user_id, text, key, settings, *, processing_mode="ai", chan
         db.add(result)
         db.flush()
         if processing_mode == "manual":
+            add_requested_reminders(db, result, text, settings)
             save_revision(db, result)
         record_event(db, user_id, "capture_saved", capture.id, channel, outcome=LIMIT_OUTCOME if limited else None)
         if commit:
