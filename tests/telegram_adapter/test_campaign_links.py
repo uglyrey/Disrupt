@@ -59,3 +59,18 @@ def test_legacy_binding_nonce_that_begins_with_src_is_still_a_binding(settings):
             assert yes["callback_data"] == "link:" + code
 
     asyncio.run(run())
+
+
+def test_longest_campaign_does_not_enter_the_legacy_binding_namespace(settings):
+    async def run():
+        source = "a" * 17
+        bot, core, telegram, calls, replies, _ = await session(
+            settings, [message(10, "/start src_" + source)]
+        )
+        async with core, telegram:
+            await bot.poll_once()
+            assert calls == []
+            yes = replies[0]["reply_markup"]["inline_keyboard"][0][0]
+            assert yes["url"] == "https://example.test?utm_source=" + source
+
+    asyncio.run(run())

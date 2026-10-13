@@ -225,8 +225,8 @@ class Bot:
             if command == "/start" and argument.startswith("src_") and not LINK_CODE.fullmatch(argument):
                 # Advertising sources have their own namespace and never enter login/link confirmation.
                 source = argument[4:]
-                # Keep valid campaign payloads shorter than the 43-character legacy link nonce.
-                if not re.fullmatch(r"[a-z][a-z0-9_-]{0,37}", source):
+                # Legacy binding accepts 22+ characters. Every valid campaign payload is shorter.
+                if not re.fullmatch(r"[a-z][a-z0-9_-]{0,16}", source):
                     await self.notify(chat_id, "Ссылка источника некорректна. Открой beresta на сайте.", self.web)
                     return
                 address = urlsplit(self.web)
