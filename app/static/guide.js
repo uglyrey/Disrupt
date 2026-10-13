@@ -194,12 +194,20 @@
   }
 
   // A step can come and go while the tour runs. A target that is gone is taken out and the counter follows.
+  // The list itself is closed until the tour opens it, so only the boxes inside it count: hidden or display:none stops the step.
+  function renderedInMenu(target) {
+    if (!target.isConnected) return false;
+    for (let n = target; n && n !== doc.body && n.id !== 'note-tools'; n = n.parentElement) {
+      if (n.hidden || window.getComputedStyle(n).display === 'none') return false;
+    }
+    return !target.closest('[hidden]');
+  }
   function usable(step) {
     const target = step.target();
     if (!target) return false;
     if (step.phoneOnly && !isPhone()) return false;
     // On a phone the tools sit in a list that the tour opens by itself, so a closed list is no reason to skip.
-    if (step.menu && isPhone()) return !target.closest('[hidden]');
+    if (step.menu && isPhone()) return renderedInMenu(target);
     return shown(target);
   }
   function mark(target) {
