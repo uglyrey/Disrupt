@@ -254,7 +254,7 @@ def create_app(
         response.headers["Cache-Control"] = "no-store"
         if request.url.path not in {"/docs", "/redoc", "/docs/oauth2-redirect"}:
             response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self' blob:; "
+                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; "
                 f"connect-src {connect_sources}; "
                 "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
             )

@@ -93,3 +93,6 @@ def test_csrf_large_body_and_no_files(client):
     assert create(client, sources=[b"x" * (10 * 1024 * 1024 + 65537)]).status_code == 413
     response = client.post("/api/v1/captures/with-images", headers={"Idempotency-Key": "empty"}, data={"text": "abc"})
     assert response.status_code == 422
+    policy = client.get("/").headers["content-security-policy"]
+    assert "img-src 'self' blob:;" in policy
+    assert "img-src *" not in policy and "data:" not in policy
