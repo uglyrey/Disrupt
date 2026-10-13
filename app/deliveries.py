@@ -84,6 +84,9 @@ MESSAGE_TTL = 900  # Account messages carry one-time links that die after 15 min
 
 def message_deliverable(db, row, now):
     """An account message goes only to the chat it was addressed to, while it is fresh."""
+    if row.message_kind in {"digest_morning", "digest_evening"}:
+        from app.digests import deliverable
+        return deliverable(db, row, now)
     if row.message_text is None or now - row.created_at > MESSAGE_TTL:
         return False
     return db.scalar(select(TelegramIdentity.id).where(

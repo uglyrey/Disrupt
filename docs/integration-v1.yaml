@@ -4046,6 +4046,64 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/telegram/digest-settings": {
+      "get": {
+        "tags": [
+          "telegram"
+        ],
+        "summary": "Read",
+        "operationId": "read_api_v1_telegram_digest_settings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      },
+      "patch": {
+        "tags": [
+          "telegram"
+        ],
+        "summary": "Change",
+        "operationId": "change_api_v1_telegram_digest_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DigestSettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/api/v1/assistant/ask": {
       "post": {
         "tags": [
@@ -6889,6 +6947,44 @@
           "callback_token"
         ],
         "title": "Delivery"
+      },
+      "DigestSettingsPatch": {
+        "properties": {
+          "morning_enabled": {
+            "type": "boolean",
+            "title": "Morning Enabled"
+          },
+          "evening_enabled": {
+            "type": "boolean",
+            "title": "Evening Enabled"
+          },
+          "morning_time": {
+            "type": "string",
+            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "Morning Time"
+          },
+          "evening_time": {
+            "type": "string",
+            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$",
+            "title": "Evening Time"
+          },
+          "timezone": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "morning_enabled",
+          "evening_enabled",
+          "morning_time",
+          "evening_time",
+          "timezone"
+        ],
+        "title": "DigestSettingsPatch"
       },
       "EmailBody": {
         "properties": {
