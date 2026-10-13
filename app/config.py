@@ -110,6 +110,8 @@ class Settings:
     audio_unit_base: int = 2
     audio_unit_per_minute: int = 1
     limit_timezone: str = "Europe/Moscow"
+    # Когда напомнить, если человек попросил напомнить, но время не назвал. Секунды, 0 отключает.
+    reminder_default_delay_seconds: int = 3600
     session_seconds: int = 86400
     lease_seconds: int = 120
     # Ждём ответ модели не дольше этого времени на одно чтение. Потоковый режим включают только после ручной проверки.
@@ -256,6 +258,8 @@ class Settings:
             1 <= self.retry_breaker_window_seconds <= 3600 and 1 <= self.retry_breaker_pause_seconds <= 7200
         ):
             raise ValueError("Retry breaker needs at least 1 failure, a window up to 3600 s and a pause up to 7200 s")
+        if not 0 <= self.reminder_default_delay_seconds <= 86400:
+            raise ValueError("NOTES_REMINDER_DEFAULT_DELAY must be between 0 and 86400 seconds")
         try:
             ZoneInfo(self.limit_timezone)
         except (ZoneInfoNotFoundError, ValueError, OSError):
@@ -383,6 +387,9 @@ class Settings:
             audio_unit_base=int(os.environ.get("NOTES_AUDIO_UNIT_BASE", str(cls.audio_unit_base))),
             audio_unit_per_minute=int(os.environ.get("NOTES_AUDIO_UNIT_PER_MINUTE", str(cls.audio_unit_per_minute))),
             limit_timezone=os.environ.get("NOTES_LIMIT_TIMEZONE", cls.limit_timezone),
+            reminder_default_delay_seconds=int(
+                os.environ.get("NOTES_REMINDER_DEFAULT_DELAY", str(cls.reminder_default_delay_seconds))
+            ),
             error_log_file=os.environ.get("NOTES_ERROR_LOG_FILE", "data/errors.log"),
             ai_retries_enabled=flag("NOTES_AI_RETRIES_ENABLED", True),
             retry_clear_delays=parse_seconds_list(

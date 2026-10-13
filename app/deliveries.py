@@ -14,7 +14,7 @@ from sqlalchemy import and_, or_, select
 from app.analytics import record_event
 from app.models import Capture, Item, Job, Note, Outbox, Reminder, TelegramIdentity
 from app.reminder_proposals import label_for
-from app.reminders import AUTO_KEY_PREFIX
+from app.reminders import AUTO_KEY_PREFIX, NOT_UNDERSTOOD, unscheduled_requests
 from app.security import hash_token
 from app.services import item_view, lock_account, reminder_proposals
 
@@ -109,6 +109,7 @@ def expire_authorization(db, row):
 REPLY_UNITS, TELEGRAM_UNITS = 3500, 4096
 REPLY_FOOTER = "\n\nПолный результат в Beresta."
 HINT_TASK_CHARS = 100
+HINT_LIST = 5
 
 
 def utf16_units(text):
@@ -137,13 +138,19 @@ def auto_reminder_hint(db, note, settings, now):
     if not rows:
         return ""
     first = rows[0]
-    zone = ZoneInfo(first.timezone)
-    local = datetime.fromtimestamp(first.scheduled_at, zone).replace(tzinfo=None)
-    label = label_for(local, datetime.fromtimestamp(now, zone).replace(tzinfo=None))
     link = settings.public_origin + "/?capture=" + note.capture_id + "&reminder=" + first.id
+
+    def when(row):
+        zone = ZoneInfo(row.timezone)
+        local = datetime.fromtimestamp(row.scheduled_at, zone).replace(tzinfo=None)
+        return label_for(local, datetime.fromtimestamp(now, zone).replace(tzinfo=None))
+
     if len(rows) == 1:
-        return f"Напоминание поставлено: {label}, «{short_task(first.text)}». Изменить: {link}"
-    return f"Напоминаний поставлено: {len(rows)}. Ближайшее: {label}, «{short_task(first.text)}». Изменить: {link}"
+        return f"Напоминание поставлено: {when(first)}, «{short_task(first.text)}». Изменить: {link}"
+    lines = [f"• {when(row)}, «{short_task(row.text)}»" for row in rows[:HINT_LIST]]
+    if len(rows) > HINT_LIST:
+        lines.append(f"и ещё {len(rows) - HINT_LIST}")
+    return "Напоминания поставлены:\n" + "\n".join(lines) + f"\nИзменить: {link}"
 
 
 def reminder_hint(db, note, settings, now=None):
@@ -153,9 +160,10 @@ def reminder_hint(db, note, settings, now=None):
     task whose deadline can be read, and nothing is stored: the link opens the note, where the user
     confirms or changes the time.
     """
+    missed = NOT_UNDERSTOOD if unscheduled_requests(db, note) else ""
     done = auto_reminder_hint(db, note, settings, time.time() if now is None else now.timestamp())
     if done:
-        return done
+        return done + ("\n" + missed if missed else "")
     items = [item_view(item) for item in db.scalars(
         select(Item).where(Item.note_id == note.id, Item.user_id == note.user_id).order_by(Item.position, Item.id)
     )]
@@ -164,11 +172,22 @@ def reminder_hint(db, note, settings, now=None):
         proposal = proposals.get(item["id"])
         if proposal:
             link = settings.public_origin + "/?capture=" + note.capture_id + "#remind"
-            return (
+            line = (
                 f"Предлагаю напоминание: {proposal['label']}, «{short_task(item['text'])}». "
                 f"Подтвердить или изменить время: {link}"
             )
-    return ""
+            return line + ("\n" + missed if missed else "")
+    return missed
+
+
+def add_reminder_set_message(db, note, identity, settings):
+    """A note saved without AI has no processing reply, so a reminder it got is confirmed in a short message."""
+    text = reminder_hint(db, note, settings)
+    if text:
+        db.add(Outbox(
+            user_id=identity.user_id, bot_id=identity.bot_id, chat_id=identity.chat_id, generation=1,
+            status="pending", message_kind="reminder_set", message_text=text,
+        ))
 
 
 def reminder_message_text(reminder, note):

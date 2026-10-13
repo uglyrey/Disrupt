@@ -168,7 +168,7 @@ def test_prompt_has_the_new_rules():
         "due_text содержит точную цитату срока",
     ]:
         assert fragment in SYSTEM_PROMPT, fragment
-    assert len(SYSTEM_PROMPT) <= 1972 * 1.5
+    assert len(SYSTEM_PROMPT) <= 2903 * 1.1  # 2903 was the length before the reminder rule
 
 
 def test_structure_context_is_json_data_with_local_date():
