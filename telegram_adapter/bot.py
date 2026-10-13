@@ -222,10 +222,11 @@ class Bot:
                 else:
                     await self.notify(chat_id, "Привет! Кнопки внизу, выбирай.", reply_markup=MAIN_MENU)
                 return
-            if command == "/start" and argument.startswith("src_"):
+            if command == "/start" and argument.startswith("src_") and not LINK_CODE.fullmatch(argument):
                 # Advertising sources have their own namespace and never enter login/link confirmation.
                 source = argument[4:]
-                if not re.fullmatch(r"[a-z][a-z0-9_-]{0,59}", source):
+                # Keep valid campaign payloads shorter than the 43-character legacy link nonce.
+                if not re.fullmatch(r"[a-z][a-z0-9_-]{0,37}", source):
                     await self.notify(chat_id, "Ссылка источника некорректна. Открой beresta на сайте.", self.web)
                     return
                 address = urlsplit(self.web)

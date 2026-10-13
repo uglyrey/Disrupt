@@ -46,3 +46,16 @@ def test_login_start_still_requires_its_own_confirmation(settings):
             assert yes["callback_data"] == "login:" + LOGIN_TOKEN
 
     asyncio.run(run())
+
+
+def test_legacy_binding_nonce_that_begins_with_src_is_still_a_binding(settings):
+    async def run():
+        code = "src_" + "a" * 39  # A valid 43-character legacy nonce, never a campaign.
+        bot, core, telegram, calls, replies, _ = await session(settings, [message(10, "/start " + code)])
+        async with core, telegram:
+            await bot.poll_once()
+            assert calls == []
+            yes = replies[0]["reply_markup"]["inline_keyboard"][0][0]
+            assert yes["callback_data"] == "link:" + code
+
+    asyncio.run(run())
