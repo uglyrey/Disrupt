@@ -152,8 +152,12 @@ def handle_telegram_action(db, body):
     item = db.get(Item, reminder.item_id) if reminder and reminder.item_id else None
     if (
         reminder is None or reminder.user_id != identity.user_id
+        or db.scalar(select(Note.id).where(
+            Note.id == reminder.note_id, Note.user_id == identity.user_id, Note.deleted_at.is_(None),
+        )) is None
         or (reminder.item_id is not None and (
             item is None or item.user_id != identity.user_id or item.note_id != reminder.note_id or item.kind != "task"
+            or item.deleted_at is not None
         ))
         or delivery.authorized_at is None or delivery.status not in {"authorized", "sent", "unknown", "cancelled"}
     ):
@@ -174,7 +178,9 @@ def handle_telegram_action(db, body):
     if item is None:
         reminder.status = "completed"
         return {"status": "completed"}
-    note = db.scalar(select(Note).where(Note.id == item.note_id, Note.user_id == identity.user_id))
+    note = db.scalar(select(Note).where(
+        Note.id == item.note_id, Note.user_id == identity.user_id, Note.deleted_at.is_(None),
+    ))
     if note is None:
         raise IntegrationRejection(409, "action_expired", "Запись больше недоступна")
     complete_item(db, identity, item, note)

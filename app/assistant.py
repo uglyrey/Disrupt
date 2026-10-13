@@ -112,7 +112,9 @@ def owned_request(db, request_id, user_id):
 def _titles(db, user_id, note_ids):
     if not note_ids:
         return {}
-    rows = db.execute(select(Note.id, Note.title).where(Note.user_id == user_id, Note.id.in_(set(note_ids))))
+    rows = db.execute(select(Note.id, Note.title).where(
+        Note.user_id == user_id, Note.deleted_at.is_(None), Note.id.in_(set(note_ids)),
+    ))
     return dict(rows.all())
 
 
@@ -135,7 +137,7 @@ def enrich_result(db, row):
     if result["open_tasks"]:
         tasks = {
             item.id: item for item in db.scalars(select(Item).where(
-                Item.user_id == row.user_id, Item.id.in_(set(result["open_tasks"])),
+                Item.user_id == row.user_id, Item.id.in_(set(result["open_tasks"])), Item.deleted_at.is_(None),
             ))
         }
         titles.update(_titles(db, row.user_id, [item.note_id for item in tasks.values()]))
@@ -145,7 +147,7 @@ def enrich_result(db, row):
         "open_tasks": [
             {"id": task_id, "text": tasks[task_id].text, "note_id": tasks[task_id].note_id,
              "note_title": titles.get(tasks[task_id].note_id)}
-            for task_id in result["open_tasks"] if task_id in tasks
+            for task_id in result["open_tasks"] if task_id in tasks and titles.get(tasks[task_id].note_id) is not None
         ],
     }
 

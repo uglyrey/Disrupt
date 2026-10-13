@@ -107,7 +107,9 @@ def _load(db, user_id, notes):
     by_note = {note_id: [] for note_id in ids}
     for start in range(0, len(ids), 400):
         rows = db.scalars(
-            select(Item).where(Item.user_id == user_id, Item.note_id.in_(ids[start:start + 400]))
+            select(Item).where(
+                Item.user_id == user_id, Item.note_id.in_(ids[start:start + 400]), Item.deleted_at.is_(None),
+            )
             .order_by(Item.note_id, Item.position, Item.id)
         )
         for item in rows:
@@ -146,7 +148,7 @@ def context_for_ask(db, user_id, question, days=90, now=None):
     now = time.time() if now is None else now
     notes = db.scalars(
         select(Note)
-        .where(Note.user_id == user_id, Note.created_at >= now - days * 86400)
+        .where(Note.user_id == user_id, Note.deleted_at.is_(None), Note.created_at >= now - days * 86400)
         .order_by(Note.created_at.desc(), Note.id)
         .limit(INDEX_LIMIT)
     ).all()
@@ -159,20 +161,24 @@ def context_for_recommend(db, user_id, now=None):
     now = time.time() if now is None else now
     recent = db.scalars(
         select(Note)
-        .where(Note.user_id == user_id, Note.created_at >= now - RECOMMEND_DAYS * 86400)
+        .where(Note.user_id == user_id, Note.deleted_at.is_(None), Note.created_at >= now - RECOMMEND_DAYS * 86400)
         .order_by(Note.created_at.desc(), Note.id)
         .limit(RECENT_NOTE_LIMIT)
     ).all()
     open_note_ids = db.scalars(
         select(Item.note_id)
-        .where(Item.user_id == user_id, Item.status == "open", Item.kind.in_(["task", "idea"]))
+        .where(
+            Item.user_id == user_id, Item.status == "open", Item.kind.in_(["task", "idea"]),
+            Item.deleted_at.is_(None),
+        )
         .order_by(Item.id)
         .limit(OPEN_ITEM_LIMIT)
     ).all()
     known = {note.id for note in recent}
     extra_ids = [note_id for note_id in dict.fromkeys(open_note_ids) if note_id not in known]
     extra = db.scalars(
-        select(Note).where(Note.user_id == user_id, Note.id.in_(extra_ids)).order_by(Note.created_at.desc())
+        select(Note).where(Note.user_id == user_id, Note.deleted_at.is_(None), Note.id.in_(extra_ids))
+        .order_by(Note.created_at.desc())
     ).all() if extra_ids else []
     return _build(_load(db, user_id, [*recent, *extra]), RECOMMEND_NOTE_CHARS)
 
@@ -182,7 +188,10 @@ def context_for_digest(db, user_id, days=7, now=None):
     since = now - days * 86400
     notes = db.scalars(
         select(Note)
-        .where(Note.user_id == user_id, or_(Note.created_at >= since, Note.updated_at >= since))
+        .where(
+            Note.user_id == user_id, Note.deleted_at.is_(None),
+            or_(Note.created_at >= since, Note.updated_at >= since),
+        )
         .order_by(Note.created_at.desc(), Note.id)
         .limit(RECENT_NOTE_LIMIT)
     ).all()

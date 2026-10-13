@@ -160,6 +160,9 @@ services:
 
   scheduler:
     build: .
+    # Планировщик стирает голосовые оригиналы заметок, пролежавших в корзине срок хранения.
+    volumes:
+      - audio-originals:/app/data/audio
     restart: unless-stopped
     command: ["python", "-m", "app.scheduler"]
     environment:

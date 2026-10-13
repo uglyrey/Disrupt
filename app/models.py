@@ -55,6 +55,8 @@ class User(Base):
     policy_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     policy_accepted_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     deletion_requested_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Where the person is in the short guided tips: {"note_tools": {"step": 0, "done": false}, ...}. Empty until used.
+    guide_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class LoginSession(Base):
@@ -128,6 +130,9 @@ class Job(Base):
     next_route: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # Какой сервис дал последний сбой. Предохранитель основного шлюза не считает сбои резерва.
     last_error_provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # capture: обычная запись. merge: объединение заметок, merge_note_ids хранит исходные заметки.
+    kind: Mapped[str] = mapped_column(String(16), default="capture", server_default="capture")
+    merge_note_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class Note(Base):
@@ -144,6 +149,25 @@ class Note(Base):
     updated_at: Mapped[float] = mapped_column(Float, default=time.time)
     category_id: Mapped[str | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
     structure_confirmed_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Корзина. Пока deleted_at пусто, заметка живая. Через NOTES_TRASH_DAYS планировщик удаляет её насовсем.
+    deleted_at: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
+    # Если заметку убрало объединение, здесь id новой заметки.
+    merged_into: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
+class NoteLink(Base):
+    """Связь двух заметок, которую человек поставил вручную. Пара хранится упорядоченной: note_a < note_b."""
+
+    __tablename__ = "note_links"
+    __table_args__ = (
+        UniqueConstraint("note_a", "note_b", name="uq_note_links_pair"),
+        CheckConstraint("note_a < note_b", name="ck_note_links_order"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    note_a: Mapped[str] = mapped_column(ForeignKey("notes.id"), index=True)
+    note_b: Mapped[str] = mapped_column(ForeignKey("notes.id"), index=True)
+    created_at: Mapped[float] = mapped_column(Float, default=time.time)
 
 
 class Revision(Base):
@@ -240,6 +264,8 @@ class Item(Base):
     source_quote: Mapped[str | None] = mapped_column(EncryptedText("items.source_quote"), nullable=True)
     due_text: Mapped[str | None] = mapped_column(EncryptedText("items.due_text"), nullable=True)
     position: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # Удалённая задача или идея. Живёт в базе до NOTES_TRASH_DAYS, чтобы «Отменить» работало.
+    deleted_at: Mapped[float | None] = mapped_column(Float, nullable=True, index=True)
 
 
 class Reminder(Base):

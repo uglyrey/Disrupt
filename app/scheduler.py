@@ -9,10 +9,15 @@ import time
 from sqlalchemy import and_, or_, select
 
 from app import crypto
+from app.audio_storage import AudioStorage, AudioStorageUnavailable
 from app.config import Settings
 from app.db import make_database
 from app.models import Item, Note, Outbox, Reminder, TelegramIdentity
+from app.notes_manage import purge_expired
 from app.services import lock_account
+
+# Корзину чистим не каждые пять секунд, а раз в несколько минут.
+PURGE_EVERY_SECONDS = 600
 
 
 def ready_reminders(now):
@@ -29,9 +34,10 @@ def ready_reminders(now):
         .outerjoin(Item, Item.id == Reminder.item_id)
         .where(
             Reminder.status == "confirmed", Reminder.scheduled_at <= now, identity, ~already_enqueued,
+            Note.deleted_at.is_(None),
             or_(Reminder.item_id.is_(None), and_(
                 Item.user_id == Reminder.user_id, Item.note_id == Reminder.note_id,
-                Item.kind == "task", Item.status == "open",
+                Item.kind == "task", Item.status == "open", Item.deleted_at.is_(None),
             )),
         ).order_by(Reminder.scheduled_at, Reminder.id)
     )
@@ -82,7 +88,18 @@ def main():
         crypto.configure_from_settings(settings)
         engine, sessions = make_database(settings.database_url)
         scheduler = Scheduler(sessions)
+        try:
+            audio_storage = AudioStorage(settings.audio_storage_path)
+        except AudioStorageUnavailable:
+            audio_storage = None  # Notes with a voice original wait in the trash until the folder is mounted.
+        next_purge = 0.0
         while not stop.is_set():
+            if time.monotonic() >= next_purge:
+                next_purge = time.monotonic() + PURGE_EVERY_SECONDS
+                try:
+                    purge_expired(sessions, settings, audio_storage)
+                except Exception:
+                    logging.warning("trash_purge_failed database_or_internal_error")
             try:
                 count = scheduler.run_once()
             except Exception:
