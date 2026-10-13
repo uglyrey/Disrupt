@@ -16,6 +16,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, or_, select
 
 from app.analytics import BACKGROUND_EVENTS
+from app.contest_metrics import ACTIVE, first_targets, target_completions
 from app.contracts import AdminSummary
 from app.csv_export import excel_csv_writer
 from app.models import Capture, Job, Note, ProductEvent, ProviderUsage, TranscriptRevision, User
@@ -24,7 +25,6 @@ from app.reference_pricing import SOURCE as REFERENCE_SOURCE
 from app.reference_pricing import estimate
 
 MOSCOW = ZoneInfo("Europe/Moscow")
-ACTIVE = {"capture_saved", "note_opened", "note_edited", "reminder_confirmed", "task_completed"}
 RETURN = {"search_result_opened", "reminder_opened"}
 DAY = 86400
 
@@ -139,7 +139,7 @@ def subject(event, note_ids):
 def completion(events, captures, notes, mode, first, last):
     saved = {event.operation_id: event.occurred_at for event in events
              if event.name == "capture_saved" and first <= event.occurred_at <= last}
-    opened, finished = {}, {}
+    finished = {}
     for event in events:
         if not first <= event.occurred_at <= last:
             continue
@@ -147,12 +147,9 @@ def completion(events, captures, notes, mode, first, last):
         if note_id is None:
             continue
         if event.name == "note_opened":
-            opened.setdefault(note_id, event.occurred_at)
-        final = {"structure_confirmed", "note_edited"} if mode == "ai" else {"search_result_opened", "reminder_confirmed"}
-        if event.name in final and note_id in opened and opened[note_id] <= event.occurred_at:
             capture_id = notes[note_id]
             if (capture_id in saved and captures.get(capture_id) == mode
-                    and saved[capture_id] <= opened[note_id]):
+                    and saved[capture_id] <= event.occurred_at):
                 finished.setdefault(note_id, event.occurred_at)
     return min(finished.values(), default=None)
 
@@ -223,6 +220,7 @@ def aggregate(db, start, end, channel, source, key, *, usage_limit=50, usage_off
     first, last = period(start, end, now)
     observed_end = math.nextafter(now, math.inf)
     low, high = midnight(first), min(midnight(last + timedelta(days=1)), observed_end)
+    qualified = first_targets(db, high, source=source)
     horizon = min(midnight(last + timedelta(days=9)), observed_end)
     candidates = or_(
         and_(User.first_login_at >= low, User.first_login_at < high),
@@ -265,7 +263,8 @@ def aggregate(db, start, end, channel, source, key, *, usage_limit=50, usage_off
         select(Note.id, Note.capture_id).where(Note.capture_id.in_(capture_ids))
     )}
     foreground = [e for e in selected if e.name not in BACKGROUND_EVENTS]
-    active_users = {e.user_id for e in selected if e.name in ACTIVE}
+    active_users = {e.user_id for e in selected if e.name in ACTIVE and e.user_id in qualified
+                    and calendar_day(e.occurred_at) >= calendar_day(qualified[e.user_id])}
     sessions = {e.session_id for e in foreground}
     seen = {e.user_id for e in foreground}
     cohort = {uid for uid, user in users.items() if user.first_login_at is not None
@@ -298,10 +297,16 @@ def aggregate(db, start, end, channel, source, key, *, usage_limit=50, usage_off
         retention[f"pending_d{offset}"] = len(retention_cohort - eligible)
     returns = {e.user_id for e in selected if e.name in RETURN and e.user_id in activated
                and e.occurred_at > activated[e.user_id]}
-    completed = {uid for uid in active_users if any(
-        completion(by_user[uid], captures, notes, mode, low, math.nextafter(high, -math.inf)) is not None
-        for mode in ("ai", "manual")
-    )}
+    completed = target_completions(db, high, low=low, source=source, channel=channel)
+    saved_users = {e.user_id for e in selected if e.name == "capture_saved"}
+    ready_query = select(Note.user_id).join(User, User.id == Note.user_id).join(Capture, Capture.id == Note.capture_id).where(
+        User.is_test.is_(False), Capture.user_id == User.id, Note.created_at >= low, Note.created_at < high,
+    )
+    if source != "all":
+        ready_query = ready_query.where(User.source == source)
+    if channel != "all":
+        ready_query = ready_query.where(Capture.channel == channel)
+    ready_users = set(db.scalars(ready_query))
     stages = [cohort, set(), set(), set(), set()]
     for uid in cohort:
         own = selected_by_user[uid]
@@ -338,7 +343,8 @@ def aggregate(db, start, end, channel, source, key, *, usage_limit=50, usage_off
     cursor = first
     while cursor <= last:
         day_events = selected_by_day[cursor]
-        daily_users = {e.user_id for e in day_events if e.name in ACTIVE}
+        daily_users = {e.user_id for e in day_events if e.name in ACTIVE and e.user_id in qualified
+                       and cursor >= calendar_day(qualified[e.user_id])}
         new = {uid for uid in daily_users if users[uid].first_login_at is not None
                and calendar_day(users[uid].first_login_at) == cursor}
         returning = {uid for uid in daily_users if users[uid].first_login_at is not None
@@ -367,6 +373,7 @@ def aggregate(db, start, end, channel, source, key, *, usage_limit=50, usage_off
                   "ai_activation": percentage(len(mature & ai.keys()), len(mature)),
                   "manual_activation": percentage(len(mature & manual.keys()), len(mature)),
                   "activation_pending": len(cohort - mature), "completed_scenario": len(completed), "returns": len(returns),
+                  "saved_users": len(saved_users), "ready_users": len(ready_users),
                   "d1": retention["d1"], "d7": retention["d7"]},
         "daily": daily, "retention": retention,
         "funnel": [{"step": step, "users": len(group), "conversion": percentage(len(group), len(cohort))}
@@ -421,6 +428,13 @@ def export_csv(summary, filters=None):
         flatten("daily", row["date"], {key: value for key, value in row.items() if key != "date"})
     for row in data["funnel"]:
         flatten("funnel", row["step"], {key: value for key, value in row.items() if key != "step"})
+    contest = data.get("contest")
+    if contest:
+        flatten("contest", "", {key: value for key, value in contest.items() if not isinstance(value, list)})
+        for row in contest["daily"]:
+            flatten("contest_daily", row["date"], {key: value for key, value in row.items() if key != "date"})
+        for row in contest["sources"]:
+            flatten("traffic_sources", row["source"], {key: value for key, value in row.items() if key != "source"})
     for name, value in (filters or {}).items():
         writer.writerow([safe_cell(cell) for cell in ("filter", "", name, value)])
     writer.writerow(("meta", "", "generated_at", safe_cell(data["generated_at"])))

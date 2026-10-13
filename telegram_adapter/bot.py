@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import time
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .clients import (
     ACTION_PREFIXES,
@@ -220,6 +221,18 @@ class Bot:
                     await self.notify(chat_id, HELP_TEXT, reply_markup=MAIN_MENU)
                 else:
                     await self.notify(chat_id, "Привет! Кнопки внизу, выбирай.", reply_markup=MAIN_MENU)
+                return
+            if command == "/start" and argument.startswith("src_"):
+                # Advertising sources have their own namespace and never enter login/link confirmation.
+                source = argument[4:]
+                if not re.fullmatch(r"[a-z][a-z0-9_-]{0,59}", source):
+                    await self.notify(chat_id, "Ссылка источника некорректна. Открой beresta на сайте.", self.web)
+                    return
+                address = urlsplit(self.web)
+                query = [(k, v) for k, v in parse_qsl(address.query) if k != "utm_source"]
+                query.append(("utm_source", source))
+                url = urlunsplit((address.scheme, address.netloc, address.path, urlencode(query), address.fragment))
+                await self.notify(chat_id, "Привет! Beresta поможет собрать мысли в заметку. Начни на сайте, затем подключи Telegram.", url)
                 return
             if command == "/start" and re.fullmatch(r"login_[A-Za-z0-9_-]{43}", argument):
                 # A link can be forwarded by someone else, so nothing reaches the core before the person says yes.

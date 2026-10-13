@@ -320,6 +320,7 @@ class TelegramLogin(Base):
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     purpose: Mapped[str] = mapped_column(String(16), default="login", server_default="login")
+    source: Mapped[str] = mapped_column(String(100), default="unknown", server_default="unknown")
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     binding_hash: Mapped[str] = mapped_column(String(64))
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
@@ -363,6 +364,7 @@ class EmailRegistrationPending(Base):
     binding_hash: Mapped[str] = mapped_column(String(64))
     code_hash: Mapped[str] = mapped_column(String(64))
     policy_version: Mapped[str] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(100), default="unknown", server_default="unknown")
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     expires_at: Mapped[float] = mapped_column(Float)
     created_at: Mapped[float] = mapped_column(Float, default=time.time)
@@ -440,6 +442,40 @@ class AssistantRequest(Base):
     created_at: Mapped[float] = mapped_column(Float, default=time.time)
     started_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     finished_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class ComponentCall(Base):
+    """Actual non-model stages. Model calls stay in ProviderUsage to avoid double counting."""
+
+    __tablename__ = "component_calls"
+    __table_args__ = (
+        UniqueConstraint("user_id", "operation_id", "component", name="uq_component_call_stage"),
+        CheckConstraint("kind IN ('skill', 'background', 'tool', 'target')", name="ck_component_call_kind"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    operation_id: Mapped[str] = mapped_column(String(100))
+    component: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(32), default="succeeded")
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    channel: Mapped[str] = mapped_column(String(16))
+    is_test: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    occurred_at: Mapped[float] = mapped_column(Float, default=time.time, index=True)
+
+
+class RequestError(Base):
+    """Authenticated HTTP failures, without paths containing IDs, request bodies or credentials."""
+
+    __tablename__ = "request_errors"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    route: Mapped[str] = mapped_column(String(160))
+    method: Mapped[str] = mapped_column(String(8))
+    status_code: Mapped[int] = mapped_column(Integer)
+    error_code: Mapped[str] = mapped_column(String(32))
+    is_test: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    occurred_at: Mapped[float] = mapped_column(Float, default=time.time, index=True)
 
 
 # Register the independent feedback and admin tables for Alembic metadata.

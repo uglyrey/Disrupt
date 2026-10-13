@@ -126,6 +126,9 @@ services:
       <<: *backend-environment
       NOTES_ANALYTICS_PSEUDONYM_KEY_FILE: /run/secrets/analytics_pseudonym_key
       NOTES_REVIEW_ENABLED: ${NOTES_REVIEW_ENABLED:-false}
+      NOTES_CONTEST_START: ${NOTES_CONTEST_START:-2026-11-03}
+      NOTES_CONTEST_END: ${NOTES_CONTEST_END:-2026-11-30}
+      NOTES_CONTEST_COUNTED_COMPONENTS: ${NOTES_CONTEST_COUNTED_COMPONENTS:-llm,stt}
     secrets:
       - postgres_password
       - analytics_pseudonym_key

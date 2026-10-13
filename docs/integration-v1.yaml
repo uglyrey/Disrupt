@@ -354,7 +354,7 @@
                     },
                     "activation_pending": 0,
                     "completed_scenario": 2,
-                    "returns": 1,
+                    "returns": 2,
                     "d1": {
                       "numerator": 1,
                       "denominator": 1,
@@ -364,7 +364,9 @@
                       "numerator": 0,
                       "denominator": 0,
                       "value": null
-                    }
+                    },
+                    "saved_users": 2,
+                    "ready_users": 2
                   },
                   "daily": [
                     {
@@ -648,6 +650,37 @@
                 }
               }
             }
+          }
+        },
+        "x-implementation-status": "implemented",
+        "security": [
+          {
+            "AdminSession": []
+          }
+        ]
+      }
+    },
+    "/admin-api/v1/contest": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Contest",
+        "operationId": "contest_admin_api_v1_contest_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "No administrator session"
+          },
+          "404": {
+            "description": "Outside the private network"
           }
         },
         "x-implementation-status": "implemented",
@@ -5633,6 +5666,18 @@
       },
       "AdminSummary": {
         "properties": {
+          "contest": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contest"
+          },
           "budget": {
             "anyOf": [
               {
@@ -6096,6 +6141,18 @@
       },
       "Cards": {
         "properties": {
+          "saved_users": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Saved Users",
+            "default": 0
+          },
+          "ready_users": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Ready Users",
+            "default": 0
+          },
           "registrations": {
             "type": "integer",
             "title": "Registrations"
@@ -6909,6 +6966,18 @@
             "maxLength": 128,
             "minLength": 10,
             "title": "Password"
+          },
+          "source_token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Token"
           },
           "accept_policy": {
             "type": "boolean",
@@ -8143,6 +8212,18 @@
             "minLength": 10,
             "title": "Password"
           },
+          "source_token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Token"
+          },
           "accept_policy": {
             "type": "boolean",
             "title": "Accept Policy",
@@ -8657,6 +8738,18 @@
       },
       "TelegramLoginStart": {
         "properties": {
+          "source_token": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Token"
+          },
           "accept_policy": {
             "type": "boolean",
             "title": "Accept Policy",

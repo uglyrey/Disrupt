@@ -17,7 +17,7 @@ from app.models import AssistantRequest, Capture, Job, ProviderUsage, User, new_
 from tests.conftest import ADMIN_ADDRESS, admin_login
 from tests.test_admin_metrics import FILTER, KEY, NOW, seed, stamp
 
-FILES = {"README.txt", "daily.csv", "users.csv", "events.csv", "ai_calls.csv", "errors.csv", "errors_by_day.csv"}
+FILES = {"contest.json", "component_calls.csv", "sources.csv", "README.txt", "daily.csv", "users.csv", "events.csv", "ai_calls.csv", "errors.csv", "errors_by_day.csv"}
 URL = "/admin-api/v1/export.zip"
 
 
@@ -69,23 +69,23 @@ def test_archive_contains_the_agreed_files_and_download_headers(client, populate
     assert set(files) == FILES
     header = {name: files[name].splitlines()[0] for name in FILES if name.endswith(".csv")}
     assert header["daily.csv"] == ("date;dau;new_users;captures_text;captures_audio;captures_web;captures_telegram;"
-                                   "ai_calls;ai_calls_per_dau;errors")
-    assert header["users.csv"] == "user_id;registered_date;first_target_scenario_date;active_days;channel_mix"
-    assert header["events.csv"] == "user_id;timestamp_utc;event;channel"
+                                   "ai_calls;ai_calls_per_dau;errors;counted_calls;recorded_calls;calls_per_dau")
+    assert header["users.csv"] == "user_id;registered_date;first_target_scenario_date;active_days;channel_mix;source"
+    assert header["events.csv"] == "user_id;timestamp_utc;event;channel;source;operation_id;session_id;outcome;subject_id;capture_id"
     assert header["ai_calls.csv"] == ("timestamp_utc;user_id;kind;model;status;latency_ms;input_tokens;"
-                                      "output_tokens;cost")
-    assert header["errors.csv"] == "timestamp_utc;date_msk;source;error_code"
+                                      "output_tokens;cost;operation_id;counted;capture_id;provider;currency;estimated_cost")
+    assert header["errors.csv"] == "timestamp_utc;date_msk;source;error_code;user_id;operation_id;route;method;status_code"
     assert header["errors_by_day.csv"] == "date_msk;source;error_code;count"
 
 
 def test_daily_counts_real_users_only_in_dau_and_matches_the_dashboard(client, populated):
     _, files = archive(client)
     daily = table(files, "daily.csv")
-    assert daily == [
+    assert [{k:v for k,v in row.items() if k not in {"counted_calls","recorded_calls","calls_per_dau"}} for row in daily] == [
         {"date": "2026-10-05", "dau": "1", "new_users": "1", "captures_text": "1", "captures_audio": "0",
-         "captures_web": "0", "captures_telegram": "1", "ai_calls": "1", "ai_calls_per_dau": "1.0000", "errors": "0"},
+         "captures_web": "0", "captures_telegram": "1", "ai_calls": "0", "ai_calls_per_dau": "0.0000", "errors": "0"},
         {"date": "2026-10-06", "dau": "2", "new_users": "1", "captures_text": "1", "captures_audio": "0",
-         "captures_web": "1", "captures_telegram": "0", "ai_calls": "1", "ai_calls_per_dau": "0.5000", "errors": "0"},
+         "captures_web": "1", "captures_telegram": "0", "ai_calls": "0", "ai_calls_per_dau": "0.0000", "errors": "0"},
     ]
     dashboard = client.get("/admin-api/v1/summary", params=FILTER).json()
     assert [row["dau"] for row in dashboard["daily"]] == [int(row["dau"]) for row in daily]
@@ -100,7 +100,7 @@ def test_users_are_pseudonymous_and_real_users_have_a_first_scenario_date(client
     users = {row["user_id"]: row for row in table(files, "users.csv")}
     assert users[who(populated["ai"])] == {
         "user_id": who(populated["ai"]), "registered_date": "2026-10-05", "first_target_scenario_date": "2026-10-05",
-        "active_days": "2", "channel_mix": "telegram:1|web:2"}
+        "active_days": "2", "channel_mix": "telegram:1|web:2", "source":"paid"}
     assert users[who(populated["manual"])]["first_target_scenario_date"] == "2026-10-06"
     assert users[who(populated["manual"])]["active_days"] == "1"
     # Registered after the period, or marked as test: not in the file at all.
@@ -118,11 +118,15 @@ def test_events_are_content_free_utc_and_skip_test_accounts(client, populated):
         row["event"] for row in events}
     for row in events:
         assert datetime.fromisoformat(row["timestamp_utc"]).utcoffset() == timedelta(0)
-        assert set(row) == {"user_id", "timestamp_utc", "event", "channel"}
+        assert set(row) == {"user_id", "timestamp_utc", "event", "channel", "source", "operation_id", "session_id", "outcome", "subject_id", "capture_id"}
+        assert row["operation_id"].startswith("operation_") and row["session_id"].startswith("session_")
     saved = next(row for row in events if row["event"] == "capture_saved" and row["user_id"] == who(populated["ai"]))
     assert saved["timestamp_utc"] == "2026-10-05T06:02:00+00:00" and saved["channel"] == "telegram"
     # Outside the period: the pending account's sign-in on 7 October.
     assert who(populated["pending"]) not in files["events.csv"]
+    opened = next(row for row in events if row["event"] == "note_opened" and row["user_id"] == who(populated["ai"]))
+    assert opened["capture_id"] == saved["capture_id"]
+    assert opened["capture_id"].startswith("capture_") and opened["subject_id"].startswith("note_")
 
 
 def test_ai_calls_come_from_receipts_with_kinds_and_unknown_cost_left_empty(app, client, populated):
@@ -142,12 +146,13 @@ def test_ai_calls_come_from_receipts_with_kinds_and_unknown_cost_left_empty(app,
     calls = table(files, "ai_calls.csv")
     assert [row["kind"] for row in calls] == ["llm", "llm", "assistant", "stt"]
     first, failed = calls[0], calls[1]
-    assert first == {"timestamp_utc": "2026-10-05T06:02:00+00:00", "user_id": who(populated["ai"]), "kind": "llm",
+    assert {k:v for k,v in first.items() if k not in {"operation_id","counted","capture_id","provider","currency","estimated_cost"}} == {"timestamp_utc": "2026-10-05T06:02:00+00:00", "user_id": who(populated["ai"]), "kind": "llm",
                      "model": "mock", "status": "succeeded", "latency_ms": "100", "input_tokens": "100",
                      "output_tokens": "50", "cost": "0.25000000"}
     assert failed["cost"] == "" and failed["input_tokens"] == "" and failed["status"] == "failed"
     assert who(populated["late_test"]) not in files["ai_calls.csv"]
-    assert table(files, "daily.csv")[1]["ai_calls"] == "3"
+    assert table(files, "daily.csv")[1]["ai_calls"] == "0"  # Explicit mock model receipts never enter the contest numerator.
+    assert all(row["counted"] == "False" for row in calls)
 
 
 def test_errors_cover_jobs_and_assistant_requests_with_counts_per_day(app, client, populated):
@@ -165,7 +170,7 @@ def test_errors_cover_jobs_and_assistant_requests_with_counts_per_day(app, clien
                                     created_at=stamp("2026-10-06T11:59:00"), finished_at=stamp("2026-10-06T12:00:00")))
         db.commit()
     _, files = archive(client)
-    assert table(files, "errors.csv") == [
+    assert [{k:v for k,v in row.items() if k not in {"user_id","operation_id","route","method","status_code"}} for row in table(files,"errors.csv")] == [
         {"timestamp_utc": "2026-10-06T07:00:00+00:00", "date_msk": "2026-10-06", "source": "job",
          "error_code": "provider_timeout"},
         {"timestamp_utc": "2026-10-06T09:00:00+00:00", "date_msk": "2026-10-06", "source": "assistant",
@@ -242,12 +247,20 @@ def test_period_rules(client, populated, params, status):
 
 
 def test_size_cap_refuses_instead_of_building_a_huge_archive(client, populated, monkeypatch):
-    monkeypatch.setattr("app.admin_export.MAX_ROWS", 3)
+    monkeypatch.setattr("app.admin_export.MAX_BYTES", 100)
     response = client.get(URL, params=FILTER)
     assert response.status_code == 413 and "период" in response.json()["detail"].lower()
-    monkeypatch.setattr("app.admin_export.MAX_ROWS", 250_000)
-    monkeypatch.setattr("app.admin_export.MAX_HISTORY", 3)
-    assert client.get(URL, params=FILTER).status_code == 413
+
+
+def test_large_csv_is_split_without_losing_rows_or_history(client, populated, monkeypatch):
+    _, whole = archive(client)
+    monkeypatch.setattr("app.admin_export.MAX_ROWS", 3)
+    _, parts = archive(client)
+    names = sorted(name for name in parts if name.startswith("events.") and name.endswith(".csv"))
+    assert len(names) > 1
+    rows = [row for name in sorted(names, key=lambda name:("part-" in name,name)) for row in table(parts,name)]
+    assert rows == table(whole,"events.csv")
+    assert all(len(table(parts,name)) <= 3 for name in names)
 
 
 def test_export_is_written_to_the_audit_log_without_content(client, populated):
@@ -255,7 +268,7 @@ def test_export_is_written_to_the_audit_log_without_content(client, populated):
     rows = client.get("/admin-api/v1/audit").json()
     export = next(row for row in rows if row["action"] == "export_zip")
     assert export["admin"] == "owner" and export["details"]["from"] == "2026-10-05" and export["details"]["to"] == "2026-10-06"
-    assert set(export["details"]) == {"from", "to", "days", "users", "events", "ai_calls", "errors"}
+    assert set(export["details"]) == {"from", "to", "days", "users", "events", "ai_calls", "components", "errors"}
     client.get("/admin-api/v1/export", params=FILTER)
     assert client.get("/admin-api/v1/audit").json()[0]["action"] == "export_csv"
     # A refused or invalid request leaves no export entry.

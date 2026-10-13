@@ -218,6 +218,12 @@ def test_success_after_retry_makes_one_note_and_one_receipt_per_attempt(app, cli
         rows = list(db.scalars(select(ProviderUsage).order_by(ProviderUsage.occurred_at)))
     assert [row.request_id for row in rows] == [job_id + ":llm", job_id + ":llm:r1"]
     assert [row.status for row in rows] == ["unknown", "succeeded"]  # A 5xx is still recorded as billing unknown
+    from app.models import ComponentCall
+    with app.state.sessions() as db:
+        stages = db.scalars(select(ComponentCall).where(ComponentCall.component == "capture_worker")
+                            .order_by(ComponentCall.occurred_at)).all()
+        assert [row.operation_id for row in stages] == [job_id+":r0", job_id+":r1"]
+        assert [row.status for row in stages] == ["failed", "succeeded"]
 
 
 @pytest.mark.parametrize("first,second,kind", [

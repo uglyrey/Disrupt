@@ -1,7 +1,4 @@
-"""ZIP archive of content-free metrics for the contest organizers.
-
-No usernames, no note text, no raw account IDs. Test accounts are excluded everywhere.
-"""
+"""Streaming, content-free evidence with versioned methodology and bounded ZIP size."""
 
 import io
 import math
@@ -11,17 +8,26 @@ from collections import Counter, defaultdict
 from datetime import date, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import literal, select, union_all
 
-from app.admin_metrics import ACTIVE, calendar_day, completion, midnight, money, pseudonym, safe_cell, utc
+from app.admin_metrics import calendar_day, midnight, money, pseudonym, safe_cell, utc
+from app.contest_metrics import ACTIVE, METHOD_VERSION, first_targets, report
 from app.csv_export import excel_csv_writer
-from app.models import AssistantRequest, Capture, Job, Note, ProductEvent, ProviderUsage, User
+from app.models import (
+    AssistantRequest,
+    Capture,
+    ComponentCall,
+    Job,
+    Note,
+    ProductEvent,
+    ProviderUsage,
+    RequestError,
+    User,
+)
 
 MAX_DAYS = 92
-MAX_ROWS = 250_000
-MAX_HISTORY = 500_000
+MAX_ROWS = 250_000  # Per CSV part, not a refusal threshold.
 MAX_BYTES = 64 * 1024 * 1024
-ORDER = {"capture_saved": 0, "note_opened": 1, "structure_confirmed": 2, "note_edited": 2}
 
 
 def archive_period(start, end, now):
@@ -29,251 +35,482 @@ def archive_period(start, end, now):
         first, last = date.fromisoformat(start), date.fromisoformat(end)
     except ValueError:
         raise HTTPException(422, "Проверьте даты периода") from None
-    if first > last:
-        raise HTTPException(422, "Начало периода позже его конца")
-    if (last - first).days + 1 > MAX_DAYS:
-        raise HTTPException(422, f"Период не может быть длиннее {MAX_DAYS} дней")
-    if last > calendar_day(now):
-        raise HTTPException(422, "Конец периода не может быть в будущем")
+    if first > last or (last - first).days + 1 > MAX_DAYS or last > calendar_day(now):
+        raise HTTPException(422, f"Выберите период до сегодняшнего дня, не длиннее {MAX_DAYS} дней")
     return first, last
 
 
 def too_large():
-    return HTTPException(413, "Слишком много данных для одного архива. Выберите период короче.")
+    return HTTPException(413, "Архив слишком большой. Выберите период короче.")
 
 
 def make_csv(header, rows):
     out = io.StringIO(newline="")
     writer = excel_csv_writer(out)
     writer.writerow(header)
-    for count, row in enumerate(rows, 1):
-        if count > MAX_ROWS:
-            raise too_large()
+    for row in rows:
         writer.writerow([safe_cell(cell) for cell in row])
     return out.getvalue()
 
 
 def readme(first, last, generated, stable_key):
-    pseudonyms = (
-        "Идентификаторы пользователей заменены псевдонимами. Это HMAC-SHA256 от внутреннего ID аккаунта "
-        "с секретным ключом сервиса, обрезанный до 32 символов. Один человек получает один и тот же "
-        "псевдоним во всех файлах и во всех архивах, пока ключ не меняют. По псевдониму нельзя узнать "
-        "имя, контакты или записи человека."
-        if stable_key else
-        "Идентификаторы пользователей заменены псевдонимами. Это HMAC-SHA256 от внутреннего ID аккаунта "
-        "с ключом, который сервис создал при запуске. Внутри этого архива один человек везде имеет один "
-        "псевдоним, но в архиве, скачанном после перезапуска сервиса, псевдонимы будут другими. "
-        "По псевдониму нельзя узнать имя, контакты или записи человека."
+    stability = (
+        "один и тот же псевдоним во всех файлах и во всех архивах"
+        if stable_key
+        else "псевдонимы меняются после перезапуска сервиса"
     )
-    return "\n".join([
-        "Архив метрик beresta",
-        "",
-        f"Период с {first.isoformat()} по {last.isoformat()} включительно, дни по Europe/Moscow.",
-        f"Архив собран {generated} (UTC).",
-        "CSV используют UTF-8 с BOM и разделитель точку с запятой. Заголовки находятся в первой строке. "
-        "При импорте выберите разделитель ; и кодировку UTF-8. Значения и десятичная точка сохранены.",
-        "",
-        "ОПРЕДЕЛЕНИЯ",
-        "",
-        "Реальный пользователь. Человек, который выполнил хотя бы один целевой сценарий. "
-        "Сценарий с ИИ. Человек сохранил запись с обработкой ИИ, открыл готовую заметку и подтвердил "
-        "структуру или исправил заметку. Сценарий без ИИ. Человек сохранил запись вручную, открыл её, "
-        "затем нашёл заметку поиском или подтвердил напоминание. Сценарий считается по всей истории "
-        "аккаунта до конца периода, а не только внутри выбранных дат.",
-        "",
-        "DAU. Число уникальных реальных пользователей за календарный день по Europe/Moscow. "
-        "В день попадает тот, кто в этот день сохранил запись, открыл результат, исправил заметку, "
-        "подтвердил напоминание или выполнил задачу. Вход, фоновая обработка и доставка уведомлений "
-        "активностью не считаются. Один человек в двух каналах считается один раз.",
-        "",
-        "Исключения. Тестовые аккаунты и аккаунты команды в архив не попадают совсем. Не попадают "
-        "и события, которые были записаны, когда аккаунт был тестовым.",
-        "",
-        "Что считается по всем нетестовым аккаунтам, а не только по реальным пользователям. "
-        "Записи (captures_*), вызовы ИИ (ai_calls), ошибки (errors) и файл events.csv. "
-        "DAU, new_users и active_days считаются иначе. DAU и new_users берут только реальных "
-        "пользователей. active_days в users.csv показывает дни с активностью для любого аккаунта.",
-        "",
-        "ФАЙЛЫ",
-        "",
-        "daily.csv. По одной строке на каждый день периода, даже без активности. Столбцы date, dau, "
-        "new_users (реальные пользователи, зарегистрированные в этот день), captures_text, "
-        "captures_audio, captures_web, captures_telegram, ai_calls, ai_calls_per_dau (пусто, если dau "
-        "равен нулю), errors.",
-        "",
-        "users.csv. Один человек в строке. Столбцы user_id (псевдоним), registered_date (пусто, если "
-        "дата регистрации неизвестна), first_target_scenario_date (пусто, если человек ещё не "
-        "реальный пользователь), active_days (дни с активностью внутри периода), channel_mix "
-        "(активные события по каналам внутри периода, например telegram:2|web:5).",
-        "",
-        "events.csv. События продукта без содержимого. Столбцы user_id (псевдоним), timestamp_utc, "
-        "event, channel.",
-        "",
-        "ai_calls.csv. Вызовы ИИ с квитанцией. Столбцы timestamp_utc, user_id (псевдоним), kind (llm, "
-        "stt или assistant), model, status, latency_ms, input_tokens, output_tokens, cost (в рублях, "
-        "пусто, если стоимость неизвестна). Старые вызовы без квитанции сюда не входят. Пустая "
-        "ячейка всегда означает, что значение неизвестно.",
-        "",
-        "errors.csv. Каждая ошибка обработки заметки или запроса к ассистенту. Столбцы timestamp_utc, "
-        "date_msk, source (job или assistant), error_code.",
-        "",
-        "errors_by_day.csv. Те же ошибки, посчитанные по дням. Столбцы date_msk, source, error_code, count.",
-        "",
-        "ПСЕВДОНИМЫ",
-        "",
-        pseudonyms,
-        "",
-        "В архиве нет имён пользователей, паролей, текстов записей, расшифровок, аудио и контактов.",
-        "",
-    ])
+    return "\n".join(
+        [
+            "Архив метрик beresta",
+            f"Период {first.isoformat()} - {last.isoformat()}, Europe/Moscow.",
+            f"Архив собран {generated} (UTC).",
+            f"Методика {METHOD_VERSION}.",
+            "",
+            "Реальный пользователь выполнил хотя бы один целевой сценарий: сохранил запись и просмотрел готовую заметку.",
+            "Критерий одинаков для записей с ИИ и без ИИ. Подтверждать структуру или менять заметку не требуется.",
+            "Отсутствующие исторические просмотры не восстанавливаются предположениями.",
+            "DAU включает реальные пользовательские действия и запросы помощнику, начиная с дня первого целевого сценария.",
+            "Тестовые аккаунты и события тестирования исключены. Веб и Telegram одного аккаунта считаются одним пользователем.",
+            "Для отношения обращений к DAU используется одна группа пользователей в числителе и знаменателе.",
+            "Журналы показывают все нетестовые обращения. Поле counted показывает включение в показатель.",
+            "Вызовы LLM и STT учитываются по квитанциям. Неподтверждённые этапы навыков, инструментов и фоновой работы",
+            "записываются отдельно, но не включаются в зачёт без явного согласования методики компонентов.",
+            "Опрос статуса, проверки доступности, обновление баланса и отладочные запросы не считаются компонентными обращениями.",
+            "Среднесуточные значения включают нулевые дни. Незавершённый период помечен preliminary.",
+            "",
+            "daily.csv - дни и счётчики; users.csv - регистрация, первый сценарий, активные дни и источник;",
+            "events.csv - события с обезличенными связями; ai_calls.csv - модельные квитанции;",
+            "component_calls.csv - фактически выполненные прочие этапы; errors.csv и errors_by_day.csv - ошибки;",
+            "sources.csv - источники привлечения; contest.json - выбранный и настроенный зачётный периоды.",
+            "Большие CSV продолжаются в файлах .part-0002.csv и следующих. Все части содержат заголовок.",
+            "CSV имеют UTF-8 BOM, разделитель ; и CRLF. Пустое значение означает неизвестное.",
+            "",
+            "Пользователи заменены псевдонимами HMAC-SHA256, используются " + stability + ".",
+            "В архиве нет имён, контактов, паролей, текстов заметок, вопросов помощнику, расшифровок или аудио.",
+            "Источники unknown сохраняются, если сведения о привлечении не были записаны.",
+            "",
+        ]
+    )
 
 
-def build_archive(db, start, end, key, *, stable_key=True, now=None):
-    """Return (ZIP bytes, row counts). Everything is read from one snapshot of the database."""
+def build_archive(
+    db,
+    start,
+    end,
+    key,
+    *,
+    stable_key=True,
+    now=None,
+    counted_components=("llm", "stt"),
+    contest_period=("2026-11-03", "2026-11-30"),
+):
     now = time.time() if now is None else now
     first, last = archive_period(start, end, now)
-    low = midnight(first)
-    high = min(midnight(last + timedelta(days=1)), math.nextafter(now, math.inf))
-    days = [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
+    low, high = midnight(first), min(midnight(last + timedelta(days=1)), math.nextafter(now, math.inf))
+    selected = report(db, start, end, counted_components=counted_components, now=now)
+    official = report(db, *contest_period, counted_components=counted_components, now=now)
+    qualified = first_targets(db, high)
+    accounts = {
+        r.id: r
+        for r in db.execute(
+            select(User.id, User.created_at, User.first_login_at, User.source).where(User.is_test.is_(False))
+        )
+    }
+    note_links = {
+        row.id: (row.capture_id, row.user_id)
+        for row in db.execute(
+            select(Note.id, Note.capture_id, Note.user_id).where(Note.user_id.in_(accounts))
+        )
+    }
+    job_links = {
+        row.id: (row.capture_id, row.user_id)
+        for row in db.execute(select(Job.id, Job.capture_id, Job.user_id).where(Job.user_id.in_(accounts)))
+    }
 
-    def user_id(raw):
-        return pseudonym(key, "user", raw)
+    def capture_link(uid, operation_id, subject_id=None, name=None):
+        if name == "capture_saved":
+            return pseudonym(key, "capture", operation_id)
+        note_id = subject_id or (operation_id.split(":", 1)[0] if ":" in operation_id else None)
+        capture = note_links.get(note_id) or job_links.get(operation_id)
+        return pseudonym(key, "capture", capture[0]) if capture and capture[1] == uid else None
 
-    accounts = {row.id: row for row in db.execute(
-        select(User.id, User.created_at, User.first_login_at).where(User.is_test.is_(False))
-    )}
-    history = list(db.scalars(
-        select(ProductEvent).join(User, User.id == ProductEvent.user_id)
-        .where(User.is_test.is_(False), ProductEvent.is_test.is_(False), ProductEvent.occurred_at < high)
-        .order_by(ProductEvent.occurred_at, ProductEvent.id).limit(MAX_HISTORY + 1)
-    ))
-    if len(history) > MAX_HISTORY:
-        raise too_large()
-    history.sort(key=lambda e: (e.occurred_at, ORDER.get(e.name, 3), e.id))
-    captures = dict(db.execute(
-        select(Capture.id, Capture.processing_mode).join(User, User.id == Capture.user_id).where(User.is_test.is_(False))
-    ).all())
-    notes = dict(db.execute(
-        select(Note.id, Note.capture_id).join(User, User.id == Note.user_id).where(User.is_test.is_(False))
-    ).all())
-
-    by_user = defaultdict(list)
-    for event in history:
-        by_user[event.user_id].append(event)
-    horizon = math.nextafter(high, -math.inf)
-    first_target = {}
-    for uid, own in by_user.items():
-        done = [t for mode in ("ai", "manual")
-                if (t := completion(own, captures, notes, mode, 0.0, horizon)) is not None]
-        if done:
-            first_target[uid] = min(done)
-
-    window = [event for event in history if event.occurred_at >= low]
-    real_by_day, active_days, channel_mix = defaultdict(set), defaultdict(set), defaultdict(Counter)
-    for event in window:
-        if event.name not in ACTIVE:
-            continue
-        day = calendar_day(event.occurred_at)
-        active_days[event.user_id].add(day)
-        channel_mix[event.user_id][event.channel] += 1
-        if event.user_id in first_target:
-            real_by_day[day].add(event.user_id)
-
-    def registered(uid):
-        row = accounts[uid]
-        return row.created_at if row.created_at is not None else row.first_login_at
-
-    new_by_day = Counter(
-        calendar_day(registered(uid)) for uid in first_target
-        if uid in accounts and registered(uid) is not None and low <= registered(uid) < high
+    active_days, mix, touched = defaultdict(set), defaultdict(Counter), set()
+    event_query = (
+        select(ProductEvent)
+        .join(User)
+        .where(
+            User.is_test.is_(False),
+            ProductEvent.is_test.is_(False),
+            ProductEvent.occurred_at >= low,
+            ProductEvent.occurred_at < high,
+        )
+        .order_by(ProductEvent.occurred_at, ProductEvent.id)
     )
-    touched = {event.user_id for event in window}
-    user_rows = []
-    for uid in accounts:
-        stamp = registered(uid)
-        if not (stamp is not None and stamp < high or uid in touched):
-            continue
-        mix = "|".join(f"{name}:{count}" for name, count in sorted(channel_mix[uid].items()))
-        user_rows.append((
-            user_id(uid),
-            calendar_day(stamp).isoformat() if stamp is not None else None,
-            calendar_day(first_target[uid]).isoformat() if uid in first_target else None,
-            len(active_days[uid]), mix or None,
-        ))
-    user_rows.sort(key=lambda row: row[0])
+    for e in db.scalars(event_query.execution_options(yield_per=2000)):
+        touched.add(e.user_id)
+        if e.name in ACTIVE:
+            active_days[e.user_id].add(calendar_day(e.occurred_at))
+            mix[e.user_id][e.channel] += 1
 
-    counts = defaultdict(Counter)
-    for created, kind, channel in db.execute(
-        select(Capture.created_at, Capture.input_kind, Capture.channel).join(User, User.id == Capture.user_id)
-        .where(User.is_test.is_(False), Capture.created_at >= low, Capture.created_at < high)
+    def counted(uid, at, component):
+        d = calendar_day(at)
+        return (
+            uid in qualified
+            and d >= calendar_day(qualified[uid])
+            and d in active_days[uid]
+            and component in counted_components
+        )
+
+    capture_counts = defaultdict(Counter)
+    for at, kind, channel in db.execute(
+        select(Capture.created_at, Capture.input_kind, Capture.channel)
+        .join(User)
+        .where(
+            User.is_test.is_(False),
+            Capture.created_at >= low,
+            Capture.created_at < high,
+        )
+        .execution_options(yield_per=2000)
     ):
-        day = calendar_day(created)
-        counts[day]["captures_" + ("audio" if kind == "audio" else "text")] += 1
-        if channel in {"web", "telegram"}:
-            counts[day]["captures_" + channel] += 1
-
-    usage = list(db.execute(
-        select(ProviderUsage.occurred_at, ProviderUsage.user_id, ProviderUsage.kind, ProviderUsage.request_id,
-               ProviderUsage.model, ProviderUsage.status, ProviderUsage.latency_ms, ProviderUsage.input_tokens,
-               ProviderUsage.output_tokens, ProviderUsage.cost)
-        .join(User, User.id == ProviderUsage.user_id)
-        .where(User.is_test.is_(False), ProviderUsage.is_test.is_(False),
-               ProviderUsage.occurred_at >= low, ProviderUsage.occurred_at < high)
-        .order_by(ProviderUsage.occurred_at, ProviderUsage.id).limit(MAX_ROWS + 1)
-    ))
-    if len(usage) > MAX_ROWS:
-        raise too_large()
-    calls = Counter(calendar_day(row.occurred_at) for row in usage)
-
-    errors = []
-    for model, source in ((Job, "job"), (AssistantRequest, "assistant")):
-        errors.extend((row.finished_at, source, row.error_code or "unknown") for row in db.execute(
-            select(model.finished_at, model.error_code).join(User, User.id == model.user_id)
-            .where(User.is_test.is_(False), model.status == "failed",
-                   model.finished_at >= low, model.finished_at < high)
-        ))
-    errors.sort(key=lambda row: (row[0], row[1], row[2]))
-    errors_by_day = Counter((calendar_day(at), source, code) for at, source, code in errors)
-
-    daily = []
-    for day in days:
-        dau = len(real_by_day[day])
-        counter = counts[day]
-        daily.append((
-            day.isoformat(), dau, new_by_day[day], counter["captures_text"], counter["captures_audio"],
-            counter["captures_web"], counter["captures_telegram"], calls[day],
-            f"{calls[day] / dau:.4f}" if dau else None, sum(n for (d, _, _), n in errors_by_day.items() if d == day),
-        ))
-
-    files = {
-        "daily.csv": make_csv(
-            ("date", "dau", "new_users", "captures_text", "captures_audio", "captures_web",
-             "captures_telegram", "ai_calls", "ai_calls_per_dau", "errors"), daily),
-        "users.csv": make_csv(
-            ("user_id", "registered_date", "first_target_scenario_date", "active_days", "channel_mix"), user_rows),
-        "events.csv": make_csv(
-            ("user_id", "timestamp_utc", "event", "channel"),
-            ((user_id(e.user_id), utc(e.occurred_at), e.name, e.channel) for e in window)),
-        "ai_calls.csv": make_csv(
-            ("timestamp_utc", "user_id", "kind", "model", "status", "latency_ms", "input_tokens",
-             "output_tokens", "cost"),
-            ((utc(r.occurred_at), user_id(r.user_id), "assistant" if r.request_id.endswith(":assistant") else r.kind,
-              r.model, r.status, r.latency_ms, r.input_tokens, r.output_tokens, money(r.cost)) for r in usage)),
-        "errors.csv": make_csv(
-            ("timestamp_utc", "date_msk", "source", "error_code"),
-            ((utc(at), calendar_day(at).isoformat(), source, code) for at, source, code in errors)),
-        "errors_by_day.csv": make_csv(
-            ("date_msk", "source", "error_code", "count"),
-            ((d.isoformat(), source, code, n) for (d, source, code), n in sorted(errors_by_day.items()))),
+        capture_counts[calendar_day(at)]["captures_" + ("audio" if kind == "audio" else "text")] += 1
+        capture_counts[calendar_day(at)]["captures_" + channel] += 1
+    error_queries = []
+    for model, label in ((Job, "job"), (AssistantRequest, "assistant")):
+        error_queries.append(
+            select(
+                model.finished_at.label("at"),
+                literal(label).label("source"),
+                model.error_code.label("code"),
+                model.user_id.label("uid"),
+                model.id.label("operation"),
+                literal(None).label("route"),
+                literal(None).label("method"),
+                literal(None).label("status_code"),
+            )
+            .join(User)
+            .where(
+                User.is_test.is_(False),
+                model.status == "failed",
+                model.finished_at >= low,
+                model.finished_at < high,
+            )
+        )
+    error_queries.append(
+        select(
+            RequestError.occurred_at.label("at"),
+            literal("http").label("source"),
+            RequestError.error_code.label("code"),
+            RequestError.user_id.label("uid"),
+            RequestError.id.label("operation"),
+            RequestError.route.label("route"),
+            RequestError.method.label("method"),
+            RequestError.status_code.label("status_code"),
+        )
+        .join(User)
+        .where(
+            User.is_test.is_(False),
+            RequestError.is_test.is_(False),
+            RequestError.occurred_at >= low,
+            RequestError.occurred_at < high,
+        )
+    )
+    error_query = union_all(*error_queries).order_by("at", "source", "operation")
+    error_days = Counter()
+    for r in db.execute(error_query.execution_options(yield_per=2000)):
+        error_days[(calendar_day(r.at), r.source, r.code or "unknown")] += 1
+    model_query = (
+        select(ProviderUsage)
+        .join(User)
+        .where(
+            User.is_test.is_(False),
+            ProviderUsage.is_test.is_(False),
+            ProviderUsage.occurred_at >= low,
+            ProviderUsage.occurred_at < high,
+        )
+        .order_by(ProviderUsage.occurred_at, ProviderUsage.id)
+    )
+    component_query = (
+        select(ComponentCall)
+        .join(User)
+        .where(
+            User.is_test.is_(False),
+            ComponentCall.is_test.is_(False),
+            ComponentCall.occurred_at >= low,
+            ComponentCall.occurred_at < high,
+        )
+        .order_by(ComponentCall.occurred_at, ComponentCall.id)
+    )
+    stats = {
+        "days": len(selected["daily"]),
+        "users": 0,
+        "events": 0,
+        "ai_calls": 0,
+        "components": 0,
+        "errors": 0,
     }
     buffer = io.BytesIO()
+
+    def who(uid):
+        return pseudonym(key, "user", uid)
+
+    def operation(uid):
+        return pseudonym(key, "operation", uid)
+
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+
+        def write(name, header, rows):
+            part, count, stream, text = 1, 0, None, None
+            try:
+                for row in rows:
+                    if stream is None or count >= MAX_ROWS:
+                        if text is not None:
+                            text.flush()
+                            text.close()
+                        filename = name if part == 1 else name[:-4] + f".part-{part:04d}.csv"
+                        stream = archive.open(filename, "w", force_zip64=True)
+                        text = io.TextIOWrapper(stream, encoding="utf-8", newline="")
+                        writer = excel_csv_writer(text)
+                        writer.writerow(header)
+                        count = 0
+                        part += 1
+                    writer.writerow([safe_cell(cell) for cell in row])
+                    count += 1
+                    if buffer.tell() > MAX_BYTES:
+                        raise too_large()
+                if stream is None:
+                    with archive.open(name, "w") as empty:
+                        empty.write(make_csv(header, []).encode("utf-8"))
+            finally:
+                if text is not None:
+                    text.flush()
+                    text.close()
+
+        def user_rows():
+            for uid, a in sorted(accounts.items()):
+                at = a.created_at if a.created_at is not None else a.first_login_at
+                if not (at is not None and at < high or uid in touched):
+                    continue
+                stats["users"] += 1
+                yield (
+                    who(uid),
+                    calendar_day(at).isoformat() if at is not None else None,
+                    calendar_day(qualified[uid]).isoformat() if uid in qualified else None,
+                    len(
+                        [
+                            d
+                            for d in active_days[uid]
+                            if uid in qualified and d >= calendar_day(qualified[uid])
+                        ]
+                    ),
+                    "|".join(f"{c}:{n}" for c, n in sorted(mix[uid].items())) or None,
+                    a.source,
+                )
+
+        def events():
+            for e in db.scalars(event_query.execution_options(yield_per=2000)):
+                stats["events"] += 1
+                yield (
+                    who(e.user_id),
+                    utc(e.occurred_at),
+                    e.name,
+                    e.channel,
+                    e.source,
+                    operation(e.operation_id),
+                    pseudonym(key, "session", e.session_id),
+                    e.outcome,
+                    pseudonym(key, "note", e.subject_id) if e.subject_id else None,
+                    capture_link(e.user_id, e.operation_id, e.subject_id, e.name),
+                )
+
+        def models():
+            for r in db.scalars(model_query.execution_options(yield_per=2000)):
+                stats["ai_calls"] += 1
+                yield (
+                    utc(r.occurred_at),
+                    who(r.user_id),
+                    "assistant" if r.request_id.split(":")[1:2] == ["assistant"] else r.kind,
+                    r.model,
+                    r.status,
+                    r.latency_ms,
+                    r.input_tokens,
+                    r.output_tokens,
+                    money(r.cost),
+                    operation(r.operation_id),
+                    counted(r.user_id, r.occurred_at, r.kind) and r.model != "mock",
+                    capture_link(r.user_id, r.operation_id),
+                    r.provider, "USD" if r.provider == "openai" else "RUB", money(r.estimated_cost),
+                )
+
+        def components():
+            for r in db.scalars(component_query.execution_options(yield_per=2000)):
+                stats["components"] += 1
+                yield (
+                    utc(r.occurred_at),
+                    who(r.user_id),
+                    r.kind,
+                    r.component,
+                    r.status,
+                    r.error_code,
+                    operation(r.operation_id),
+                    r.channel,
+                    counted(r.user_id, r.occurred_at, r.component),
+                )
+
+        def errors():
+            for r in db.execute(error_query.execution_options(yield_per=2000)):
+                stats["errors"] += 1
+                yield (
+                    utc(r.at),
+                    calendar_day(r.at).isoformat(),
+                    r.source,
+                    r.code or "unknown",
+                    who(r.uid),
+                    operation(r.operation),
+                    r.route,
+                    r.method,
+                    r.status_code,
+                )
+
+        def daily():
+            for d in selected["daily"]:
+                day = date.fromisoformat(d["date"])
+                counts = capture_counts[day]
+                new = sum(
+                    calendar_day(a.created_at if a.created_at is not None else a.first_login_at) == day
+                    for uid, a in accounts.items()
+                    if uid in qualified and (a.created_at or a.first_login_at) is not None
+                )
+                ratio = d["model_calls"] / d["dau"] if d["dau"] else None
+                yield (
+                    d["date"],
+                    d["dau"],
+                    new,
+                    counts["captures_text"],
+                    counts["captures_audio"],
+                    counts["captures_web"],
+                    counts["captures_telegram"],
+                    d["model_calls"],
+                    f"{ratio:.4f}" if ratio is not None else None,
+                    sum(n for (at, _, _), n in error_days.items() if at == day),
+                    d["calls"],
+                    d["recorded_calls"],
+                    f"{d['calls_per_dau']:.4f}" if d["calls_per_dau"] is not None else None,
+                )
+
         archive.writestr("README.txt", readme(first, last, utc(now), stable_key))
-        for name, content in files.items():
-            archive.writestr(name, content)
-    data = buffer.getvalue()
-    if len(data) > MAX_BYTES:
+        import json
+
+        archive.writestr(
+            "contest.json",
+            json.dumps(
+                {"selected": selected, "official_period": official}, ensure_ascii=False, sort_keys=True
+            ),
+        )
+        write(
+            "daily.csv",
+            (
+                "date",
+                "dau",
+                "new_users",
+                "captures_text",
+                "captures_audio",
+                "captures_web",
+                "captures_telegram",
+                "ai_calls",
+                "ai_calls_per_dau",
+                "errors",
+                "counted_calls",
+                "recorded_calls",
+                "calls_per_dau",
+            ),
+            daily(),
+        )
+        write(
+            "users.csv",
+            (
+                "user_id",
+                "registered_date",
+                "first_target_scenario_date",
+                "active_days",
+                "channel_mix",
+                "source",
+            ),
+            user_rows(),
+        )
+        write(
+            "events.csv",
+            (
+                "user_id",
+                "timestamp_utc",
+                "event",
+                "channel",
+                "source",
+                "operation_id",
+                "session_id",
+                "outcome",
+                "subject_id",
+                "capture_id",
+            ),
+            events(),
+        )
+        write(
+            "ai_calls.csv",
+            (
+                "timestamp_utc",
+                "user_id",
+                "kind",
+                "model",
+                "status",
+                "latency_ms",
+                "input_tokens",
+                "output_tokens",
+                "cost",
+                "operation_id",
+                "counted",
+                "capture_id", "provider", "currency", "estimated_cost",
+            ),
+            models(),
+        )
+        write(
+            "component_calls.csv",
+            (
+                "timestamp_utc",
+                "user_id",
+                "kind",
+                "component",
+                "status",
+                "error_code",
+                "operation_id",
+                "channel",
+                "counted",
+            ),
+            components(),
+        )
+        write(
+            "errors.csv",
+            (
+                "timestamp_utc",
+                "date_msk",
+                "source",
+                "error_code",
+                "user_id",
+                "operation_id",
+                "route",
+                "method",
+                "status_code",
+            ),
+            errors(),
+        )
+        write(
+            "errors_by_day.csv",
+            ("date_msk", "source", "error_code", "count"),
+            ((d.isoformat(), s, c, n) for (d, s, c), n in sorted(error_days.items())),
+        )
+        write(
+            "sources.csv",
+            ("source", "registrations", "real_users"),
+            ((r["source"], r["registrations"], r["real_users"]) for r in selected["sources"]),
+        )
+    if len(buffer.getvalue()) > MAX_BYTES:
         raise too_large()
-    stats = {"days": len(days), "users": len(user_rows), "events": len(window), "ai_calls": len(usage),
-             "errors": len(errors)}
-    return data, stats
+    return buffer.getvalue(), stats

@@ -39,6 +39,7 @@ class Credentials(StrictModel):
 
 
 class Registration(Credentials):
+    source_token: str | None = Field(default=None, max_length=200)
     # Consent is checked in the route so that the message can say what is missing.
     accept_policy: bool = False
     policy_version: str | None = Field(default=None, max_length=32)
@@ -46,6 +47,7 @@ class Registration(Credentials):
 
 
 class TelegramLoginStart(StrictModel):
+    source_token: str | None = Field(default=None, max_length=200)
     accept_policy: bool = False
     policy_version: str | None = Field(default=None, max_length=32)
     confirm_age: bool = False
@@ -93,6 +95,7 @@ class EmailCredentials(EmailBody):
 
 
 class EmailRegistrationStart(EmailCredentials):
+    source_token: str | None = Field(default=None, max_length=200)
     accept_policy: bool = False
     policy_version: str | None = Field(default=None, max_length=32)
     confirm_age: bool = False

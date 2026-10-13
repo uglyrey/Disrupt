@@ -21,6 +21,8 @@ from app.analytics import record_event
 from app.assistant import run_assistant_once
 from app.audio_contracts import AUDIO_MEDIA_TYPES, MAX_AUDIO_SECONDS, AudioReader, SpeechProvider
 from app.audio_storage import AudioStorage
+from app.components import finish as finish_component
+from app.components import record as record_component
 from app.config import Settings
 from app.db import make_database
 from app.error_logging import log_error
@@ -346,7 +348,15 @@ class Worker:
         if job_id is None:
             return run_assistant_once(self)  # Capture jobs always go first.
         attempt = None
+        component_id = None
         try:
+            with self.sessions() as db:
+                claimed_job = db.get(Job, job_id)
+                channel = db.get(Capture, claimed_job.capture_id).channel
+                component_id = job_id + ":r" + str(claimed_job.attempts or 0)
+                record_component(db, claimed_job.user_id, component_id, "capture_worker", channel,
+                                 status="unknown", is_test=self.settings.provider != "cloudru")
+                db.commit()
             attempt = self.begin_attempt(job_id)
             original = self.original_for_job(job_id, attempt)
             with self.sessions() as db:
@@ -438,6 +448,7 @@ class Worker:
                               job_id=job_id, exception=exc)
                 capture = db.get(Capture, capture_id)
                 record_event(db, user_id, "processing_completed", job_id, capture.channel)
+                finish_component(db, user_id, component_id, "capture_worker", "succeeded")
                 db.commit()
         except ProviderError as exc:
             self.fail(job_id, exc.code, exception=exc, http_status=exc.http_status, retry_after=exc.retry_after)
@@ -448,6 +459,13 @@ class Worker:
         finally:
             if attempt is not None:
                 attempt.finish()
+        if component_id is not None:
+            with self.sessions() as db:
+                final = db.get(Job, job_id)
+                if final is not None and (final.status == "failed" or final.status == "queued" and final.last_error_code):
+                    finish_component(db, final.user_id, component_id, "capture_worker", "failed",
+                                     final.error_code or final.last_error_code)
+                    db.commit()
         return True
 
     def budget_available(self):
