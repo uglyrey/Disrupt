@@ -18,6 +18,8 @@ module.exports=async function(){
   assert.equal(images.parse(block).url,url);
   for(const bad of ['![bad](https://tracker.invalid/x)','![bad](javascript:alert(1))','![bad](data:image/svg+xml,xx)',`![bad](${url}?align=evil&width=100)`,`![bad](${url}/../other)`])assert.equal(images.parse(bad),null);
   field.value='Первый абзац\n\n'+block+'\n\nВторой абзац';w.BerestaMd.refresh();
+  w.eval('noteBusy=true;');w.BerestaMd.refresh();assert.ok(preview.querySelector('button').disabled);
+  w.eval('noteBusy=false;');w.document.dispatchEvent(new w.CustomEvent('beresta:note-idle'));assert.equal(preview.querySelector('button').disabled,false);
   assert.equal(preview.querySelectorAll('figure img').length,1);assert.equal(preview.querySelector('img').getAttribute('src'),url);assert.equal(preview.querySelectorAll('[onerror]').length,0);
   const button=text=>[...preview.querySelectorAll('button')].find(b=>b.textContent===text);
   button('Выше').click();assert.ok(field.value.startsWith(block));button('Ниже').click();assert.ok(field.value.startsWith('Первый абзац'));

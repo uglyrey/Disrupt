@@ -93,6 +93,10 @@
   add.addEventListener('mousedown',event=>event.preventDefault());add.addEventListener('click',()=>{if(!noteBusy&&!uploading)file.click();});
   const row=el('div','','note-image-add-row');row.append(add,file);get('preview').before(row);
   const preview=get('preview');
+  // renderNote builds fresh controls while its request is locked. Restore their state when that request ends.
+  document.addEventListener('beresta:note-idle',()=>{
+    for(const control of preview.querySelectorAll('.ni-controls button,.ni-controls select'))control.disabled=Boolean(noteBusy||uploading);
+  });
   preview.addEventListener('dragover',event=>{if(dragging&&dragging.note===currentNote?.id&&!noteBusy){event.preventDefault();event.dataTransfer.dropEffect='move';}});
   preview.addEventListener('drop',event=>{
     if(!dragging||dragging.note!==currentNote?.id||noteBusy)return;event.preventDefault();

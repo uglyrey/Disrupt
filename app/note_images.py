@@ -2,13 +2,14 @@
 
 import hashlib
 import io
+import re
 import threading
 
 from fastapi import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import func, select
 
-from app.models import Note, NoteImage
+from app.models import Note, NoteImage, new_id
 from app.services import lock_account, owned_note
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -17,6 +18,53 @@ MAX_PIXELS = 24_000_000
 MAX_IMAGES_PER_NOTE = 20
 MAX_USER_BYTES = 50 * 1024 * 1024
 _decode_slot = threading.BoundedSemaphore(1)
+IMAGE_BLOCK = re.compile(
+    r"^!\[[^\]\r\n]{0,200}\]\(/api/v1/note-images/([0-9a-f-]{36})"
+    r"(?:\?align=(?:left|center|right)&width=(?:25|50|75|100))?\)[ \t]*$", re.MULTILINE,
+)
+
+
+class ImageMergeUnavailable(Exception):
+    pass
+
+
+def merge_images(db, notes):
+    blocks = [match for note in notes for match in IMAGE_BLOCK.finditer(note.markdown)]
+    if not blocks:
+        return [], {}
+    images = {image.id: image for image in db.scalars(select(NoteImage).where(
+        NoteImage.note_id.in_([note.id for note in notes]), NoteImage.id.in_([m[1] for m in blocks]),
+    ))}
+    return [m for m in blocks if m[1] in images], images
+
+
+def image_bytes_used(db, user_id):
+    return db.scalar(select(func.coalesce(func.sum(NoteImage.byte_size), 0)).join(Note).where(Note.user_id == user_id))
+
+
+def check_merge_space(db, notes, user_id):
+    _, images = merge_images(db, notes)
+    return (len(images) <= MAX_IMAGES_PER_NOTE
+            and image_bytes_used(db, user_id) + sum(image.byte_size for image in images.values()) <= MAX_USER_BYTES)
+
+
+def carry_merge_images(db, sources, note):
+    """Copy referenced attachments so purging either original never breaks the merged note."""
+    blocks, images = merge_images(db, sources)
+    if not images:
+        return
+    if not check_merge_space(db, sources, note.user_id):
+        raise ImageMergeUnavailable()
+    copies = {key: new_id() for key in images}
+    moved = [m[0].replace(m[1], copies[m[1]]) for m in blocks]
+    result = IMAGE_BLOCK.sub("", note.markdown).strip() + "\n\n" + "\n\n".join(moved)
+    if len(result) > 24000:
+        raise ImageMergeUnavailable()
+    for key, image in images.items():
+        db.add(NoteImage(id=copies[key], note_id=note.id, idempotency_key="merge:"+key,
+                         source_sha256=image.source_sha256, media_type=image.media_type,
+                         width=image.width, height=image.height, byte_size=image.byte_size, data=image.data))
+    note.markdown = result
 
 
 def _normalize_image(source):
@@ -78,7 +126,7 @@ def save_image(db, user_id, note_id, key, source):
     if count >= MAX_IMAGES_PER_NOTE:
         raise HTTPException(429, "В одной заметке можно хранить до 20 картинок, включая историю правок")
     data, width, height = normalize_image(source)
-    used = db.scalar(select(func.coalesce(func.sum(NoteImage.byte_size), 0)).join(Note).where(Note.user_id == user_id))
+    used = image_bytes_used(db, user_id)
     if used + len(data) > MAX_USER_BYTES:
         raise HTTPException(429, "Лимит картинок 50 МБ. Удалите ненужные заметки из корзины")
     image = NoteImage(note_id=note_id, idempotency_key=key, source_sha256=digest,

@@ -132,3 +132,30 @@ def test_user_quota_pixels_and_animation(app, client, monkeypatch):
     assert upload(client, note, output.getvalue()).status_code == 422
     with app.state.sessions() as db:
         assert db.scalar(select(func.count()).select_from(NoteImage)) == 0
+
+
+def test_merge_preserves_images_after_original_purge(app, client):
+    from tests.test_notes_manage import merge, run_worker
+    register(client)
+    first = manual(client, "Купить молоко")
+    second = manual(client, "Позвонить Оле")
+    asset = upload(client, first).json()
+    updated = client.patch('/api/v1/notes/'+first["id"], json={
+        "title": first["title"], "version": first["version"],
+        "markdown": first["markdown"]+'\n\n![Фото]('+asset["url"]+'?align=right&width=50)',
+    })
+    assert updated.status_code == 200
+    queued = merge(client, [first["id"], second["id"]])
+    assert queued.status_code == 202
+    assert run_worker(app)
+    job = client.get('/api/v1/jobs/'+queued.json()["id"]).json()
+    assert job["status"] == "succeeded", job
+    result = client.get('/api/v1/notes/'+job["note_id"]).json()
+    with app.state.sessions() as db:
+        copy = db.scalar(select(NoteImage).where(NoteImage.note_id == result["id"]))
+        assert copy is not None and copy.id != asset["id"]
+        url = '/api/v1/note-images/'+copy.id
+    assert url+'?align=right&width=50' in result["markdown"]
+    assert client.delete('/api/v1/trash/'+first["id"]).status_code == 204
+    assert client.get(asset["url"]).status_code == 404
+    assert client.get(url).status_code == 200
