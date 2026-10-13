@@ -70,7 +70,7 @@ with Session(engine) as session:
     source = io.BytesIO()
     Image.new('RGB', (16, 12), (80, 120, 160)).save(source, 'PNG')
     image, width, height = normalize_image(source.getvalue())
-    session.add(NoteImage(note_id=note.id, idempotency_key='image-recovery-fixture',
+    session.add(NoteImage(note_id=note.id, capture_id=capture.id, idempotency_key='image-recovery-fixture',
                           source_sha256=hashlib.sha256(source.getvalue()).hexdigest(), data=image,
                           media_type='image/webp', width=width, height=height, byte_size=len(image)))
     session.commit()

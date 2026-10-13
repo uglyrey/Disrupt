@@ -385,7 +385,7 @@ async function importIntoCapture() {
   const textFile = (text, name = 'мысли.txt', type = 'text/plain') => new w.File([text], name, {type});
   try {
     await settled(); $('new-note').click(); await settled();
-    assert.equal($('import-file').accept, '.txt,.md,text/plain,text/markdown');
+    assert.ok($('import-file').accept.includes('.docx,.pdf,.rtf,.odt,.txt,.md'));
     $('tool-import').click();
     // A text file fills the field and focuses it.
     pick(textFile('Привет\r\nмир\r\n')); await t.until(() => $('thought').value !== '', 'file read');
@@ -409,7 +409,7 @@ async function importIntoCapture() {
     assert.equal($('thought').value.length, 11000);
     $('thought').value = '';
     // Not text.
-    pick(textFile('x', 'photo.png', 'image/png')); assert.match($('import-status').textContent, /текстовый файл/);
+    pick(textFile('x', 'photo.png', 'image/png')); assert.match($('import-status').textContent, /DOCX, PDF/);
     pick(textFile('a\u0000b')); await t.until(() => /UTF-8/.test($('import-status').textContent), 'binary');
     pick(textFile('  \n ')); await t.until(() => /пустой/.test($('import-status').textContent), 'empty');
     assert.equal($('thought').value, '');

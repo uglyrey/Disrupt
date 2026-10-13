@@ -60,13 +60,15 @@ def add_requested_reminders(db, note, text, settings):
         logging.getLogger(__name__).warning("manual_request_reminder_failed %s", type(exc).__name__)
 
 
-def capture_text(db, user_id, text, key, settings, *, processing_mode="ai", channel="web", commit=True):
+def capture_text(db, user_id, text, key, settings, *, processing_mode="ai", channel="web", commit=True, images=()):
     # Serialize quota checking for this account before counting queued jobs.
     lock_account(db, user_id)
 
     def existing():
         capture = db.scalar(select(Capture).where(Capture.user_id == user_id, Capture.idempotency_key == key))
         if capture:
+            from app.note_images import check_capture_replay
+            check_capture_replay(db, capture.id, images)
             if (
                 capture.input_kind != "text"
                 or capture.original_text != text
@@ -120,6 +122,9 @@ def capture_text(db, user_id, text, key, settings, *, processing_mode="ai", chan
         db.flush()
         db.add(result)
         db.flush()
+        if images:
+            from app.note_images import store_capture_images
+            store_capture_images(db, capture, images)
         if processing_mode == "manual":
             add_requested_reminders(db, result, text, settings)
             save_revision(db, result)
@@ -284,6 +289,8 @@ def _now():
 
 def save_revision(db, note, kind="change", settings=None):
     """Новая версия в истории. Любой вид, кроме правки текста, всегда отдельная запись."""
+    from app.note_images import adopt_capture_images
+    adopt_capture_images(db, note)
     marked = {**snapshot(db, note), "_kind": kind}
     db.add(Revision(note_id=note.id, version=note.version, snapshot=marked, created_at=_now()))
     prune_revisions(db, note.id, settings)
@@ -502,12 +509,14 @@ def owned_capture(db, capture_id, user_id, *, audio_only=False):
 
 
 def capture_view(db, capture):
+    from app.note_images import capture_image_views
     job = db.scalar(select(Job).where(Job.capture_id == capture.id))
     return {
         "capture_id": capture.id, "original_text": capture.original_text,
         "processing_mode": capture.processing_mode, **audio_metadata(db, capture),
         "note_id": db.scalar(select(Note.id).where(Note.capture_id == capture.id, Note.deleted_at.is_(None))),
         "job": job_view(db, job) if job else None,
+        "images": capture_image_views(db, capture.id),
     }
 
 

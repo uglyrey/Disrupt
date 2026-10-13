@@ -9,8 +9,7 @@ from fastapi import HTTPException
 from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import func, select
 
-from app.models import Note, NoteImage, new_id
-from app.services import lock_account, owned_note
+from app.models import Capture, NoteImage, new_id
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_STORED_BYTES = 2 * 1024 * 1024
@@ -39,7 +38,7 @@ def merge_images(db, notes):
 
 
 def image_bytes_used(db, user_id):
-    return db.scalar(select(func.coalesce(func.sum(NoteImage.byte_size), 0)).join(Note).where(Note.user_id == user_id))
+    return db.scalar(select(func.coalesce(func.sum(NoteImage.byte_size), 0)).join(Capture).where(Capture.user_id == user_id))
 
 
 def check_merge_space(db, notes, user_id):
@@ -61,7 +60,7 @@ def carry_merge_images(db, sources, note):
     if len(result) > 24000:
         raise ImageMergeUnavailable()
     for key, image in images.items():
-        db.add(NoteImage(id=copies[key], note_id=note.id, idempotency_key="merge:"+key,
+        db.add(NoteImage(id=copies[key], note_id=note.id, capture_id=note.capture_id, idempotency_key="merge:"+key,
                          source_sha256=image.source_sha256, media_type=image.media_type,
                          width=image.width, height=image.height, byte_size=image.byte_size, data=image.data))
     note.markdown = result
@@ -111,7 +110,55 @@ def image_view(image):
     }
 
 
+def capture_image_views(db, capture_id):
+    return [image_view(image) for image in db.scalars(select(NoteImage).where(
+        NoteImage.capture_id == capture_id,
+    ).order_by(NoteImage.created_at, NoteImage.id))]
+
+
+def prepare_images(sources):
+    if not 1 <= len(sources) <= MAX_IMAGES_PER_NOTE:
+        raise HTTPException(422, "Добавьте от 1 до 20 картинок")
+    if sum(map(len, sources)) > 10 * 1024 * 1024:
+        raise HTTPException(413, "Все картинки вместе должны быть не больше 10 МБ")
+    return [(hashlib.sha256(source).hexdigest(), *normalize_image(source)) for source in sources]
+
+
+def check_capture_replay(db, capture_id, prepared):
+    digests = list(db.scalars(select(NoteImage.source_sha256).where(
+        NoteImage.capture_id == capture_id, NoteImage.idempotency_key.like("capture:%"),
+    ).order_by(NoteImage.idempotency_key)))
+    if digests != [item[0] for item in prepared]:
+        raise HTTPException(409, "С этим кодом уже сохранена запись с другими картинками")
+
+
+def store_capture_images(db, capture, prepared):
+    if image_bytes_used(db, capture.user_id) + sum(len(item[1]) for item in prepared) > MAX_USER_BYTES:
+        raise HTTPException(429, "Лимит картинок 50 МБ. Удалите ненужные заметки из корзины")
+    for index, (digest, data, width, height) in enumerate(prepared):
+        db.add(NoteImage(capture_id=capture.id, idempotency_key=f"capture:{index:04d}",
+                         source_sha256=digest, media_type="image/webp", data=data,
+                         byte_size=len(data), width=width, height=height))
+    db.flush()
+
+
+def adopt_capture_images(db, note):
+    images = list(db.scalars(select(NoteImage).where(
+        NoteImage.capture_id == note.capture_id, NoteImage.note_id.is_(None),
+    ).order_by(NoteImage.idempotency_key)))
+    if not images:
+        return
+    blocks = "\n\n".join(f"![Изображение](/api/v1/note-images/{image.id}?align=center&width=100)" for image in images)
+    for image in images:
+        image.note_id = note.id
+    # Full model output is never truncated. In this rare case the originals remain in the source gallery.
+    if len(note.markdown) + len(blocks) + 2 <= 24000:
+        note.markdown += "\n\n" + blocks
+
+
 def save_image(db, user_id, note_id, key, source):
+    from app.services import lock_account, owned_note
+
     owned_note(db, note_id, user_id)
     digest = hashlib.sha256(source).hexdigest()
     # Serializes concurrent uploads and quota checks with note deletion on both databases.
@@ -129,7 +176,8 @@ def save_image(db, user_id, note_id, key, source):
     used = image_bytes_used(db, user_id)
     if used + len(data) > MAX_USER_BYTES:
         raise HTTPException(429, "Лимит картинок 50 МБ. Удалите ненужные заметки из корзины")
-    image = NoteImage(note_id=note_id, idempotency_key=key, source_sha256=digest,
+    note = owned_note(db, note_id, user_id)
+    image = NoteImage(note_id=note_id, capture_id=note.capture_id, idempotency_key=key, source_sha256=digest,
                       media_type="image/webp", byte_size=len(data), width=width, height=height, data=data)
     db.add(image)
     db.commit()

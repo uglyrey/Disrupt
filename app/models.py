@@ -157,9 +157,10 @@ class Note(Base):
 
 class NoteImage(Base):
     __tablename__ = "note_images"
-    __table_args__ = (UniqueConstraint("note_id", "idempotency_key", name="uq_note_images_upload"),)
+    __table_args__ = (UniqueConstraint("capture_id", "idempotency_key", name="uq_capture_images_upload"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
-    note_id: Mapped[str] = mapped_column(ForeignKey("notes.id", ondelete="CASCADE"), index=True)
+    note_id: Mapped[str | None] = mapped_column(ForeignKey("notes.id", ondelete="CASCADE"), index=True)
+    capture_id: Mapped[str] = mapped_column(ForeignKey("captures.id", ondelete="CASCADE"), index=True)
     idempotency_key: Mapped[str] = mapped_column(String(100))
     source_sha256: Mapped[str] = mapped_column(String(64))
     media_type: Mapped[str] = mapped_column(String(32))

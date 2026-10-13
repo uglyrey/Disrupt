@@ -40,6 +40,7 @@ from app.routes.audio import build_router as audio_router
 from app.routes.auth_flows import build_router as auth_flows_router
 from app.routes.brain import build_router as brain_router
 from app.routes.digests import build_router as digests_router
+from app.routes.document_import import build_router as document_import_router
 from app.routes.feedback import build_router as feedback_router
 from app.routes.internal import build_router as internal_router
 from app.routes.note_images import build_router as note_images_router
@@ -115,11 +116,11 @@ class BodyLimit:
         maximum = self.maximum
         if (
             scope["method"] == "POST"
-            and (scope["path"] in {"/internal/v1/telegram/voice", "/api/v1/captures/audio"}
+            and (scope["path"] in {"/internal/v1/telegram/voice", "/api/v1/captures/audio", "/api/v1/captures/with-images", "/api/v1/imports/text"}
                  or re.fullmatch(r"/api/v1/notes/[0-9a-fA-F-]{36}/images", scope["path"]))
             and content_type.split(b";", 1)[0].strip() == b"multipart/form-data"
         ):
-            image_path = scope["path"].endswith("/images")
+            image_path = scope["path"].endswith("/images") or scope["path"] == "/api/v1/imports/text"
             maximum = (5 * 1024 * 1024 if image_path else self.AUDIO_MAXIMUM) + self.MULTIPART_OVERHEAD
         body = bytearray()
         while True:
@@ -312,7 +313,8 @@ def create_app(
     app.include_router(brain_router(database, settings))
     app.include_router(digests_router(database))
     app.include_router(notes_manage_router(database, settings, audio_storage))
-    app.include_router(note_images_router(database))
+    app.include_router(note_images_router(database, settings))
+    app.include_router(document_import_router(database))
     app.include_router(assistant_router(database, settings))
     app.include_router(auth_flows_router(database, settings))
     from app.routes.email_auth import build_router as email_auth_router

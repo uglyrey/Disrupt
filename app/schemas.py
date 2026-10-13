@@ -143,12 +143,21 @@ class AudioMetadata(StrictModel):
     audio_media_type: str | None = None
 
 
+class ImageMetadata(StrictModel):
+    id: str
+    url: str
+    width: int
+    height: int
+    byte_size: int
+
+
 class CaptureResponse(AudioMetadata):
     capture_id: str
     original_text: str
     processing_mode: Literal["ai", "manual"]
     note_id: str | None
     job: AudioJobResponse | None
+    images: list[ImageMetadata] = Field(default_factory=list)
 
 
 class TranscriptEdit(StrictModel):

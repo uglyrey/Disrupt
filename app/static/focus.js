@@ -305,18 +305,31 @@
     importStatus.textContent = ''; importStatus.classList.remove('is-error');
     closeAll(); thought.focus(); thought.setSelectionRange?.(next.length, next.length);
     message(source === 'file' ? 'Текст из файла добавлен в запись. Проверьте его и сохраните.' : 'Текст из буфера добавлен в запись. Проверьте его и сохраните.');
+    return true;
   }
   function importFile(file) {
     importStatus.classList.remove('is-error'); importStatus.textContent = '';
     if (!file) return;
     if (thought.disabled) return importError('Подождите, запись ещё сохраняется.');
+    const account=typeof epoch==='undefined'?null:epoch,generation=typeof viewGeneration==='undefined'?null:viewGeneration;
+    const current=()=>!thought.disabled&&(typeof epoch==='undefined'||epoch===account)&&(typeof viewGeneration==='undefined'||viewGeneration===generation);
+    if (/\.(docx|pdf|rtf|odt)$/i.test(file.name || '')) {
+      if(file.size>5*1024*1024)return importError('Файл должен быть не больше 5 МБ.');
+      const form=new FormData();form.append('file',file);importStatus.textContent='Читаем документ…';
+      return api('/api/v1/imports/text',{method:'POST',body:form}).then(result=>{
+        if(!current())return;
+        const added=addText(result.text,'file');
+        if(added&&result.warnings?.length)message('Текст добавлен в запись. '+result.warnings.join('. ')+'. Проверьте его и сохраните.');
+      }).catch(error=>{if(current())importError(error.message||'Не удалось прочитать документ.');});
+    }
     const textual = /\.(txt|md|markdown)$/i.test(file.name || '') || /^text\//.test(file.type || '');
-    if (!textual) return importError('Нужен текстовый файл .txt или .md.');
+    if (!textual) return importError('Поддерживаются DOCX, PDF, RTF, ODT, TXT и MD. Старый DOC сохраните как DOCX.');
     // UTF-8 takes at most four bytes per character.
     if (file.size > limit() * 4) return importError(`Файл слишком большой. В запись помещается до ${limit()} знаков.`);
     const reader = new FileReader();
     reader.onerror = () => importError('Не удалось прочитать файл.');
     reader.onload = () => {
+      if(!current())return;
       const text = String(reader.result || '');
       if (text.includes('\u0000') || text.includes('�')) return importError('Это не текст в кодировке UTF-8. Сохраните файл как .txt в UTF-8.');
       addText(text, 'file');
@@ -337,7 +350,9 @@
     if (thought.disabled) return importError('Подождите, запись ещё сохраняется.');
     const clipboard = window.navigator && window.navigator.clipboard;
     if (!clipboard || typeof clipboard.readText !== 'function') return pasteFallback();
-    try { addText(await clipboard.readText(), 'clipboard'); } catch (_) { pasteFallback(); }
+    const account=typeof epoch==='undefined'?null:epoch,generation=typeof viewGeneration==='undefined'?null:viewGeneration;
+    const current=()=>!thought.disabled&&(typeof epoch==='undefined'||epoch===account)&&(typeof viewGeneration==='undefined'||viewGeneration===generation);
+    try {const text=await clipboard.readText();if(current())addText(text, 'clipboard');} catch (_) {if(current())pasteFallback();}
   });
 
   window.BerestaFocus = {pending, flush, checkpoint, closeAll, open: openTool, close: closeTool, fitTitle, grow, importFile, tools};

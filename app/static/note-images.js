@@ -6,7 +6,7 @@
   const parse = line => {const m=pattern.exec(line);return m ? {alt:m[1],url:m[2].toLowerCase(),align:(m[3]||'center').toLowerCase(),width:Number(m[4]||100)} : null;};
   const encode = image => `![${image.alt.replace(/[\[\]\r\n]/g,' ').slice(0,200)}](${image.url}?align=${image.align}&width=${image.width})`;
   const el = (tag,text,cls) => {const node=document.createElement(tag);if(text)node.textContent=text;if(cls)node.className=cls;return node;};
-  let uploading=false, dragging=null;
+  let uploading=false, dragging=null, draft=[], draftSerial=0;
   function move(text,from,target) {
     const lines=text.split('\n');
     if (!parse(lines[from]||'') || from===target) return text;
@@ -21,8 +21,8 @@
     else{while(next+1<lines.length&&lines[next+1].trim()&&!parse(lines[next+1]))next++;next++;}
     return move(text,index,next);
   }
-  function apply(value) {
-    if(noteBusy||uploading||!currentNote)return;
+  function apply(value,fromUpload=false) {
+    if(noteBusy||(uploading&&!fromUpload)||!currentNote)return;
     const field=get('markdown');
     if(!value.trim())return message('Добавьте текст перед удалением последней картинки.');
     window.BerestaMd.applyEdit(field,{value,start:field.selectionStart,end:field.selectionEnd});
@@ -68,6 +68,7 @@
     if(field.value.length>23800)return message('В заметке почти 24 000 знаков. Сократите текст перед добавлением картинки.');
     if(window.BerestaFocus.pending())await window.BerestaFocus.flush();
     if(noteBusy||currentNote?.id!==note||epoch!==account)return;
+    let ownsLock=true;
     uploading=true;setNoteBusy(true);message('Загружаем картинку…');
     const form=new FormData();form.append('image',file);const key=window.berestaId();
     try{
@@ -79,19 +80,72 @@
       if(epoch!==account||currentNote?.id!==note)return;
       const value=insert(field.value,position,encode({url:uploaded.url,alt:'Изображение',align:'center',width:100}));
       if(value.length>24000)return message('Картинка загружена, но в тексте уже 24 000 знаков. Сократите заметку.');
-      uploading=false;setNoteBusy(false);apply(value);window.BerestaMd.setMode('read');
+      setNoteBusy(false);ownsLock=false;apply(value,true);window.BerestaMd.setMode('read');
       await window.BerestaFocus.flush();
       if(epoch!==account||currentNote?.id!==note)return;
       if(typeof currentNote.markdown==='string'&&currentNote.markdown!==field.value)return message('Картинка загружена, но текст пока не сохранён. Проверьте сообщение рядом с названием заметки.');
       message('Картинка добавлена. Под ней можно изменить расположение и ширину.');
     }catch(error){if(epoch===account)message(error.message||'Не удалось загрузить картинку. Попробуйте ещё раз.');}
-    finally{uploading=false;if(epoch===account)setNoteBusy(false);}
+    finally{uploading=false;if(ownsLock&&epoch===account)setNoteBusy(false);document.dispatchEvent(new Event('beresta:note-idle'));}
   }
-  const file=el('input');file.type='file';file.id='note-image-file';file.accept='image/jpeg,image/png,image/webp';file.hidden=true;
-  file.addEventListener('change',()=>{const selected=file.files?.[0];file.value='';if(selected)upload(selected).catch(error=>message(error.message));});
-  const add=el('button','Добавить картинку','quiet note-image-add');add.type='button';add.id='note-image-add';
-  add.addEventListener('mousedown',event=>event.preventDefault());add.addEventListener('click',()=>{if(!noteBusy&&!uploading)file.click();});
-  const row=el('div','','note-image-add-row');row.append(add,file);get('preview').before(row);
+  const gallery=el('div','','draft-images');gallery.id='capture-images';gallery.hidden=true;get('thought').after(gallery);
+  const sourceGallery=el('div','','source-images');get('source-original').after(sourceGallery);
+  function syncDraft() {
+    gallery.replaceChildren();gallery.hidden=!draft.length;get('thought').required=!draft.length;
+    for(const item of draft){
+      const box=el('div','','draft-image'),img=el('img');img.src=item.url;img.alt='Картинка в новой записи';
+      const remove=el('button','×','quiet');remove.type='button';remove.setAttribute('aria-label','Убрать картинку');remove.disabled=captureBusy;
+      remove.onclick=()=>{if(captureBusy)return;URL.revokeObjectURL(item.url);draft=draft.filter(other=>other!==item);draftSerial++;syncDraft();};box.append(img,remove);gallery.append(box);
+    }
+    const help=el('p','Картинки сохранятся вместе с записью. ИИ обрабатывает только текст.','muted');gallery.append(help);
+    document.dispatchEvent(new Event('beresta:images-draft'));
+  }
+  function addDraft(files) {
+    if(captureBusy||recorder||microphonePending)return message('Сначала завершите текущую запись.');
+    const incoming=Array.from(files);
+    if(incoming.some(file=>!/^image\/(png|jpeg|webp)$/.test(file.type)||file.size>5*1024*1024))return message('Нужны картинки JPG, PNG или WebP до 5 МБ.');
+    if(draft.length+incoming.length>20)return message('В запись помещается до 20 картинок.');
+    if([...draft.map(item=>item.file),...incoming].reduce((sum,file)=>sum+file.size,0)>10*1024*1024)return message('Все картинки вместе должны быть не больше 10 МБ.');
+    for(const file of incoming)draft.push({file,url:URL.createObjectURL(file)});
+    draftSerial++;syncDraft();window.BerestaFocus?.closeAll();message('Картинка добавлена в новую запись. Нажмите «Сохранить».');
+  }
+  function clearDraft() {for(const item of draft)URL.revokeObjectURL(item.url);draft=[];draftSerial++;syncDraft();}
+  async function receive(files,isDraft) {
+    if(isDraft)return addDraft(files);
+    const note=currentNote?.id,account=epoch;
+    for(const file of files){if(epoch!==account||currentNote?.id!==note)break;await upload(file);}
+  }
+  async function paste(isDraft) {
+    const account=epoch,note=currentNote?.id;
+    try{
+      if(!navigator.clipboard?.read)throw new Error('clipboard-unavailable');
+      const items=await navigator.clipboard.read(),files=[];
+      for(const item of items){const type=item.types.find(type=>/^image\/(png|jpeg|webp)$/.test(type));if(type){const blob=await item.getType(type);files.push(new File([blob],'clipboard.png',{type}));}}
+      if(epoch!==account||(!isDraft&&currentNote?.id!==note))return;
+      if(!files.length)return message('В буфере нет картинки. Скопируйте изображение и попробуйте ещё раз.');
+      await receive(files,isDraft);
+    }catch(_){message('Вставьте картинку через Ctrl+V или ⌘V в поле записи. На телефоне выберите файл.');window.BerestaFocus?.closeAll();(isDraft?get('thought'):get('markdown')).focus();}
+  }
+  function imageTool(isDraft) {
+    const key=isDraft?'capture-images':'note-images',tool=el('div','','tool');tool.dataset.tool=key;
+    const add=el('button','','tool-btn quiet');add.type='button';add.id=isDraft?'capture-image-add':'note-image-add';add.dataset.toolBtn=key;add.dataset.tip='Картинка';add.setAttribute('aria-label','Добавить картинку');add.setAttribute('aria-haspopup','dialog');add.setAttribute('aria-expanded','false');add.setAttribute('aria-controls','pop-'+key);
+    add.innerHTML='<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><rect x="3" y="3" width="18" height="18" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/><path d="m4 17 5-5 4 4 3-3 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    const pop=el('div','','tool-pop');pop.id='pop-'+key;pop.hidden=true;pop.tabIndex=-1;pop.setAttribute('role','dialog');pop.setAttribute('aria-label','Добавить картинку');
+    const head=el('div','','pop-head'),close=el('button','×','pop-close quiet');close.type='button';close.setAttribute('aria-label','Закрыть окно');head.append(el('span','Картинка','pop-title'),close);
+    const body=el('div','','pop-body'),file=el('input');file.type='file';file.id=isDraft?'capture-image-file':'note-image-file';file.accept='image/jpeg,image/png,image/webp';file.multiple=isDraft;file.hidden=true;
+    const choose=el('button','Выбрать файл','secondary'),clipboard=el('button','Вставить из буфера','quiet');choose.type=clipboard.type='button';
+    choose.onclick=()=>{if(isDraft?captureBusy:noteBusy||uploading)return;file.click();};clipboard.onclick=()=>paste(isDraft);
+    file.onchange=()=>{const files=Array.from(file.files||[]);file.value='';if(files.length){window.BerestaFocus?.closeAll();receive(files,isDraft).catch(error=>message(error.message));}};
+    body.append(choose,clipboard,file,el('p','JPG, PNG или WebP до 5 МБ. Можно вставить через Ctrl+V или ⌘V.','muted'));pop.append(head,body);tool.append(add,pop);
+    (isDraft?get('capture-card').querySelector('.tools'):get('note-tools')).prepend(tool);
+  }
+  imageTool(true);imageTool(false);
+  for(const [field,isDraft] of [[get('thought'),true],[get('markdown'),false],[get('preview'),false]])field.addEventListener('paste',event=>{
+    const files=Array.from(event.clipboardData?.items||[]).filter(item=>item.kind==='file'&&item.type.startsWith('image/')).map(item=>item.getAsFile()).filter(Boolean);
+    if(!files.length)return;event.preventDefault();receive(files,isDraft).catch(error=>message(error.message));
+  });
+  function source(images) {sourceGallery.replaceChildren();for(const image of images||[])if(/^\/api\/v1\/note-images\/[0-9a-f-]{36}$/.test(image.url)){const img=el('img');img.src=image.url;img.alt='Картинка из исходной записи';img.loading='lazy';sourceGallery.append(img);}}
+  document.addEventListener('beresta:capture-busy',syncDraft);
   const preview=get('preview');
   // renderNote builds fresh controls while its request is locked. Restore their state when that request ends.
   document.addEventListener('beresta:note-idle',()=>{
@@ -103,5 +157,7 @@
     const target=event.target.closest('[data-line]'),index=target?Number(target.dataset.line):get('markdown').value.split('\n').length;
     change(dragging.index,dragging.url,()=>move(get('markdown').value,dragging.index,index));dragging=null;
   });
-  window.BerestaImages={parse,encode,move,adjacent,insert,render,upload};
+  window.BerestaImages={parse,encode,move,adjacent,insert,render,upload,addDraft,clearDraft,source,
+    hasDraft:()=>draft.length>0,draftKey:()=>draftSerial,
+    captureBody:(text,mode)=>{const form=new FormData();form.append('text',text);form.append('processing_mode',mode);for(const item of draft)form.append('images',item.file);return form;}};
 })();

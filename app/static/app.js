@@ -379,7 +379,7 @@ function hasDrafts(except = null) {
   }
   return false;
 }
-function dirty() { return hasDrafts() || Boolean(recorder || microphonePending || selectedAudio || captureBusy || $('thought').value.trim()); }
+function dirty() { return hasDrafts() || Boolean(window.BerestaImages?.hasDraft() || recorder || microphonePending || selectedAudio || captureBusy || $('thought').value.trim()); }
 function setNoteBusy(value) {
   noteBusy = value;
   if (value) {
@@ -578,7 +578,7 @@ async function resendFailedJob(job, mode) {
 }
 function jobDraftUnchanged(draft) {
   return !captureBusy && !recorder && !microphonePending &&
-    !selectedAudio && !hasDrafts() && $('thought').value === draft;
+    !selectedAudio && !window.BerestaImages?.hasDraft() && !hasDrafts() && $('thought').value === draft;
 }
 function canShowJobResult(generation, draft) {
   return generation === viewGeneration && !noteBusy && jobDraftUnchanged(draft);
@@ -696,17 +696,19 @@ $('example').onclick = async () => {
 $('capture-form').onsubmit = async event => {
   event.preventDefault(); const text = $('thought').value;
   if (captureBusy || recorder || microphonePending) return;
-  const processing_mode = $('processing-mode').value;
-  if (!text.trim()) return message('Напишите что-нибудь.');
+  const withImages=Boolean(window.BerestaImages?.hasDraft()),imagesKey=window.BerestaImages?.draftKey();
+  const processing_mode = !text.trim() && withImages ? 'manual' : $('processing-mode').value;
+  if (!text.trim() && !withImages) return message('Напишите что-нибудь или добавьте картинку.');
   // Keep the same key after a network error: retrying must not create another paid job.
-  if (!pendingCapture || pendingCapture.text !== text || pendingCapture.processing_mode !== processing_mode) {
-    pendingCapture = {text,processing_mode,key:window.berestaId()};
+  if (!pendingCapture || pendingCapture.text !== text || pendingCapture.processing_mode !== processing_mode || pendingCapture.imagesKey !== imagesKey) {
+    pendingCapture = {text,processing_mode,imagesKey,key:window.berestaId()};
   }
   const generation = ++viewGeneration;
   let savedJob = null;
   setCaptureBusy(true);
   try {
-    const job = await api('/api/v1/captures/text',{method:'POST',headers:{'Idempotency-Key':pendingCapture.key},body:JSON.stringify({text,processing_mode})});
+    const job = await api(withImages?'/api/v1/captures/with-images':'/api/v1/captures/text',{method:'POST',headers:{'Idempotency-Key':pendingCapture.key},body:withImages?window.BerestaImages.captureBody(text,processing_mode):JSON.stringify({text,processing_mode})});
+    window.BerestaImages?.clearDraft();
     message('Запись сохранена.');
     // The server may save without AI when the daily limit ends. Tell the person, even if the flag shape changes.
     const downgraded = processing_mode === 'ai' && (job.ai_limit_exceeded === true || job.ai_limit_reached === true || job.processing_mode === 'manual');
@@ -1025,6 +1027,7 @@ function setCaptureBusy(value) {
   for (const id of ['capture-submit','thought','example','processing-mode']) $(id).disabled = value;
   syncModeSwitch();
   setAudioControls();
+  document.dispatchEvent(new Event('beresta:capture-busy'));
 }
 function clearAudio() {
   selectedAudio = null; pendingAudio = null; $('audio-file').value = '';
@@ -1155,6 +1158,7 @@ function renderSource(capture) {
   $('source-audio').hidden = !audio; $('transcript-editor').hidden = !audio;
   $('source-original').hidden = audio;
   $('source-original').textContent = audio ? '' : capture.original_text;
+  window.BerestaImages?.source(capture.images);
   if (audio) {
     const url = `/api/v1/captures/${encodeURIComponent(capture.capture_id)}/audio`;
     if ($('audio-player').getAttribute('src') !== url) $('audio-player').src = url;
