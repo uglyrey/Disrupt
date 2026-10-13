@@ -29,7 +29,8 @@
   const menu = document.createElement('div');
   menu.id = 'category-menu'; menu.className = 'category-menu'; menu.setAttribute('role','menu');
   menu.setAttribute('aria-label','Действия с категорией'); menu.hidden = true; document.body.append(menu);
-  const dotsIcon = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path d="M5 12h.01M12 12h.01M19 12h.01" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>';
+  // Gear icon (Feather, MIT). The button opens the category settings menu.
+  const gearIcon = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   function chooseCategory(value, label) {
     filter.value = value; get('library-title').textContent = label;
     get('search-form').requestSubmit(); categoriesNavigation();
@@ -53,8 +54,8 @@
         button.setAttribute('aria-haspopup','menu');
         const more = document.createElement('button'); more.type = 'button'; more.className = 'category-more';
         more.setAttribute('aria-haspopup','menu'); more.setAttribute('aria-expanded','false');
-        more.setAttribute('aria-label',`Действия с категорией «${label}»`); more.title = 'Действия';
-        more.innerHTML = dotsIcon; item.append(more);
+        more.setAttribute('aria-label',`Настройки категории «${label}»`); more.title = 'Настройки категории';
+        more.innerHTML = gearIcon; item.append(more);
       }
       list.append(item);
     }

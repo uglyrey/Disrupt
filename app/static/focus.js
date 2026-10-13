@@ -336,6 +336,6 @@
     try { addText(await clipboard.readText(), 'clipboard'); } catch (_) { pasteFallback(); }
   });
 
-  window.BerestaFocus = {pending, flush, checkpoint, closeAll, open: openTool, close: closeTool, fitTitle, importFile, tools};
+  window.BerestaFocus = {pending, flush, checkpoint, closeAll, open: openTool, close: closeTool, fitTitle, grow, importFile, tools};
   syncAll();
 })();
