@@ -65,6 +65,7 @@
     if(file.size>5*1024*1024)return message('Картинка должна быть не больше 5 МБ.');
     const note=currentNote.id,account=epoch,field=get('markdown');
     const position=window.BerestaMd.mode()==='edit'?field.selectionStart:field.value.length;
+    if(field.value.length>23800)return message('В заметке почти 24 000 знаков. Сократите текст перед добавлением картинки.');
     if(window.BerestaFocus.pending())await window.BerestaFocus.flush();
     if(noteBusy||currentNote?.id!==note||epoch!==account)return;
     uploading=true;setNoteBusy(true);message('Загружаем картинку…');
@@ -79,7 +80,10 @@
       const value=insert(field.value,position,encode({url:uploaded.url,alt:'Изображение',align:'center',width:100}));
       if(value.length>24000)return message('Картинка загружена, но в тексте уже 24 000 знаков. Сократите заметку.');
       uploading=false;setNoteBusy(false);apply(value);window.BerestaMd.setMode('read');
-      await window.BerestaFocus.flush();message('Картинка добавлена. Под ней можно изменить расположение и ширину.');
+      await window.BerestaFocus.flush();
+      if(epoch!==account||currentNote?.id!==note)return;
+      if(typeof currentNote.markdown==='string'&&currentNote.markdown!==field.value)return message('Картинка загружена, но текст пока не сохранён. Проверьте сообщение рядом с названием заметки.');
+      message('Картинка добавлена. Под ней можно изменить расположение и ширину.');
     }catch(error){if(epoch===account)message(error.message||'Не удалось загрузить картинку. Попробуйте ещё раз.');}
     finally{uploading=false;if(epoch===account)setNoteBusy(false);}
   }
