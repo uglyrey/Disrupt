@@ -144,6 +144,8 @@ async function generalMenu() {
     assert.ok(menu.querySelector('[data-cookie-settings]'));
     assert.ok($('general-menu-extra'), 'hook for more items');
     // Open: expanded, focus on the first item, the current section is marked.
+    // index.html marks «Все заметки» as the current one. brain.js moves the mark and is not loaded here, so the test moves it.
+    $('nav-notes').removeAttribute('aria-current');
     $('nav-assistant').setAttribute('aria-current', 'page');
     button.click();
     assert.equal(menu.hidden, false); assert.equal(button.getAttribute('aria-expanded'), 'true');
