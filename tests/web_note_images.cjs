@@ -4,13 +4,13 @@ module.exports=async function(){
  const dom=new JSDOM(read('index.html'),{url:'https://beresta.invalid/',runScripts:'outside-only'}),w=dom.window;
  const id='11111111-1111-4111-8111-111111111111',url='/api/v1/note-images/'+id;
  try{
-  w.eval(`var noteBusy=false,epoch=1,currentNote={id:'note-one'};var $=id=>document.getElementById(id);var message=text=>{$('message').textContent=text||'';};var setNoteBusy=value=>{noteBusy=value;};var element=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};`);
+  w.eval(`var captureBusy=false,recorder=null,microphonePending=false,noteBusy=false,epoch=1,currentNote={id:'note-one'};var $=id=>document.getElementById(id);var message=text=>{$('message').textContent=text||'';};var setNoteBusy=value=>{noteBusy=value;};var setCaptureBusy=value=>{captureBusy=value;};var element=(tag,text,cls)=>{const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e;};`);
   const app=read('app.js'),start=app.indexOf('function markdownSafeUrl('),end=app.indexOf('function hasDrafts(',start);
   w.eval(app.slice(start,end));
-  w.confirm=()=>true;w.berestaId=()=>id;
+  w.URL.createObjectURL=()=>"blob:synthetic-image";w.URL.revokeObjectURL=()=>{};w.confirm=()=>true;w.berestaId=()=>id;
   let held=null,calls=0,fail=false;
   w.api=async(p,options)=>{calls++;assert.equal(options.headers['Idempotency-Key'],id);if(fail&&calls===1)throw new TypeError('Lost ack');if(held)await held;return {id,url,width:10,height:10,byte_size:12};};
-  w.BerestaFocus={pending:()=>false,flush:async()=>{}};
+  w.BerestaFocus={pending:()=>false,flush:async()=>{},closeAll:()=>{}};
   w.BerestaMd={mode:()=>'read',setMode:()=>{},applyEdit:(field,result)=>{field.value=result.value;},refresh:()=>w.renderMarkdownInto(w.document.getElementById('preview'),w.document.getElementById('markdown').value,{images:true})};
   w.eval(read('note-images.js'));
   const images=w.BerestaImages,field=w.document.getElementById('markdown'),preview=w.document.getElementById('preview');
@@ -34,6 +34,18 @@ module.exports=async function(){
   const pending=images.upload(new w.File(['test'],'test.png'));await Promise.resolve();
   w.eval("epoch=2;currentNote={id:'other-note'};");field.value='Другой аккаунт';release();await pending;assert.equal(field.value,'Другой аккаунт');
   assert.ok(oldValue.includes(url));
+  const thought=w.document.getElementById('thought');
+  const photo=new w.File(['synthetic'],'paste.png',{type:'image/png'});
+  const paste=new w.Event('paste',{bubbles:true,cancelable:true});Object.defineProperty(paste,'clipboardData',{value:{items:[{kind:'file',type:'image/png',getAsFile:()=>photo}]}});
+  thought.dispatchEvent(paste);assert.ok(paste.defaultPrevented);assert.ok(images.hasDraft());assert.equal(thought.required,false);assert.equal(w.document.querySelectorAll('.draft-image').length,1);
+  assert.ok(w.document.getElementById('capture-image-add').querySelector('svg'));assert.ok(w.document.getElementById('note-image-add').classList.contains('tool-btn'));
+  const form=images.captureBody('typed','manual');assert.equal(form.get('text'),'typed');assert.equal(form.getAll('images').length,1);
+  const textPaste=new w.Event('paste',{cancelable:true});Object.defineProperty(textPaste,'clipboardData',{value:{items:[{kind:'string',type:'text/plain'}]}});thought.dispatchEvent(textPaste);assert.equal(textPaste.defaultPrevented,false);
+  w.eval('captureBusy=true');images.addDraft([photo]);assert.equal(form.getAll('images').length,1);w.eval('captureBusy=false');
+  images.clearDraft();assert.equal(images.hasDraft(),false);assert.equal(thought.required,true);
+  w.fetch=async request=>{assert.equal(request,url);return {ok:true,blob:async()=>new w.Blob(['synthetic'],{type:'image/webp'})};};
+  assert.equal(await images.restoreDraft([{url}]),true);assert.ok(images.hasDraft());assert.equal(images.captureBody('retry','manual').getAll('images').length,1);images.clearDraft();
+  w.fetch=async()=>({ok:false});await assert.rejects(images.restoreDraft([{url}]),/недоступна/);assert.equal(images.hasDraft(),false);
   console.log('Image DOM checks passed: private URLs, safe rendering, placement, width, removal, lost ack and account isolation.');
  }finally{dom.window.close();}
 };

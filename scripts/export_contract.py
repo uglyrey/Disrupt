@@ -214,6 +214,26 @@ spec["paths"]["/api/v1/captures/{capture_id}/audio"] = {
         },
     },
 }
+for path, properties, required in [
+    ("/api/v1/captures/with-images", {
+        "text": {"type": "string", "maxLength": 12000},
+        "processing_mode": {"type": "string", "enum": ["ai", "manual"]},
+        "images": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string", "format": "binary"}},
+    }, ["images"]),
+    ("/api/v1/imports/text", {"file": {"type": "string", "format": "binary"}}, ["file"]),
+    ("/api/v1/notes/{note_id}/images", {"image": {"type": "string", "format": "binary"}}, ["image"]),
+]:
+    operation = spec["paths"][path]["post"]
+    operation["security"] = [{"BrowserSession": []}]
+    operation.setdefault("parameters", []).append({"name": "X-CSRF-Token", "in": "header", "required": True,
+                                                   "schema": {"type": "string"}})
+    if path != "/api/v1/imports/text":
+        operation["parameters"].append({"name": "Idempotency-Key", "in": "header", "required": True,
+                                        "schema": {"type": "string", "maxLength": 100}})
+    operation["requestBody"] = {"required": True, "content": {"multipart/form-data": {"schema": {
+        "type": "object", "additionalProperties": False, "required": required, "properties": properties,
+    }}}}
+    operation["responses"].update({code: response for code, response in browser_errors.items()})
 base = {"bot_id": 1234567890123, "update_id": 12, "telegram_user_id": 2345678901234, "chat_id": 2345678901234}
 examples = {
     "reminder_time": {

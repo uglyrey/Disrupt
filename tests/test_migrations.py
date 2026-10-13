@@ -8,6 +8,30 @@ from app.db import make_database
 from app.models import Capture, LoginSession, Note, ProductEvent, Revision, User
 
 
+def test_existing_image_bytes_and_owner_survive_capture_migration(tmp_path, monkeypatch):
+    url = "sqlite:///" + (tmp_path / "existing-images.db").as_posix()
+    monkeypatch.setenv("NOTES_DATABASE_URL", url)
+    config = Config("alembic.ini")
+    command.upgrade(config, "a62d91e7b403")
+    engine, _ = make_database(url)
+    try:
+        with engine.begin() as db:
+            db.execute(text("INSERT INTO users(id,username,password_hash,live_calls) VALUES ('u','oldowner','hash',0)"))
+            db.execute(text("INSERT INTO captures(id,user_id,original_text,idempotency_key,created_at) VALUES ('c','u','original','key',1)"))
+            db.execute(text("INSERT INTO notes(id,capture_id,user_id,title,markdown,conclusions,version,provider,created_at,updated_at) VALUES ('n','c','u','title','text','[]',1,'manual',1,1)"))
+            db.execute(text("INSERT INTO note_images(id,note_id,idempotency_key,source_sha256,media_type,byte_size,width,height,created_at,data) VALUES ('i','n','key','digest','image/webp',7,10,10,1,:data)"), {"data": b"fixture"})
+        command.upgrade(config, "head")
+        command.check(config)
+        with engine.connect() as db:
+            assert tuple(db.execute(text("SELECT note_id,capture_id,data FROM note_images")).one()) == ("n", "c", b"fixture")
+            assert db.execute(text("PRAGMA foreign_key_check")).all() == []
+        command.downgrade(config, "a62d91e7b403")
+        with engine.connect() as db:
+            assert db.execute(text("SELECT data FROM note_images")).scalar() == b"fixture"
+    finally:
+        engine.dispose()
+
+
 def test_existing_records_survive_upgrade_and_downgrade(tmp_path, monkeypatch):
     url = "sqlite:///" + (tmp_path / "legacy.db").as_posix()
     monkeypatch.setenv("NOTES_DATABASE_URL", url)

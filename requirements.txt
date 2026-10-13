@@ -17,6 +17,9 @@ Mako==1.4.3
 MarkupSafe==3.0.3
 packaging==26.3
 pillow==12.3.0
+defusedxml==0.7.1
+pypdf==6.20.1
+striprtf==0.0.33
 pluggy==1.6.0
 pycparser==3.00
 psycopg==3.3.6
