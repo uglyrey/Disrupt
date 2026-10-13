@@ -7,6 +7,7 @@ from sqlalchemy import case, func, select
 
 from app.dashboard import build_dashboard
 from app.models import Item, Note
+from app.notes_manage import manual_edges
 from app.related import MIN_SCORE, NoteDoc, build_index, graph_edges, related_notes
 from app.security import get_login_session
 from app.services import owned_note
@@ -20,16 +21,18 @@ def load_docs(db, user_id, *, must_include=None, cap=CORPUS_LIMIT):
     """The user's latest notes with the columns that matter, and their item texts, in two queries."""
     rows = db.execute(
         select(Note.id, Note.title, Note.markdown, Note.category_id, Note.updated_at)
-        .where(Note.user_id == user_id).order_by(Note.updated_at.desc(), Note.id).limit(cap)
+        .where(Note.user_id == user_id, Note.deleted_at.is_(None)).order_by(Note.updated_at.desc(), Note.id).limit(cap)
     ).all()
     if must_include is not None and all(row.id != must_include for row in rows):
         rows = [*rows, *db.execute(
             select(Note.id, Note.title, Note.markdown, Note.category_id, Note.updated_at)
-            .where(Note.user_id == user_id, Note.id == must_include)
+            .where(Note.user_id == user_id, Note.deleted_at.is_(None), Note.id == must_include)
         ).all()]
     texts = {row.id: [] for row in rows}
     for note_id, text in db.execute(
-        select(Item.note_id, Item.text).where(Item.user_id == user_id, Item.note_id.in_(list(texts)))
+        select(Item.note_id, Item.text).where(
+            Item.user_id == user_id, Item.deleted_at.is_(None), Item.note_id.in_(list(texts)),
+        )
         .order_by(Item.note_id, Item.position, Item.id)
     ):
         texts[note_id].append(text)
@@ -82,6 +85,7 @@ def build_router(database, settings):
                 for doc in nodes
             ],
             "edges": graph_edges(index, [doc.id for doc in nodes], GRAPH_NEIGHBOURS, MIN_SCORE),
+            "manual_edges": manual_edges(db, session.user_id, [doc.id for doc in nodes]),
         }
 
     @router.get("/dashboard")
@@ -96,14 +100,16 @@ def build_router(database, settings):
     ):
         """Every task of the user across notes. Text columns are encrypted, so nothing is filtered on them."""
         session = get_login_session(request, db)
-        mine = (Item.user_id == session.user_id, Item.kind == "task")
+        mine = (Item.user_id == session.user_id, Item.kind == "task", Item.deleted_at.is_(None))
         counts = dict(db.execute(
-            select(Item.status, func.count()).where(*mine).group_by(Item.status)
+            select(Item.status, func.count())
+            .join(Note, (Note.id == Item.note_id) & (Note.user_id == Item.user_id))
+            .where(*mine, Note.deleted_at.is_(None)).group_by(Item.status)
         ).all())
         statement = (
             select(Item, Note.title, Note.version, Note.updated_at, Note.created_at)
             .join(Note, (Note.id == Item.note_id) & (Note.user_id == Item.user_id))
-            .where(*mine)
+            .where(*mine, Note.deleted_at.is_(None))
         )
         if status != "all":
             statement = statement.where(Item.status == status)

@@ -58,7 +58,7 @@ def validate_target(db, note_id, item_id, user_id):
         if "\x00" in item_id:
             raise HTTPException(404, "Задача не найдена")
         item = db.scalar(select(Item).where(
-            Item.id == item_id, Item.note_id == note_id, Item.user_id == user_id,
+            Item.id == item_id, Item.note_id == note_id, Item.user_id == user_id, Item.deleted_at.is_(None),
         ))
         if item is None:
             raise HTTPException(404, "Задача не найдена")
@@ -170,6 +170,7 @@ def auto_reminders(db, note, settings=None, now=None):
         return []
     items = db.scalars(select(Item).where(
         Item.note_id == note.id, Item.user_id == note.user_id, Item.kind == "task", Item.status == "open",
+        Item.deleted_at.is_(None),
     ).order_by(Item.position, Item.id)).all()
     proposals = reminder_proposals(db, note.user_id, [item_view(item) for item in items], settings, now)
     stamp = (now or datetime.now(UTC)).timestamp()
@@ -242,8 +243,9 @@ def reminder_requests(db, note, original):
     Each entry is a dict with sentence, match, task (an open task whose quote touches the sentence, or None)
     and covered (that task already has a reminder, even a cancelled one, so it is never made again).
     """
-    items = db.scalars(select(Item).where(Item.note_id == note.id, Item.user_id == note.user_id)
-                       .order_by(Item.position, Item.id)).all()
+    items = db.scalars(select(Item).where(
+        Item.note_id == note.id, Item.user_id == note.user_id, Item.deleted_at.is_(None),
+    ).order_by(Item.position, Item.id)).all()
     taken = set(db.scalars(select(Reminder.item_id).where(
         Reminder.note_id == note.id, Reminder.user_id == note.user_id, Reminder.item_id.is_not(None),
     )))
@@ -296,7 +298,9 @@ def request_reminders(db, note, original, settings=None, now=None):
         if local.timestamp() <= now.timestamp():
             continue
         if task is None:
-            count = db.scalar(select(func.count()).select_from(Item).where(Item.note_id == note.id))
+            count = db.scalar(select(func.count()).select_from(Item).where(
+                Item.note_id == note.id, Item.deleted_at.is_(None),
+            ))
             if count >= MAX_ITEMS:
                 continue
             position = db.scalar(select(func.max(Item.position)).where(Item.note_id == note.id))

@@ -47,7 +47,10 @@ def current_target(db, row, now):
             TelegramIdentity.chat_id == row.chat_id, TelegramIdentity.notifications_enabled.is_(True),
             TelegramIdentity.delivery_status == "available",
         ))
-        if capture is None or capture.user_id != row.user_id or capture.channel != "telegram" or note is None:
+        if (
+            capture is None or capture.user_id != row.user_id or capture.channel != "telegram"
+            or note is None or note.deleted_at is not None
+        ):
             return None
         return (None, note) if identity else None
     reminder = db.get(Reminder, row.reminder_id)
@@ -57,13 +60,13 @@ def current_target(db, row, now):
     ):
         return None
     note = db.get(Note, reminder.note_id)
-    if note is None or note.user_id != row.user_id:
+    if note is None or note.user_id != row.user_id or note.deleted_at is not None:
         return None
     if reminder.item_id is not None:
         item = db.get(Item, reminder.item_id)
         if (
             item is None or item.user_id != row.user_id or item.note_id != note.id
-            or item.kind != "task" or item.status != "open"
+            or item.kind != "task" or item.status != "open" or item.deleted_at is not None
         ):
             return None
     identity = db.scalar(select(TelegramIdentity).where(
@@ -165,7 +168,8 @@ def reminder_hint(db, note, settings, now=None):
     if done:
         return done + ("\n" + missed if missed else "")
     items = [item_view(item) for item in db.scalars(
-        select(Item).where(Item.note_id == note.id, Item.user_id == note.user_id).order_by(Item.position, Item.id)
+        select(Item).where(Item.note_id == note.id, Item.user_id == note.user_id, Item.deleted_at.is_(None))
+        .order_by(Item.position, Item.id)
     )]
     proposals = reminder_proposals(db, note.user_id, items, settings, now)
     for item in items:
@@ -227,9 +231,11 @@ def claim_deliveries(db, body, settings):
         .where(
             Outbox.bot_id == body.bot_id, Reminder.user_id == Outbox.user_id,
             Reminder.generation == Outbox.generation, Reminder.status == "confirmed", Reminder.scheduled_at <= now,
+            Note.deleted_at.is_(None),
             TelegramIdentity.notifications_enabled.is_(True), TelegramIdentity.delivery_status == "available",
             or_(Reminder.item_id.is_(None), and_(
-                Item.user_id == Outbox.user_id, Item.note_id == Reminder.note_id, Item.kind == "task", Item.status == "open",
+                Item.user_id == Outbox.user_id, Item.note_id == Reminder.note_id, Item.kind == "task",
+                Item.status == "open", Item.deleted_at.is_(None),
             )),
             or_(
                 and_(Outbox.status == "pending", Outbox.authorized_at.is_(None)),
@@ -247,7 +253,7 @@ def claim_deliveries(db, body, settings):
             TelegramIdentity.chat_id == Outbox.chat_id,
         ))
         .where(
-            Outbox.bot_id == body.bot_id, Job.status == "succeeded", Outbox.generation == 1,
+            Outbox.bot_id == body.bot_id, Job.status == "succeeded", Outbox.generation == 1, Note.deleted_at.is_(None),
             TelegramIdentity.notifications_enabled.is_(True), TelegramIdentity.delivery_status == "available",
             or_(
                 and_(Outbox.status == "pending", Outbox.authorized_at.is_(None)),

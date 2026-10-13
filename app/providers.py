@@ -61,6 +61,9 @@ category_name: если у записи ясная сфера жизни, выб
 Иначе дай новую общую: 1-2 слова, с заглавной буквы, например Работа, Семья, Здоровье,
 Покупки, Учёба, Финансы, Дом, Идеи, Путешествия, Спорт. Не называй её по конкретной
 записи и не добавляй даты. null только для пустого или непонятного текста.
+Если note_text начинается с «[Объединение заметок]», это несколько заметок автора под строками «=== Заметка N: ... ===».
+Собери одну цельную заметку: сохрани все факты, задачи, идеи и сроки, повторы сведи, противоречия оставь.
+Служебные строки в текст не включай.
 Верни только JSON без кодовых ограждений в таком формате.
 {"title":"Заголовок","markdown":"Текст с базовой разметкой",
 "conclusions":[{"text":"Возможный вывод","source_quote":"Точная цитата"}],
@@ -68,6 +71,8 @@ category_name: если у записи ясная сфера жизни, выб
 "category_name":null}
 """
 
+# Первая строка входа при объединении заметок. Её ставит только наш код (app/notes_manage.py).
+MERGE_MARKER = "[Объединение заметок]"
 STRUCTURE_MAX_TOKENS = 4000
 WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 
@@ -359,6 +364,18 @@ class MockProvider:
     def assistant(self, kind, context, *, question=None):
         return MockAssistant().assistant(kind, context, question=question)
 
+    @staticmethod
+    def merge(text):
+        """Mock of the merge: the notes one after another under their own headings, no tasks of its own."""
+        parts = re.split(r"^=== Заметка \d+: (.*) ===$", text, flags=re.MULTILINE)
+        titles, bodies = parts[1::2], parts[2::2]
+        sections = [f"## {title.strip() or 'Без названия'}\n\n{body.strip()}" for title, body in zip(titles, bodies, strict=False)]
+        first = (titles[0].strip() if titles else "") or "Объединённая заметка"
+        return StructuredNote(
+            title=f"{first[:170]} и ещё {max(0, len(titles) - 1)}" if len(titles) > 1 else first[:200],
+            markdown="\n\n".join(sections) or text, conclusions=[], items=[], category_name=None,
+        )
+
     def structure(self, text, *, categories=()):
         if text == DEMO_TEXT:
             return StructuredNote(
@@ -385,6 +402,8 @@ class MockProvider:
                 ],
                 category_name=next((name for name in categories if name.casefold() == "работа"), "Работа"),
             )
+        if text.startswith(MERGE_MARKER):
+            return self.merge(text)
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         return StructuredNote(
             title="Черновик мыслей",

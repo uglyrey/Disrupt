@@ -55,7 +55,7 @@ def test_prompt_asks_for_a_task_and_no_longer_forbids_reminders():
     assert "не создавай напоминания" not in lowered
     assert "напомни" in lowered and "remind me" in lowered and "будильник" in lowered
     assert "due_text" in SYSTEM_PROMPT and "Не придумывай даты" in SYSTEM_PROMPT
-    assert len(SYSTEM_PROMPT) <= 3200  # about 1.1 times the previous prompt
+    assert len(SYSTEM_PROMPT) <= 3500  # 3200 plus the short merge rule (notes-manage-v1)
 
 
 # Grounding

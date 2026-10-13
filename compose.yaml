@@ -49,6 +49,9 @@ services:
         condition: service_completed_successfully
   scheduler:
     build: .
+    # Планировщик стирает голосовые оригиналы заметок, пролежавших в корзине срок хранения.
+    volumes:
+      - audio-originals:/app/data/audio
     command: ["python", "-m", "app.scheduler"]
     environment: *backend-env
     depends_on:
