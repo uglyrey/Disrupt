@@ -119,10 +119,28 @@ def deliverable(db, row, now):
 def enqueue(sessions, limit=100, *, now=None):
     now = time.time() if now is None else now
     with sessions() as db:
-        users = db.scalars(select(TelegramDigestSettings.user_id).join(User).where(
+        subscriptions = db.scalars(select(TelegramDigestSettings).join(User).where(
             User.deletion_requested_at.is_(None),
             or_(TelegramDigestSettings.morning_enabled.is_(True), TelegramDigestSettings.evening_enabled.is_(True)),
         ).order_by(TelegramDigestSettings.user_id)).all()
+        candidates = []
+        for settings in subscriptions:
+            zone = ZoneInfo(settings.timezone)
+            local = datetime.fromtimestamp(now, zone)
+            for slot in ("morning", "evening"):
+                if not getattr(settings, slot + "_enabled"):
+                    continue
+                scheduled = slot_timestamp(local, getattr(settings, slot + "_time"), zone)
+                if scheduled is not None and 0 <= now - scheduled <= FRESH_SECONDS and settings.updated_at <= scheduled:
+                    key = str(uuid5(NAMESPACE_URL, f"beresta:digest:{settings.user_id}:{local.date()}:{slot}"))
+                    candidates.append((settings.user_id, key))
+        existing = set()
+        # Avoid locking every subscriber every five seconds, including already processed slots.
+        for start in range(0, len(candidates), 2000):
+            existing.update(db.scalars(select(Outbox.id).where(
+                Outbox.id.in_([key for _, key in candidates[start:start + 2000]])
+            )))
+        users = list(dict.fromkeys(uid for uid, key in candidates if key not in existing))
     created = 0
     for user_id in users:
         if created >= limit:
