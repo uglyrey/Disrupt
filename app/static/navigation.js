@@ -44,8 +44,8 @@
     if (ours(original) && original.owner === owner() && same(original.route,initial)) current = original;
     else {
       current = state({kind:'home'},ours(original) ? original.index : 0,ours(original) ? original.group : window.berestaId());
-      // Keep one-time password recovery fragments until the authentication module consumes them.
-      history.replaceState(current,'',location.hash.startsWith('#reset=') ? location.href : url(current.route));
+      // Keep one-time password recovery and email-verification fragments until auth consumes them.
+      history.replaceState(current,'',/^(#reset=|#verify-email=)/.test(location.hash) ? location.href : url(current.route));
       if (views.includes(initial.kind) || ['note','source','library','new','trash'].includes(initial.kind)) write(initial);
     }
     ready = true;
@@ -135,6 +135,7 @@
     } finally { running = false; }
   }
   function schedule() {
+    if (location.hash.startsWith('#verify-email=')) return;
     if (visible() && running) viewGeneration++;  // Cancel a superseded history read, without invalidating a pending save.
     serial++; queued = true; clearTimeout(timer); timer = setTimeout(drain,0);
   }

@@ -42,7 +42,7 @@ def test_policy_mentions_cookies_age_and_current_version(client):
     from app.policy import POLICY_VERSION
 
     page = client.get("/privacy").text
-    assert POLICY_VERSION == "2026-10-12" and f"Версия {POLICY_VERSION}" in page
+    assert POLICY_VERSION == "2026-10-14" and f"Версия {POLICY_VERSION}" in page
     assert 'href="/cookies"' in page and "старше 18 лет" in page
 
 

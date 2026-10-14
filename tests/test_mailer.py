@@ -79,6 +79,9 @@ def test_verification_flow_with_a_fake_mailer(app_factory):
     app = app_factory(mailer=mailer)
     with TestClient(app) as client:
         account = register(client)
+        assert client.get("/api/v1/account/login-methods").json() == {
+            "email_verified": False, "telegram_linked": False,
+        }
         sent = client.post("/api/v1/account/email", json={"email": "user@example.com"})
         assert sent.status_code == 200 and sent.json() == {"status": "sent"}
         to, subject, body = mailer.sent[-1]
@@ -93,6 +96,9 @@ def test_verification_flow_with_a_fake_mailer(app_factory):
         assert client.post("/api/v1/account/email/verify", json={"token": "x" * 43}).status_code == 400
         done = client.post("/api/v1/account/email/verify", json={"token": token})
         assert done.status_code == 200 and done.json() == {"status": "verified", "email": "user@example.com"}
+        assert client.get("/api/v1/account/login-methods").json() == {
+            "email_verified": True, "telegram_linked": False,
+        }
         assert client.post("/api/v1/account/email/verify", json={"token": token}).status_code == 400
         assert client.post("/api/v1/account/email", json={"email": "user@example.com"}).status_code == 409
         with TestClient(app) as other:  # Someone else cannot take a confirmed address.

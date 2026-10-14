@@ -51,6 +51,7 @@ class TelegramLoginStart(StrictModel):
     accept_policy: bool = False
     policy_version: str | None = Field(default=None, max_length=32)
     confirm_age: bool = False
+    marketing_opt_in: bool = False
 
 
 class RecoveryRequest(StrictModel):
@@ -69,6 +70,10 @@ class TokenBody(StrictModel):
 
 class AcceptPolicy(StrictModel):
     policy_version: str = Field(min_length=1, max_length=32)
+
+
+class MarketingConsent(StrictModel):
+    enabled: bool
 
 
 class DeletionRequest(StrictModel):
@@ -99,6 +104,7 @@ class EmailRegistrationStart(EmailCredentials):
     accept_policy: bool = False
     policy_version: str | None = Field(default=None, max_length=32)
     confirm_age: bool = False
+    marketing_opt_in: bool = False
 
 
 class EmailRegistrationConfirm(StrictModel):

@@ -7,7 +7,8 @@ existing users to accept it again on their next visit.
 
 from fastapi import HTTPException
 
-POLICY_VERSION = "2026-10-12"
+POLICY_VERSION = "2026-10-14"
+MARKETING_CONSENT_VERSION = "2026-10-14"
 
 
 def require_consent(accepted, version):
@@ -18,7 +19,15 @@ def require_consent(accepted, version):
         raise HTTPException(422, "Политика обработки данных обновилась. Обновите страницу и подтвердите согласие ещё раз")
 
 
-def require_adult(confirmed):
-    """Accounts are for people who are 18 or older. The answer is not stored."""
-    if confirmed is not True:
-        raise HTTPException(422, "Чтобы продолжить, подтвердите, что вам исполнилось 18 лет")
+def set_marketing_consent(user, accepted: bool, source: str, now: float) -> None:
+    """Keep this optional choice separate from acceptance of the privacy policy."""
+    if accepted:
+        user.marketing_consent_at = now
+        user.marketing_consent_version = MARKETING_CONSENT_VERSION
+        user.marketing_consent_source = source
+        user.marketing_consent_revoked_at = None
+    else:
+        user.marketing_consent_at = None
+        user.marketing_consent_version = None
+        user.marketing_consent_source = None
+        user.marketing_consent_revoked_at = now

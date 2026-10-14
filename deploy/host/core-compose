@@ -6,8 +6,12 @@ failover=""
 if [ -f /etc/beresta/ai-failover ]; then
     failover="-f deploy/compose.ai-failover.yaml"
 fi
+mail=""
+if [ -f /etc/beresta/email ]; then
+    mail="-f deploy/compose.smtp-bz.yaml"
+fi
 # The owner removes the maintenance overlay only after DNS and HTTPS are ready.
 if [ ! -f /etc/beresta/domain-ready ]; then
-    exec docker compose --env-file .env.production -p beresta-pilot -f compose.production.yaml -f deploy/compose.core-private.yaml -f deploy/compose.limits.yaml -f deploy/compose.pre-domain.yaml $failover "$@"
+    exec docker compose --env-file .env.production -p beresta-pilot -f compose.production.yaml -f deploy/compose.core-private.yaml -f deploy/compose.limits.yaml -f deploy/compose.pre-domain.yaml $failover $mail "$@"
 fi
-exec docker compose --env-file .env.production -p beresta-pilot -f compose.production.yaml -f deploy/compose.core-private.yaml -f deploy/compose.limits.yaml $failover "$@"
+exec docker compose --env-file .env.production -p beresta-pilot -f compose.production.yaml -f deploy/compose.core-private.yaml -f deploy/compose.limits.yaml $failover $mail "$@"

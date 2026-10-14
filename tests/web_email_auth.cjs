@@ -10,6 +10,7 @@ async function boot(enabled=true){
  w.localStorage.setItem=()=>{throw new Error('Never store a password or code');};
  let error=null;
  w.enterApp=async user=>{entered.push(user);};
+ w.authMessage=text=>{$('auth-message').textContent=text||'';};
  w.api=async(url,options={})=>{
   const body=options.body?JSON.parse(options.body):null;calls.push({url,body});
   if(url.endsWith('/options'))return{login_enabled:enabled,registration_enabled:enabled};
@@ -32,11 +33,8 @@ async function registration(){
   assert.equal(calls.length,1,'Consent is needed before sending');
   $('email-auth-consent').checked=true;
   await $('email-auth-form').onsubmit({preventDefault(){}});
-  assert.equal(calls.length,1,'Age confirmation is needed before sending');
-  assert.match($('email-auth-message').textContent,/18 лет/);
-  $('email-auth-age').checked=true;
-  await $('email-auth-form').onsubmit({preventDefault(){}});
-  assert.equal(calls.at(-1).body.policy_version,'2026-10-12');assert.equal(calls.at(-1).body.confirm_age,true);
+  assert.equal(calls.at(-1).body.policy_version,'2026-10-14');
+  assert.equal(calls.at(-1).body.marketing_opt_in,false);
   assert.equal($('email-auth-password').value,'');assert.equal($('email-auth-code-form').hidden,false);
   $('email-auth-code').value='000001';
   t.setError('<img src=x onerror=alert(1)>Код не подошёл');
@@ -51,13 +49,14 @@ async function registration(){
 async function retryAndLogin(){
  const t=await boot();const{$,calls,entered}=t;
  try{
-  $('landing-register-bottom').click();$('email-auth-consent').checked=true;$('email-auth-age').checked=true;
+  $('landing-register-bottom').click();$('email-auth-consent').checked=true;$('email-auth-marketing').checked=true;
   $('email-auth-address').value='owner@example.test';$('email-auth-password').value='synthetic-password-1';
   await $('email-auth-form').onsubmit({preventDefault(){}});
+  assert.equal(calls.at(-1).body.marketing_opt_in,true);
   const before=calls.length;$('email-auth-retry').click();
   assert.equal(calls.length,before,'No automatic email resend');assert.equal($('email-auth-form').hidden,false);
   $('email-auth-close').click();$('email-login').click();
-  assert.equal($('email-auth-consent-label').hidden,true);assert.equal($('email-auth-age-label').hidden,true);
+  assert.equal($('email-auth-consent-label').hidden,true);assert.equal($('email-auth-marketing-label').hidden,true);
   $('email-auth-address').value='owner@example.test';$('email-auth-password').value='synthetic-password-1';
   $('email-auth-recover').click();await settle();
   assert.ok(calls.at(-1).url.endsWith('/recovery/email'));
@@ -69,7 +68,7 @@ async function retryAndLogin(){
 module.exports=async()=>{
  await registration();await retryAndLogin();
  const t=await boot(false);
- try{assert.equal(t.$('email-login').hidden,true);t.$('landing-register').click();assert.equal(t.$('email-auth-dialog').open,false);}
+ try{assert.equal(t.$('email-login').hidden,true);t.$('landing-register').click();assert.equal(t.$('email-auth-dialog').open,false);assert.match(t.$('auth-message').textContent,/недоступна/);}
  finally{t.close();}
  console.log('Email DOM checks passed: consent, code, leading zero, safe errors, explicit resend, login, hidden unavailable feature.');
 };

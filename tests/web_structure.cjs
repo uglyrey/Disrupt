@@ -158,22 +158,13 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
       authCalls.push({url,body:JSON.parse(options.body)});
       return reply({detail:'Synthetic auth result'},401);
     };
-    // Registration needs the privacy consent box. Password sign-in does not.
+    // The old username form is sign-in only, for accounts created before email registration.
     login.value = 'abc'; $('password').value = 'test-only-password-123'; $('accept-policy').checked = false;
-    await $('auth-form').onsubmit({preventDefault(){},target:$('auth-form'),submitter:{value:'register'}});
-    assert.equal(authCalls.length,0);
-    assert.match($('auth-message').textContent,/согласие на обработку персональных данных/);
     await $('auth-form').onsubmit({preventDefault(){},target:$('auth-form'),submitter:{value:'login'}});
     assert.equal(authCalls.length,1); authCalls.length = 0;
-    $('accept-policy').checked = true; $('confirm-age').checked = false;
-    await $('auth-form').onsubmit({preventDefault(){},target:$('auth-form'),submitter:{value:'register'}});
-    assert.equal(authCalls.length,0);
-    assert.match($('auth-message').textContent,/18 лет/);
-    await $('auth-form').onsubmit({preventDefault(){},target:$('auth-form'),submitter:{value:'login'}});
-    assert.equal(authCalls.length,1); authCalls.length = 0;
-    $('confirm-age').checked = true;
-    for (const action of ['register','login']) {
-      for (const name of ['abc','User.Name_123-X','A'.repeat(64),'ab','a'.repeat(65),'Марк','MarkМ','Ёжик','abc\n',' abc','abc ','café','abc@']) {
+    assert.equal(w.document.querySelector('#auth-form button[value="register"]'),null);
+    assert.equal($('confirm-age'),null);
+    for (const name of ['abc','User.Name_123-X','A'.repeat(64),'ab','a'.repeat(65),'Марк','MarkМ','Ёжик','abc\n',' abc','abc ','café','abc@']) {
         const valid = ['abc','User.Name_123-X','A'.repeat(64)].includes(name);
         login.value = name;
         $('password').value = 'test-only-password-123';
@@ -182,14 +173,12 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
         const before = authCalls.length;
         // Set the original value to test JS validation even for programmatic submits.
         Object.defineProperty(login,'value',{configurable:true,value:name,writable:true});
-        await $('auth-form').onsubmit({preventDefault(){},target:$('auth-form'),submitter:{value:action}});
+        await $('auth-form').onsubmit({preventDefault(){},target:$('auth-form'),submitter:{value:'login'}});
         delete login.value;
         assert.equal(authCalls.length,before + Number(valid),name);
         if (valid) assert.equal(authCalls.at(-1).body.username,name);
-        if (valid && action === 'register') assert.deepEqual([authCalls.at(-1).body.accept_policy,authCalls.at(-1).body.policy_version,authCalls.at(-1).body.confirm_age],[true,'2026-10-12',true]);
-        if (valid && action === 'login') assert.equal('accept_policy' in authCalls.at(-1).body || 'confirm_age' in authCalls.at(-1).body,false);
+        if (valid) assert.equal('accept_policy' in authCalls.at(-1).body || 'confirm_age' in authCalls.at(-1).body,false);
         if (!valid) assert.match($('auth-message').textContent,/Латинские буквы/);
-      }
     }
     await require('./web_job_waiting.cjs')();
     await require('./web_failed_job_retry.cjs')();
@@ -203,6 +192,7 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
     await require('./web_cookies.cjs')();
     await require('./web_auth.cjs')();
     await require('./web_email_auth.cjs')();
+    await require('./web_contact_methods.cjs')();
     await require('./web_brain.cjs')();
     await require('./web_search_digests.cjs')();
     await require('./web_notes_manage.cjs')();

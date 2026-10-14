@@ -28,11 +28,12 @@ from app.models import (
     User,
     new_id,
 )
-from app.policy import POLICY_VERSION, require_adult, require_consent
+from app.policy import POLICY_VERSION, require_consent, set_marketing_consent
 from app.schemas import (
     AcceptPolicy,
     DeletionRequest,
     EmailBody,
+    MarketingConsent,
     PasswordReset,
     RecoveryRequest,
     TelegramLoginStart,
@@ -94,13 +95,13 @@ def iso(timestamp):
     return datetime.fromtimestamp(timestamp, UTC).isoformat()
 
 
-def new_login(db, purpose, *, user_id=None, policy_version=None):
+def new_login(db, purpose, *, user_id=None, policy_version=None, marketing_opt_in=False):
     now = time.time()
     db.execute(delete(TelegramLogin).where(TelegramLogin.expires_at < now - 86400))
     token, binding = secrets.token_urlsafe(32), secrets.token_urlsafe(32)
     row = TelegramLogin(
         id=new_id(), purpose=purpose, token_hash=hash_token(token), binding_hash=hash_token(binding),
-        user_id=user_id, policy_version=policy_version, status="pending",
+        user_id=user_id, policy_version=policy_version, marketing_opt_in=marketing_opt_in, status="pending",
         expires_at=now + LOGIN_SECONDS, created_at=now,
     )
     db.add(row)
@@ -188,8 +189,9 @@ def build_router(database, settings):
         check_origin(request)
         throttle(db, "tg-login-start:" + client_ip(request), limit=10)
         require_consent(body.accept_policy, body.policy_version)
-        require_adult(body.confirm_age)
-        row, token, binding = new_login(db, "login", policy_version=body.policy_version)
+        row, token, binding = new_login(
+            db, "login", policy_version=body.policy_version, marketing_opt_in=body.marketing_opt_in,
+        )
         row.source = acquisition_source(body.source_token, settings, default="telegram")
         db.commit()
         response.set_cookie(
@@ -259,6 +261,8 @@ def build_router(database, settings):
             raise HTTPException(409, "Не удалось создать аккаунт. Попробуйте ещё раз") from None
         if user.policy_version != row.policy_version:
             user.policy_version, user.policy_accepted_at = row.policy_version, now
+        if row.marketing_opt_in:
+            set_marketing_consent(user, True, "telegram-login", row.created_at)
         payload = create_session(db, response, user, request, settings, method="telegram")
         response.delete_cookie(BINDING_COOKIE, path=BINDING_PATH)
         return {**payload, "status": "ok", "new_account": created}
@@ -365,6 +369,27 @@ def build_router(database, settings):
         user.policy_version, user.policy_accepted_at = POLICY_VERSION, time.time()
         db.commit()
         return {"status": "ok", "policy_version": POLICY_VERSION}
+
+    @router.get("/api/v1/account/marketing-consent")
+    def marketing_consent_status(request: Request, db=Depends(database)):
+        session = get_login_session(request, db)
+        user = db.get(User, session.user_id)
+        return {"enabled": user.marketing_consent_at is not None}
+
+    @router.get("/api/v1/account/login-methods")
+    def login_methods(request: Request, db=Depends(database)):
+        session = get_login_session(request, db)
+        user = db.get(User, session.user_id)
+        telegram_linked = db.scalar(select(TelegramIdentity.id).where(TelegramIdentity.user_id == user.id).limit(1))
+        return {"email_verified": user.email_verified_at is not None, "telegram_linked": telegram_linked is not None}
+
+    @router.put("/api/v1/account/marketing-consent")
+    def update_marketing_consent(body: MarketingConsent, request: Request, db=Depends(database)):
+        session = get_login_session(request, db, write=True)
+        user = db.get(User, session.user_id)
+        set_marketing_consent(user, body.enabled, "account-settings", time.time())
+        db.commit()
+        return {"enabled": body.enabled}
 
     # Email scaffold. Sending stays off until the owner configures SMTP.
 

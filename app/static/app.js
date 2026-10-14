@@ -132,6 +132,7 @@ function showUser(user) {
 async function enterApp(user) {
   showUser(user); await loadProviderUsage(); await loadCategories(); await loadNotes(); await loadJobs(); await openLinkedCapture();
   await window.BerestaNavigation?.restoreInitial();
+  await window.BerestaContact?.refresh();
 }
 const LIMIT_SPENT = 'Лимит ИИ на сегодня исчерпан. Запись сохранена без ИИ, разобрать её можно завтра.';
 function setMode(text = '') { $('mode').textContent = text; }
@@ -652,7 +653,6 @@ $('auth-form').onsubmit = async event => {
   event.preventDefault();
   const username = $('login').value;
   const password = $('password').value;
-  const action = event.submitter?.value || 'login';
   if (username.length < 3 || username.length > 64 || /[^A-Za-z0-9_.-]/u.test(username)) {
     authMessage('От 3 до 64 символов. Латинские буквы, цифры и символы _ . -');
     $('login').focus(); return;
@@ -662,25 +662,11 @@ $('auth-form').onsubmit = async event => {
     $('password').focus(); return;
   }
   const body = {username,password};
-  if (action === 'register') {
-    const consent = $('accept-policy');
-    if (!consent.checked) {
-      authMessage('Чтобы создать аккаунт, дайте согласие на обработку персональных данных.');
-      consent.focus(); return;
-    }
-    const age = $('confirm-age');
-    if (!age.checked) {
-      authMessage('Чтобы создать аккаунт, подтвердите, что вам исполнилось 18 лет.');
-      age.focus(); return;
-    }
-    body.accept_policy = true; body.policy_version = consent.dataset.policyVersion; body.confirm_age = true;
-    if (document.body.dataset.sourceToken) body.source_token = document.body.dataset.sourceToken;
-  }
   authMessage();
   const buttons = [...event.target.querySelectorAll('button')];
   buttons.forEach(b => b.disabled=true);
   try {
-    const user = await api(`/api/v1/auth/${action}`, {method:'POST',body:JSON.stringify(body)});
+    const user = await api('/api/v1/auth/login', {method:'POST',body:JSON.stringify(body)});
     $('password').value=''; await enterApp(user); message();
   } catch(e) {
     authMessage(e.message);

@@ -1,0 +1,11 @@
+# The existing SMTP.BZ key is mounted only into API. Codes go out over HTTPS.
+services:
+  api:
+    environment:
+      NOTES_SMTP_BZ_API_KEY_FILE: /run/secrets/smtp_bz_api_key
+    secrets:
+      - smtp_bz_api_key
+
+secrets:
+  smtp_bz_api_key:
+    file: ./secrets/smtp_bz_api_key.txt

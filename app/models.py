@@ -55,6 +55,11 @@ class User(Base):
     policy_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     policy_accepted_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     deletion_requested_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # A separate, optional choice. Older accounts have no recorded marketing consent.
+    marketing_consent_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    marketing_consent_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    marketing_consent_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    marketing_consent_revoked_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Where the person is in the short guided tips: {"note_tools": {"step": 0, "done": false}, ...}. Empty until used.
     guide_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
@@ -382,6 +387,7 @@ class TelegramLogin(Base):
     binding_hash: Mapped[str] = mapped_column(String(64))
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     policy_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    marketing_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     status: Mapped[str] = mapped_column(String(16), default="pending")
     bot_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -421,6 +427,7 @@ class EmailRegistrationPending(Base):
     binding_hash: Mapped[str] = mapped_column(String(64))
     code_hash: Mapped[str] = mapped_column(String(64))
     policy_version: Mapped[str] = mapped_column(String(32))
+    marketing_opt_in: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     source: Mapped[str] = mapped_column(String(100), default="unknown", server_default="unknown")
     attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     expires_at: Mapped[float] = mapped_column(Float)

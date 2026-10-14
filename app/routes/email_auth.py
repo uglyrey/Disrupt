@@ -15,7 +15,7 @@ from app.attribution import read as acquisition_source
 from app.mailer import MAIL_DISABLED_TEXT, MailError
 from app.models import EmailRegistrationPending as Pending
 from app.models import User
-from app.policy import POLICY_VERSION, require_adult, require_consent
+from app.policy import POLICY_VERSION, require_consent, set_marketing_consent
 from app.schemas import EmailCredentials, EmailRegistrationConfirm, EmailRegistrationStart
 from app.security import (
     DUMMY_PASSWORD_HASH,
@@ -77,7 +77,6 @@ def build_router(database, settings):
         if not settings.allow_registration:
             raise HTTPException(403, "Регистрация закрыта")
         require_consent(body.accept_policy, body.policy_version)
-        require_adult(body.confirm_age)
         mailer = request.app.state.mailer
         if not mailer.enabled:
             raise HTTPException(503, MAIL_DISABLED_TEXT)
@@ -102,7 +101,7 @@ def build_router(database, settings):
         row = Pending(
             email=body.email, password_hash=hash_password(body.password), binding_hash=hash_token(binding),
             code_hash=digest(binding, code), policy_version=POLICY_VERSION, expires_at=now + LIFETIME,
-            source=acquisition_source(body.source_token, settings),
+            source=acquisition_source(body.source_token, settings), marketing_opt_in=body.marketing_opt_in,
         )
         db.add(row)
         db.commit()
@@ -154,6 +153,8 @@ def build_router(database, settings):
         user = User(username=available_name(db, row.email), email=row.email, email_verified_at=now,
                     source=row.source,
                     password_hash=row.password_hash, policy_version=row.policy_version, policy_accepted_at=now)
+        if row.marketing_opt_in:
+            set_marketing_consent(user, True, "email-registration", row.created_at)
         retire(row, now)
         db.add(user)
         try:

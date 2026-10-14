@@ -135,6 +135,7 @@
     forget(); clearCode();
     await loadLinks();
     message('Telegram подключён.');
+    window.dispatchEvent(new Event('beresta:telegram-linked'));
   }
 
   function expire() {
@@ -170,6 +171,7 @@
       if (mine.seen && links.identities.length) {
         // Another tab or button confirmed it already.
         forget(); clearCode(); renderLinks(links); message('Telegram подключён.');
+        window.dispatchEvent(new Event('beresta:telegram-linked'));
         return;
       }
     } catch (e) {

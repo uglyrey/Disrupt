@@ -197,17 +197,13 @@
       authMessage('Чтобы войти через Telegram, дайте согласие на обработку персональных данных.');
       box.focus(); return;
     }
-    const age = el('confirm-age');
-    if (!age.checked) {
-      authMessage('Чтобы войти через Telegram, подтвердите, что вам исполнилось 18 лет.');
-      age.focus(); return;
-    }
     authMessage(); info(); resetLogin();
     loginButton.disabled = true;
     const target = reserveTarget(); // Still inside the tap, before the first await.
     try {
       const start = await send('/api/v1/auth/telegram/start', {
-        accept_policy: true, policy_version: box.dataset.policyVersion, confirm_age: true,
+        accept_policy: true, policy_version: box.dataset.policyVersion,
+        marketing_opt_in: el('marketing-consent').checked,
         ...(document.body.dataset.sourceToken ? {source_token:document.body.dataset.sourceToken} : {}),
       });
       if (!botLink(start.deep_link)) throw new Error('Не удалось начать вход. Попробуйте ещё раз.');
@@ -303,6 +299,30 @@
       await send('/api/v1/account/accept-policy', {policy_version: consent().dataset.policyVersion});
       el('policy-banner').hidden = true;
     } catch (e) { message(e.message); }
+    finally { button.disabled = false; }
+  };
+
+  // Optional messages. The checkbox is never inferred from policy acceptance.
+  el('open-marketing').onclick = async () => {
+    say('marketing-status', 'Загружаем настройку…');
+    openDialog('marketing-dialog');
+    try {
+      const state = await api('/api/v1/account/marketing-consent');
+      el('marketing-enabled').checked = state.enabled === true;
+      say('marketing-status', '');
+    } catch (error) { say('marketing-status', error.message); }
+  };
+  el('marketing-close').onclick = () => el('marketing-dialog').close();
+  el('marketing-form').onsubmit = async event => {
+    event.preventDefault();
+    const button = el('marketing-save');
+    button.disabled = true;
+    try {
+      const state = await api('/api/v1/account/marketing-consent', {
+        method:'PUT', body:JSON.stringify({enabled:el('marketing-enabled').checked}),
+      });
+      say('marketing-status', state.enabled ? 'Согласие сохранено.' : 'Согласие отозвано.');
+    } catch (error) { say('marketing-status', error.message); }
     finally { button.disabled = false; }
   };
 

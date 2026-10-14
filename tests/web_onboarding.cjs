@@ -19,14 +19,10 @@ function landing(){
   assert.equal($('auth').hidden,false);
   assert.ok($('landing-title'),'landing headline');
   assert.equal($('auth-form').querySelector('button').value,'login');
-  $('landing-register').click();
-  assert.equal($('auth').dataset.intent,'register');assert.equal($('auth-title').textContent,'Создать аккаунт');
-  assert.equal($('password').getAttribute('autocomplete'),'new-password');
-  assert.equal($('auth-form').querySelector('button').value,'register','Enter must submit the register action');
-  assert.equal($('auth-form').querySelectorAll('button[type=submit]').length,2);
   $('landing-login').click();
   assert.equal($('auth').dataset.intent,'login');assert.equal($('auth-form').querySelector('button').value,'login');
-  $('landing-register-bottom').click();assert.equal($('auth').dataset.intent,'register');
+  assert.equal($('legacy-login').open,true);
+  assert.equal($('auth-form').querySelectorAll('button[type=submit]').length,1);
  }finally{dom.window.close();}
 }
 async function firstRun({storage='ok',notes=[],preset=false}={}){

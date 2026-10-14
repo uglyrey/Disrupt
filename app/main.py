@@ -29,7 +29,7 @@ from app.integration import IntegrationRejection
 from app.limits import daily_state
 from app.mailer import build_mailer
 from app.models import Capture, Job, Note, ProviderBudget, Revision, User
-from app.policy import POLICY_VERSION, require_adult, require_consent
+from app.policy import POLICY_VERSION, require_consent
 from app.providers import DEMO_TEXT
 from app.request_metrics import RequestMetrics
 from app.routes.account import build_router as account_router
@@ -340,7 +340,6 @@ def create_app(
         if settings.email_registration_enabled:
             raise HTTPException(403, "Создайте аккаунт через почту или Telegram")
         require_consent(body.accept_policy, body.policy_version)
-        require_adult(body.confirm_age)
         ip = request.client.host if request.client else "unknown"
         throttle(db, "register:" + ip)
         throttle(db, "register-day:" + ip, limit=settings.registrations_per_ip_per_day, window=86400)

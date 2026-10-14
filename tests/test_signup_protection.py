@@ -1,4 +1,4 @@
-"""Age confirmation, daily sign-up limits per address and the AI ceiling of new accounts. Fakes only."""
+"""Daily sign-up limits per address and the AI ceiling of new accounts. Fakes only."""
 
 import time
 
@@ -18,8 +18,6 @@ from tests.test_email_registration import PASSWORD, Mail, begin, code
 from tests.test_email_registration import confirm as confirm_code
 from tests.test_internal import SERVICE_TOKEN
 
-AGE_TEXT = "18 лет"
-
 
 def body(**changes):
     return {
@@ -28,17 +26,14 @@ def body(**changes):
     }
 
 
-# Age confirmation
+# Registration no longer asks for an age checkbox.
 
 
-def test_registration_needs_age_confirmation(app, client):
-    refused = client.post("/api/v1/auth/register", json=body(confirm_age=False))
-    assert refused.status_code == 422 and AGE_TEXT in refused.json()["detail"]
+def test_registration_does_not_need_age_confirmation(app, client):
     payload = body()
     del payload["confirm_age"]
-    assert client.post("/api/v1/auth/register", json=payload).status_code == 422
-    assert rows(app, User) == []
-    assert client.post("/api/v1/auth/register", json=body()).status_code == 201
+    assert client.post("/api/v1/auth/register", json=payload).status_code == 201
+    assert len(rows(app, User)) == 1
 
 
 def test_ordinary_login_does_not_need_age_confirmation(client):
@@ -48,17 +43,14 @@ def test_ordinary_login_does_not_need_age_confirmation(client):
     assert login.status_code == 200
 
 
-def test_telegram_start_needs_age_confirmation(client):
-    refused = start(client, confirm_age=False)
-    assert refused.status_code == 422 and AGE_TEXT in refused.json()["detail"]
+def test_telegram_start_does_not_need_age_confirmation(client):
     missing = client.post(
         "/api/v1/auth/telegram/start", json={"accept_policy": True, "policy_version": POLICY_VERSION},
     )
-    assert missing.status_code == 422
-    assert start(client).status_code == 201
+    assert missing.status_code == 201
 
 
-def test_email_registration_needs_age_confirmation(app_factory):
+def test_email_registration_does_not_need_age_confirmation(app_factory):
     mail = Mail()
     app = app_factory(mailer=mail, email_registration_enabled=True)
     with TestClient(app) as client:
@@ -66,10 +58,8 @@ def test_email_registration_needs_age_confirmation(app_factory):
             "email": "owner@example.test", "password": PASSWORD,
             "accept_policy": True, "policy_version": POLICY_VERSION,
         }
-        refused = client.post(EMAIL + "/registration/start", json=payload)
-        assert refused.status_code == 422 and AGE_TEXT in refused.json()["detail"]
-        assert mail.sent == []
-        assert begin(client).status_code == 202
+        assert client.post(EMAIL + "/registration/start", json=payload).status_code == 202
+        assert len(mail.sent) == 1
 
 
 # Daily limit of new accounts per address

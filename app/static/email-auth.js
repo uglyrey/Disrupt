@@ -13,7 +13,8 @@
     mode = next; registration = null;
     el('email-auth-title').textContent = mode === 'register' ? 'Регистрация по почте' : 'Войти по почте';
     el('email-auth-consent-label').hidden = mode !== 'register';
-    el('email-auth-age-label').hidden = mode !== 'register';
+    el('email-auth-marketing-label').hidden = mode !== 'register';
+    el('email-auth-marketing').checked = false;
     el('email-auth-recover').hidden = mode !== 'login';
     el('email-auth-send').textContent = mode === 'register' ? 'Получить код' : 'Войти';
     el('email-auth-password').autocomplete = mode === 'register' ? 'new-password' : 'current-password';
@@ -44,9 +45,8 @@
   el('email-auth-form').onsubmit = async event => {
     event.preventDefault(); if (busy) return;
     if (mode === 'register' && !el('email-auth-consent').checked) return say('Дайте согласие на обработку персональных данных.');
-    if (mode === 'register' && !el('email-auth-age').checked) return say('Подтвердите, что вам исполнилось 18 лет.');
     const body = {email:el('email-auth-address').value,password:el('email-auth-password').value};
-    if (mode === 'register') Object.assign(body, {accept_policy:true,policy_version:el('accept-policy').dataset.policyVersion,confirm_age:true});
+    if (mode === 'register') Object.assign(body, {accept_policy:true,policy_version:el('accept-policy').dataset.policyVersion,marketing_opt_in:el('email-auth-marketing').checked});
     if (mode === 'register' && document.body.dataset.sourceToken) body.source_token = document.body.dataset.sourceToken;
     lock(true); say('');
     try {
@@ -71,13 +71,14 @@
   api('/api/v1/auth/email/options').then(options => {
     el('email-login').hidden = !options.login_enabled;
     el('email-login').onclick = () => open('login');
-    if (options.registration_enabled) {
-      document.querySelector('.landing-note').textContent = 'Можно войти через Telegram или зарегистрироваться по почте с подтверждением.';
-      for (const button of document.querySelectorAll('#landing-register,#landing-register-bottom,#auth-form button[value="register"]')) {
-        button.addEventListener('click', event => {
-          event.preventDefault(); event.stopImmediatePropagation(); open('register');
-        }, true);
-      }
+    el('email-register').hidden = !options.registration_enabled;
+    for (const button of document.querySelectorAll('#landing-register,#landing-register-bottom,#email-register')) {
+      button.addEventListener('click', event => {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (options.registration_enabled) open('register');
+        else authMessage('Регистрация по почте временно недоступна. Попробуйте позже.');
+      }, true);
     }
-  }).catch(() => {}); // Existing username/Telegram access remains available if mail setup is unavailable.
+    if (location.hash === '#register' && options.registration_enabled) open('register');
+  }).catch(() => authMessage('Не удалось проверить доступность почты. Попробуйте обновить страницу.'));
 })();

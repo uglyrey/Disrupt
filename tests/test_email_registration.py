@@ -188,7 +188,5 @@ def test_registration_checks_consent_and_origin(stack):
     payload = {"email": "owner@example.test", "password": PASSWORD}
     assert client.post(BASE + "/registration/start", json=payload).status_code == 422
     payload.update(accept_policy=True, policy_version=POLICY_VERSION)
-    assert client.post(BASE + "/registration/start", json=payload).status_code == 422  # No age confirmation
-    payload.update(confirm_age=True)
     assert client.post(BASE + "/registration/start", json=payload, headers={"Origin": "https://evil.invalid"}).status_code == 403
     assert mail.sent == []

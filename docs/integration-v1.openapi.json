@@ -6083,6 +6083,83 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/account/marketing-consent": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Marketing Consent Status",
+        "operationId": "marketing_consent_status_api_v1_account_marketing_consent_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      },
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Update Marketing Consent",
+        "operationId": "update_marketing_consent_api_v1_account_marketing_consent_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketingConsent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/account/login-methods": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Login Methods",
+        "operationId": "login_methods_api_v1_account_login_methods_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/api/v1/account/email": {
       "post": {
         "tags": [
@@ -8426,6 +8503,11 @@
             "type": "boolean",
             "title": "Confirm Age",
             "default": false
+          },
+          "marketing_opt_in": {
+            "type": "boolean",
+            "title": "Marketing Opt In",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -9232,6 +9314,20 @@
           "totp"
         ],
         "title": "LoginBody"
+      },
+      "MarketingConsent": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "MarketingConsent"
       },
       "MergeRequest": {
         "properties": {
@@ -10463,6 +10559,11 @@
           "confirm_age": {
             "type": "boolean",
             "title": "Confirm Age",
+            "default": false
+          },
+          "marketing_opt_in": {
+            "type": "boolean",
+            "title": "Marketing Opt In",
             "default": false
           }
         },

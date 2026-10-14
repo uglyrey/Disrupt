@@ -12,6 +12,7 @@
   <script src="/static/cookie-consent.js" defer=""></script>
   <script src="/static/reminders.js" defer=""></script>
   <script src="/static/app.js" defer=""></script>
+  <script src="/static/contact-methods.js" defer=""></script>
   <script src="/static/telegram-link.js" defer=""></script>
   <script src="/static/email-auth.js" defer=""></script>
   <link rel="stylesheet" href="/static/email-auth.css">
@@ -45,7 +46,7 @@
         <span>Канал<span class="sr-only"> в Telegram</span></span>
         <span aria-hidden="true">↗</span>
       </a>
-      <div id="account" hidden><span id="username"></span><button id="logout" class="quiet">Выйти</button></div>
+      <div id="account" hidden><span id="username"></span><button id="open-marketing" class="quiet" type="button">Рассылки</button><button id="logout" class="quiet">Выйти</button></div>
     </div>
   </header>
   <div id="menu-scrim" class="menu-scrim" hidden></div>
@@ -76,6 +77,7 @@
   <div id="mode" class="banner">Проверяем состояние приложения…</div>
   <div id="policy-banner" class="notice-bar" role="region" aria-label="Политика конфиденциальности" hidden><p>Мы обновили политику обработки данных. <a href="/privacy" target="_blank" rel="noopener noreferrer">Прочитать<span class="sr-only"> (откроется в новой вкладке)</span></a>. Если не согласны, можно выйти и <a href="/data-deletion" target="_blank" rel="noopener noreferrer">запросить удаление данных<span class="sr-only"> (откроется в новой вкладке)</span></a>.</p><button id="policy-accept" type="button">Принимаю</button></div>
   <div id="deletion-banner" class="notice-bar" role="region" aria-label="Запрос на удаление аккаунта" hidden><p>Вы попросили удалить аккаунт. Оператор обработает запрос вручную в срок, предусмотренный законом. Подробности на странице «Удаление данных».</p><button id="deletion-cancel" type="button" class="secondary">Отменить запрос</button></div>
+  <div id="contact-method-banner" class="notice-bar" role="region" aria-label="Подключите способ входа" hidden><p>Вы входите по старому логину. Подключите почту или Telegram, чтобы сохранить удобный доступ к заметкам.</p><div class="actions"><button id="contact-email" type="button">Подключить почту</button><button id="contact-telegram" type="button" class="secondary">Подключить Telegram</button></div></div>
   <p id="message" role="status" aria-live="polite"></p>
   <main>
     <section id="auth" class="landing" aria-labelledby="landing-title">
@@ -88,21 +90,23 @@
             <button type="button" id="landing-register" class="cta-primary">Создать аккаунт</button>
             <button type="button" id="landing-login" class="cta-quiet">Войти</button>
           </div>
-          <p class="landing-note">Можно войти через Telegram или создать аккаунт с именем и паролем. Почта не нужна. beresta для людей старше 18 лет.</p>
+          <p class="landing-note">Создайте аккаунт по почте с кодом подтверждения или войдите через Telegram.</p>
           <p class="landing-note" id="landing-ai-allowance">beresta бесплатна. ИИ работает с дневным лимитом: в день даётся 30 единиц, текст стоит 1, голос от 2. В первые сутки после регистрации доступно 10 единиц. Остаток виден рядом с кнопкой «Сохранить». Когда единицы кончаются, записи сохраняются без ИИ, а на следующий день лимит обновляется.</p>
         </div>
         <div class="auth-card" id="auth-card">
           <h2 id="auth-title">Войти в beresta</h2>
-          <p id="auth-lead" class="auth-lead">Продолжите с того места, где остановились.</p>
-          <form id="auth-form" novalidate="">
+          <p id="auth-lead" class="auth-lead">Войдите по почте или через Telegram.</p>
+          <div class="actions"><button type="button" id="email-register" class="secondary" hidden>Создать аккаунт по почте</button><button type="button" id="email-login" hidden>Войти по почте</button></div>
+          <label class="consent" for="accept-policy"><input id="accept-policy" type="checkbox" data-policy-version="2026-10-14"><span>Даю согласие на обработку персональных данных согласно <a href="/privacy" target="_blank" rel="noopener noreferrer">политике обработки данных<span class="sr-only"> (откроется в новой вкладке)</span></a></span></label>
+          <label class="consent" for="marketing-consent"><input id="marketing-consent" type="checkbox"><span>Я согласен получать новости и предложения beresta по почте и в Telegram. Это необязательно, согласие можно отозвать в настройках.</span></label>
+          <p id="consent-hint" class="field-hint">Согласие на обработку данных нужно для нового входа через Telegram. Согласие на рассылку необязательно. Создавая аккаунт, вы принимаете <a href="/terms" target="_blank" rel="noopener noreferrer">условия использования</a>.</p>
+          <details id="legacy-login"><summary>Войти по старому логину</summary><form id="auth-form" novalidate="">
             <label for="login">Имя пользователя</label><input id="login" name="username" autocomplete="username" required="" minlength="3" maxlength="64" pattern="[A-Za-z0-9_.\-]+" placeholder="username" aria-describedby="username-hint">
-            <p id="username-hint" class="field-hint">От 3 до 64 символов. Латинские буквы, цифры и символы _ . -</p>
+            <p id="username-hint" class="field-hint">Для существующего аккаунта без подключённой почты или Telegram.</p>
             <label for="password">Пароль</label><input id="password" name="password" type="password" autocomplete="current-password" required="" minlength="10" maxlength="128" placeholder="Не менее 10 символов">
-            <label class="consent" for="confirm-age"><input id="confirm-age" type="checkbox"><span>Мне исполнилось 18 лет</span></label>
-            <label class="consent" for="accept-policy"><input id="accept-policy" type="checkbox" data-policy-version="2026-10-12"><span>Даю согласие на обработку персональных данных согласно <a href="/privacy" target="_blank" rel="noopener noreferrer">политике обработки данных<span class="sr-only"> (откроется в новой вкладке)</span></a></span></label>
-            <p id="consent-hint" class="field-hint">Обе отметки нужны при регистрации и при входе через Telegram. Создавая аккаунт, вы принимаете <a href="/terms" target="_blank" rel="noopener noreferrer">условия использования</a>.</p>
-            <div class="actions"><button type="submit" value="login">Войти</button><button type="submit" value="register" class="secondary">Создать аккаунт</button></div>
-            <p class="auth-extra"><button type="button" id="forgot-password" class="text-link">Забыли пароль?</button><button type="button" id="email-login" class="text-link" hidden>Войти по почте</button></p>
+            <div class="actions"><button type="submit" value="login">Войти</button></div>
+            <p class="auth-extra"><button type="button" id="forgot-password" class="text-link">Забыли пароль?</button></p>
+          </form></details>
             <div class="auth-alt">
               <p class="auth-or" aria-hidden="true"><span>или</span></p>
               <button type="button" id="tg-login" class="telegram-login">Войти через Telegram</button>
@@ -117,7 +121,6 @@
             </div>
             <p id="auth-info" class="auth-info" role="status" aria-live="polite" hidden=""></p>
             <p id="auth-message" role="alert" aria-live="assertive" hidden=""></p>
-          </form>
         </div>
       </div>
       <section class="landing-section" aria-labelledby="how-title">
@@ -329,13 +332,22 @@
         </section>
       </div></div>
   </main>
+  <dialog id="marketing-dialog" class="auth-dialog" aria-labelledby="marketing-title">
+    <h2 id="marketing-title">Рассылки beresta</h2>
+    <form id="marketing-form">
+      <label class="consent" for="marketing-enabled"><input id="marketing-enabled" type="checkbox"><span>Я согласен получать новости и предложения beresta по почте и в Telegram.</span></label>
+      <p class="field-hint">Согласие необязательно. Здесь его можно дать или отозвать.</p>
+      <p id="marketing-status" role="status" aria-live="polite"></p>
+      <div class="actions"><button id="marketing-save" type="submit">Сохранить</button><button id="marketing-close" type="button" class="quiet">Закрыть</button></div>
+    </form>
+  </dialog>
   <dialog id="email-auth-dialog" class="auth-dialog" aria-labelledby="email-auth-title">
     <h2 id="email-auth-title">Регистрация по почте</h2>
     <form id="email-auth-form">
       <label for="email-auth-address">Почта</label><input id="email-auth-address" type="email" maxlength="254" autocomplete="email" required>
       <label for="email-auth-password">Пароль</label><input id="email-auth-password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
       <label id="email-auth-consent-label" class="consent" for="email-auth-consent"><input id="email-auth-consent" type="checkbox"><span>Даю согласие на обработку персональных данных согласно <a href="/privacy" target="_blank" rel="noopener noreferrer">политике обработки данных</a></span></label>
-      <label id="email-auth-age-label" class="consent" for="email-auth-age"><input id="email-auth-age" type="checkbox"><span>Мне исполнилось 18 лет</span></label>
+      <label id="email-auth-marketing-label" class="consent" for="email-auth-marketing"><input id="email-auth-marketing" type="checkbox"><span>Я согласен получать новости и предложения beresta по почте и в Telegram. Это необязательно, согласие можно отозвать в настройках.</span></label>
       <p class="field-hint">Создавая аккаунт, вы принимаете <a href="/terms" target="_blank" rel="noopener noreferrer">условия использования</a>.</p>
       <button id="email-auth-send" type="submit">Получить код</button>
       <button id="email-auth-recover" type="button" class="quiet" hidden>Восстановить пароль по почте</button>
@@ -350,6 +362,8 @@
     <button id="email-auth-close" type="button" class="quiet">Закрыть</button>
   </dialog>
   <div id="pop-scrim" class="pop-scrim" hidden></div>
+
+  <dialog id="contact-email-dialog" class="utility-dialog" aria-labelledby="contact-email-title"><div class="dialog-heading"><h2 id="contact-email-title">Подключить почту</h2><button type="button" data-close-dialog aria-label="Закрыть">×</button></div><p>Отправим ссылку для подтверждения. Откройте её в этом браузере, пока вы вошли в аккаунт.</p><form id="contact-email-form"><label for="contact-email-address">Почта</label><input id="contact-email-address" type="email" maxlength="254" autocomplete="email" required><div class="actions"><button id="contact-email-send" type="submit">Отправить ссылку</button></div><p id="contact-email-status" role="status" aria-live="polite"></p></form></dialog>
 
 
 <dialog id="reset-dialog" class="utility-dialog" aria-labelledby="reset-dialog-title"><div class="dialog-heading"><h2 id="reset-dialog-title">Новый пароль</h2><button type="button" data-close-dialog="" aria-label="Закрыть">×</button></div><p>Придумайте новый пароль. После сохранения войдите с ним. Остальные входы в аккаунт будут завершены.</p><form id="reset-form" novalidate=""><label for="reset-password">Новый пароль</label><input id="reset-password" type="password" autocomplete="new-password" minlength="10" maxlength="128" required="" placeholder="Не менее 10 символов"><label for="reset-password2">Ещё раз</label><input id="reset-password2" type="password" autocomplete="new-password" minlength="10" maxlength="128" required=""><div class="actions"><button id="reset-submit" type="submit">Сохранить пароль</button></div><p id="reset-status" role="status" aria-live="polite"></p></form></dialog><dialog id="delete-dialog" class="utility-dialog" aria-labelledby="delete-dialog-title"><div class="dialog-heading"><h2 id="delete-dialog-title">Запросить удаление аккаунта</h2><button type="button" data-close-dialog="" aria-label="Закрыть">×</button></div><p>Мы отметим аккаунт к удалению и выйдем из него. Оператор обработает запрос вручную. Отметка запроса сама по себе не удаляет данные. Срок зависит от основания обращения и требований закона. <a href="/data-deletion" target="_blank" rel="noopener noreferrer">Подробнее об удалении данных</a>.</p><form id="delete-form" novalidate=""><label for="delete-password">Подтвердите паролем</label><input id="delete-password" type="password" autocomplete="current-password" maxlength="128"><div class="actions"><button id="delete-submit" type="submit" class="danger">Отправить запрос</button></div></form><div class="delete-telegram"><p class="muted">Если пароля нет или вы входили через Telegram, подтвердите удаление в боте.</p><button id="delete-telegram-start" type="button" class="secondary">Подтвердить через Telegram</button><div id="delete-telegram-box" hidden=""><a id="delete-telegram-link" class="button-link" href="https://t.me/" target="_blank" rel="noopener noreferrer">Открыть Telegram<span class="sr-only"> (откроется в новой вкладке)</span></a><a id="delete-telegram-app" class="button-link alt" href="tg://resolve" hidden>Открыть приложение Telegram</a></div></div><p id="delete-status" role="status" aria-live="polite"></p></dialog><dialog id="category-delete-dialog" class="utility-dialog" aria-labelledby="category-delete-title"><div class="dialog-heading"><h2 id="category-delete-title">Удалить категорию?</h2><button type="button" data-close-dialog="" aria-label="Закрыть">×</button></div><p>Категория «<span id="category-delete-name"></span>» будет удалена. Заметки из категории останутся и попадут в «Без категории».</p><p class="dialog-status" role="status" aria-live="polite"></p><div class="actions"><button type="button" id="category-delete-confirm" class="danger">Удалить</button><button type="button" class="secondary" data-close-dialog="">Отмена</button></div></dialog><dialog id="telegram-dialog" class="utility-dialog" aria-labelledby="telegram-dialog-title"><div class="dialog-heading"><h2 id="telegram-dialog-title">Подключение Telegram</h2><button type="button" data-close-dialog="" aria-label="Закрыть">×</button></div><p class="dialog-status" role="status" aria-live="polite"></p><details id="telegram-settings" open=""><summary>Связать Telegram</summary><p>Создайте код и отправьте вашему боту команду /start с этим кодом. Бот спросит, подключать ли этот Telegram. Нажмите «Да, подключить». Затем вернитесь сюда и подтвердите свой Telegram ID.</p><button id="link-code" type="button" class="secondary">Создать код на 10 минут</button><p id="telegram-code"></p><button id="refresh-links" type="button" class="quiet">Проверить запрос</button><div id="telegram-links"></div></details>
