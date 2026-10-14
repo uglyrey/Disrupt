@@ -5,7 +5,7 @@
   function syncNote() {
     const title = get('title').value || 'Без названия';
     if(get('note-heading-title').textContent !== title)get('note-heading-title').textContent = title;
-    if (currentNote?.id !== lastNote) {lastNote = currentNote?.id; window.BerestaFocus?.closeAll();get('workspace').classList.remove('library-open');get('mobile-library-toggle').setAttribute('aria-expanded','false');}
+    if (currentNote?.id !== lastNote) {lastNote = currentNote?.id; window.BerestaFocus?.closeAll();}
     get('workspace').classList.toggle('has-note',!get('note-card').hidden);
     get('workspace').classList.toggle('has-source',!get('source-card').hidden);
     // This observer watches the note card subtree: write the attribute only when it changes,
@@ -15,12 +15,12 @@
     for (const button of get('notes').querySelectorAll('button')) {
       button.setAttribute('aria-current',String(button.dataset.noteId === currentNote?.id));
     }
+    phoneNoteMoved();
   }
   new MutationObserver(syncNote).observe(get('note-card'),{attributes:true,attributeFilter:['hidden'],childList:true,subtree:true});
   get('title').addEventListener('input',()=>{get('note-heading-title').textContent=get('title').value || 'Без названия';});
   new MutationObserver(syncNote).observe(get('source-card'),{attributes:true,attributeFilter:['hidden']});
   new MutationObserver(syncNote).observe(get('notes'),{childList:true});
-  get('mobile-library-toggle').onclick=()=>{const open=get('workspace').classList.toggle('library-open');get('mobile-library-toggle').setAttribute('aria-expanded',String(open));};
   get('new-note').addEventListener('click',()=>{if(get('capture-card').hidden)return;window.BerestaFocus?.closeAll();if(!get('thought').disabled)get('thought').focus();});
   // ---- Category navigation: plus button, inline create and rename, context menu, delete dialog ----
   window.categoryLongPressMs = 500;
@@ -288,5 +288,127 @@
   document.addEventListener('keydown',event => {
     if (event.key === 'Escape' && navMenu.classList.contains('is-open')) { setNavMenu(false); navMore.focus(); }
   });
-  categoriesNavigation();syncNote();
+
+  // ---- Phone: the new-note field comes first, the list of notes opens by a button ----
+  // Views on a phone: the capture field, the list («library-open»), a note or a source. CSS shows one of them.
+  // The browser Back button walks the same way: #list and #note are history entries that this code pushes itself.
+  const workspace = get('workspace'), libraryButton = get('mobile-library-toggle'), backButton = get('mobile-back');
+  const onPhone = () => typeof window.matchMedia === 'function' && window.matchMedia('(max-width:640px)').matches;
+  const listShown = () => workspace.classList.contains('library-open');
+  const noteShown = () => !get('note-card').hidden || !get('source-card').hidden;
+  const marker = () => (history.state && history.state.beresta) || '';
+  let origin = 'capture', noteWasShown = false, pendingOpen = null, pushes = 0, here = 0;
+  // Every entry carries a number. A lower number than the one we stood on means the person went back.
+  function pushMarker(name) {
+    try {
+      history.pushState({beresta:name,seq:++pushes},'',location.pathname + location.search + '#' + name); here = pushes;
+    } catch (_) { /* a sandboxed frame may refuse */ }
+  }
+  // An entry that no longer matches the screen gives way to the address of the screen.
+  function dropMarker() {
+    if (!marker()) return;
+    const tail = ['overview','assistant','tasks'].includes(location.hash.slice(1)) ? location.hash : '';
+    try { history.replaceState(null,'',location.pathname + location.search + tail); here = 0; } catch (_) { /* ignore */ }
+  }
+  function libraryCount() {
+    const filtered = filter.value !== '' || get('search-query').value.trim() !== '' || activeFilter.source !== '';
+    const count = get('notes').querySelectorAll('button[data-note-id]').length;
+    const text = filtered || !count ? '' : count + (get('more-notes').hidden ? '' : '+');
+    const badge = get('mobile-library-count');
+    if (badge.textContent !== text) badge.textContent = text;
+    badge.hidden = !text;
+  }
+  function backLabel() {
+    if (listShown()) return !noteShown() && !get('capture-card').hidden ? 'Новая запись' : 'Назад';
+    return origin === 'list' ? 'Назад' : 'Новая запись';
+  }
+  function phoneLabels() {
+    const text = backLabel(), label = get('mobile-back-label');
+    if (label.textContent !== text) label.textContent = text;
+  }
+  function setList(open) {
+    if (listShown() === open) return;
+    workspace.classList.toggle('library-open',open); phoneLabels();
+    if (onPhone()) window.scrollTo?.(0,0);
+  }
+  // Brings the capture field back when nothing else holds the column (a note was left for the list).
+  function showCapture() {
+    if (get('capture-card').hidden && !noteShown() && !workspace.classList.contains('has-view')) get('new-note').click();
+  }
+  function openList() {
+    // A desktop shows the list all the time. Without matchMedia (tests) the class is still set.
+    if (listShown() || (typeof window.matchMedia === 'function' && !onPhone())) return;
+    setList(true);
+    if (onPhone()) { pushMarker('list'); backButton.focus?.({preventScroll:true}); }
+  }
+  // The note or source took the column. A tap in the list brings the person here, so Back leads to the list.
+  function noteArrived() {
+    const fromList = listShown();
+    origin = fromList ? 'list' : 'capture'; noteWasShown = true;
+    if (fromList) setList(false);
+    phoneLabels();
+    if (onPhone()) { if (marker() !== 'note') pushMarker('note'); window.scrollTo?.(0,0); }
+  }
+  function phoneNoteMoved() {
+    const shown = noteShown();
+    if (shown && !noteWasShown) noteArrived();
+    noteWasShown = shown;
+    if (!shown && origin === 'list' && !listShown()) origin = 'capture';
+    phoneLabels(); libraryCount();
+  }
+  // Closes the open note or source without showing the capture field, then runs `then`.
+  // False when the person keeps it open (or a save is still running: leaveNote then calls us again).
+  function leaveToList(then) {
+    if (!noteShown()) { then(); return true; }
+    const ok = leaveNote(undefined,() => leaveToList(then));
+    if (ok) { noteWasShown = false; origin = 'capture'; then(); }
+    return ok;
+  }
+  libraryButton.onclick = openList;
+  backButton.onclick = () => {
+    const state = marker();
+    if (listShown()) {
+      if (state === 'list') history.back(); else { setList(false); dropMarker(); showCapture(); }
+    } else if (state === 'note') history.back();
+    else if (origin === 'list') leaveToList(() => setList(true));
+    else get('new-note').click();
+  };
+  // Entries that no longer match a screen (a note that was closed, a list that is already shown) are walked over when
+  // the person goes back, so one press of Back always changes what they see.
+  window.addEventListener('popstate',() => {
+    if (!onPhone()) return;
+    const seq = (history.state && history.state.seq) || 0, back = seq < here && pushes > 0;
+    here = seq;
+    const name = location.hash === '#list' ? 'list' : location.hash === '#note' ? 'note' : '';
+    if (name === 'list') {
+      if (listShown()) { if (back) history.back(); return; }
+      if (!leaveToList(() => setList(true))) history.forward();
+    } else if (name === 'note') {
+      if (noteShown()) { if (listShown()) setList(false); } else if (back) history.back();
+    } else {
+      setList(false);
+      if (noteShown()) { get('new-note').click(); if (noteShown()) history.forward(); } else showCapture();
+    }
+  });
+  get('notes').addEventListener('click',event => {
+    const button = event.target.closest('button[data-note-id]');
+    if (button && listShown()) pendingOpen = button.dataset.noteId;
+  });
+  // The tapped note is already the open one: nothing changes in the column, only the list steps aside.
+  document.addEventListener('beresta:note-rendered',() => {
+    if (pendingOpen && currentNote?.id === pendingOpen && listShown()) noteArrived();
+    pendingOpen = null;
+  });
+  // Another screen (overview, tasks, assistant, the capture field) takes the column: the list steps aside.
+  function phoneColumnMoved() {
+    if (listShown() && workspace.classList.contains('has-view')) { setList(false); dropMarker(); }
+    if (workspace.hidden) { if (listShown()) workspace.classList.remove('library-open'); origin = 'capture'; noteWasShown = false; pendingOpen = null; }
+    phoneLabels();
+  }
+  new MutationObserver(phoneColumnMoved).observe(workspace,{attributes:true,attributeFilter:['class','hidden']});
+  new MutationObserver(libraryCount).observe(get('notes'),{childList:true});
+  new MutationObserver(libraryCount).observe(get('more-notes'),{attributes:true,attributeFilter:['hidden']});
+  get('search-form').addEventListener('submit',() => setTimeout(libraryCount,0));
+  window.BerestaPhone = {origin:() => origin,openList,onPhone,listShown,backLabel:() => get('mobile-back-label').textContent};
+  categoriesNavigation();syncNote();libraryCount();phoneLabels();
 })();

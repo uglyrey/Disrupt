@@ -28,8 +28,8 @@ module.exports=async()=>{
   assert.equal($('note-heading-title').textContent,'Synthetic note');assert.equal($('view-tasks').hidden,false);assert.equal($('view-reminders').hidden,false);assert.equal($('markdown').hidden,false);assert.equal(w.document.querySelector('#note-card [data-note-view]'),null);
   assert.equal($('preview').hidden,true);$('markdown').value='Unsaved';
   $('tool-original').click();await settled();assert.equal($('original-details').open,true);assert.equal($('pop-original').hidden,false);assert.equal($('markdown').value,'Unsaved');assert.equal($('markdown').hidden,false);
-  $('mobile-library-toggle').click();assert.equal($('mobile-library-toggle').getAttribute('aria-expanded'),'true');
-  $('mobile-library-toggle').click();assert.equal($('workspace').classList.contains('library-open'),false);
+  $('mobile-library-toggle').click();assert.equal($('workspace').classList.contains('library-open'),true,'The button opens the list');
+  $('mobile-back').click();assert.equal($('workspace').classList.contains('library-open'),false,'Back closes it');
   $('open-telegram').click();assert.ok($('telegram-dialog').querySelector('.dialog-status'));$('telegram-dialog').close();
   $('open-feedback').click();assert.equal($('feedback-dialog').open,true);
   $('feedback-subject').value='Bug';$('feedback-description').value='Synthetic reproduction';
