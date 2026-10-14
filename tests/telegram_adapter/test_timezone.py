@@ -201,13 +201,29 @@ def test_offsets_are_passed_to_the_core_as_typed(settings):
     assert "Екатеринбург (UTC+5)" in texts(replies)[1]["text"]
 
 
-def test_unknown_city_gets_the_hint_and_keeps_waiting(settings):
-    core = FakeCore()
-    _, replies = run(settings, [callback(20, "tz:other"), message(21, "Нигде"), message(22, "Томск")], core)
-    texts_ = [r["text"] for r in texts(replies)]
-    assert texts_[1] == ZONE_NOT_FOUND == "Не нашёл такой город. Напишите крупный город рядом."
-    assert core.zone == "Asia/Tomsk"
-    assert "/telegram/updates" not in [p for _, p in core.paths()]
+def test_a_short_text_that_is_not_a_city_is_saved_once_as_a_note_with_one_line(settings):
+    core = FakeCore(asked=True)
+    bot, replies = run(settings, [callback(20, "tz:other"), message(21, "Купить хлеб")], core)
+    sent = [body for body in core.bodies("/telegram/updates")]
+    assert len(sent) == 1 and sent[0]["text"] == "Купить хлеб"
+    assert core.zone is None
+    answers = [r["text"] for r in texts(replies)]
+    assert answers[-1] == "Это не похоже на город, поэтому сохранил как запись. Часовой пояс можно выбрать командой /timezone."
+    assert answers.count(answers[-1]) == 1 and len(answers) == 3
+    assert bot.awaiting_zone.get(101) is None  # The waiting is over.
+
+
+def test_a_real_city_after_other_sets_the_zone_and_is_not_captured(settings):
+    core = FakeCore(asked=True)
+    run(settings, [callback(20, "tz:other"), message(21, "Томск")], core)
+    assert core.zone == "Asia/Tomsk" and core.bodies("/telegram/updates") == []
+
+
+def test_timezone_command_with_an_unknown_city_only_answers_not_found(settings):
+    core = FakeCore(asked=True)
+    _, replies = run(settings, [message(10, "/timezone Нигде")], core)
+    assert [r["text"] for r in texts(replies)] == [ZONE_NOT_FOUND]
+    assert core.bodies("/telegram/updates") == []
 
 
 def test_a_short_text_is_a_note_when_nobody_asked_for_a_city(settings):
