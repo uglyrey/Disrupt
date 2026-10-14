@@ -71,6 +71,15 @@ def set_account_timezone(db, user_id, zone, source, *, now=None):
     return user, moved
 
 
+def zone_question_due(db, user_id):
+    """True once for an account without a zone that was never asked. The mark is set in the same transaction,
+    so a processed Telegram message carries the question at most one time, and a replay repeats the same answer."""
+    user = db.get(User, user_id)
+    if valid_zone(user.timezone):
+        return False
+    return mark_zone_asked(db, user_id)
+
+
 def mark_zone_asked(db, user_id, *, now=None):
     """The bot asked for the zone. True only for the call that set the mark, so it asks once."""
     lock_account(db, user_id)

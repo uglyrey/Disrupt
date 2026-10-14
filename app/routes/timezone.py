@@ -8,6 +8,7 @@ from app.schemas import AccountTimezone, AccountTimezoneUpdate, ZoneList
 from app.security import get_login_session
 from app.timezones import zone_list
 
+TIMEZONES_CACHE = "private, max-age=3600"
 DOC = "Requires a browser session. Changes also require CSRF and a same-origin request."
 
 
@@ -21,7 +22,7 @@ def build_router(database):
     )
     def zones(request: Request, response: Response, db=Depends(database)):
         get_login_session(request, db)
-        response.headers["Cache-Control"] = "private, max-age=3600"
+        response.headers["Cache-Control"] = TIMEZONES_CACHE
         return {"zones": zone_list()}
 
     @router.get("/account/timezone", response_model=AccountTimezone, description=DOC)

@@ -484,6 +484,8 @@ class TelegramCaptureResponse(StrictModel):
     ai_limit_exceeded: bool = False
     ai_units_remaining: int | None = None
     ai_limit_resets_at: str | None = None
+    # True once: the account has no time zone and was never asked. The bot then asks with city buttons.
+    ask_timezone: bool = False
 
 
 class IntegrationErrorDetail(StrictModel):

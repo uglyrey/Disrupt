@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.account_timezone import mark_zone_asked, set_account_timezone, telegram_zone_state
+from app.account_timezone import mark_zone_asked, set_account_timezone, telegram_zone_state, zone_question_due
 from app.analytics import record_event
 from app.contracts import (
     ActionRequest,
@@ -327,6 +327,7 @@ def build_router(database, settings):
             if isinstance(result, Note) and body.processing_mode == "ai":
                 saved["ai_limit_exceeded"] = True  # Daily AI limit spent, saved without AI.
             db.flush()  # The stored capture counts in the remaining units.
+            saved["ask_timezone"] = zone_question_due(db, identity.user_id)
             return {**saved, **telegram_state(db, settings, identity.user_id)}
 
         return process_update(db, body, "text", handle)

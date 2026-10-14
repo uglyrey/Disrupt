@@ -84,8 +84,6 @@ LOCATION_KEYBOARD = {
 }
 ZONE_TEXTS = {"часовой пояс", "мой часовой пояс", "часовой пояс?"}
 ZONE_WAIT_MAX_CHARS = 40
-# A second operation of the same Telegram update (the question after a saved note) needs its own update_id in the core.
-ZONE_UPDATE_SHIFT = 1 << 40
 UTC_TEXT = re.compile(r"UTC([+-]\d{1,2}(:\d{2})?)?")
 LOGIN_PREFIX, LINK_PREFIX = "login:", "link:"
 LOGIN_DECLINE, LINK_DECLINE = "login-no", "link-no"
@@ -118,7 +116,6 @@ class Bot:
         self.watchers = {}
         self.recent = {}  # chat_id -> times of recent messages, in memory only
         self.awaiting_zone = {}  # chat_id -> until when the next short text is a city or an offset
-        self.zone_seen = set()  # chats known to have a zone or to have been asked, so no extra request per note
 
     @property
     def web(self):
@@ -331,7 +328,9 @@ class Bot:
             url = self.core.validate_saved(result)
             saved = saved_reply(result)
             await self.notify(chat_id, saved, url)
-            await self.ask_zone_once(chat_id, identity)
+            if result.get("ask_timezone") is True:
+                # The core says this account has no zone and was never asked. It marks the question as asked.
+                await self.notify(chat_id, ZONE_ASK, reply_markup=self.zone_keyboard())
         except Rejected as error:
             await self.notify(chat_id, REJECTIONS[str(error)], self.settings.web_url)
 
@@ -366,30 +365,6 @@ class Bot:
             raise RemoteFailure("core_invalid_response")
         return data
 
-    def remember_zone_seen(self, chat_id):
-        if len(self.zone_seen) > CHAT_TABLE_MAX:
-            self.zone_seen.clear()
-        self.zone_seen.add(chat_id)
-
-    async def ask_zone_once(self, chat_id, identity):
-        """After the usual reply, ask for the zone one time. A failure here never touches the saved note."""
-        if chat_id in self.zone_seen:
-            return
-        try:
-            state = await self.zone_state(identity)
-            if state is None:
-                return
-            if state.get("timezone") or state.get("asked"):
-                self.remember_zone_seen(chat_id)
-                return
-            shifted = {**identity, "update_id": identity["update_id"] + ZONE_UPDATE_SHIFT}
-            result = await self.core.post("/telegram/timezone-asked", shifted)
-            self.remember_zone_seen(chat_id)
-            if result.get("first") is True:
-                await self.notify(chat_id, ZONE_ASK, reply_markup=self.zone_keyboard())
-        except (Rejected, RemoteFailure) as error:
-            logger.warning("bot_zone_ask_skipped code=%s", getattr(error, "code", "rejected"))
-
     async def timezone_command(self, chat_id, identity, argument):
         """/timezone shows the zone and the buttons. With a city or an offset after it, the zone is set at once."""
         if argument:
@@ -402,7 +377,9 @@ class Bot:
             text = f"Ваш часовой пояс: {state['label']} ({state['utc']}). Выберите другой, если нужно."
         else:
             text = "Часовой пояс не выбран, напоминания идут по Москве. " + ZONE_ASK
-        self.remember_zone_seen(chat_id)
+            if not state.get("asked"):
+                # The buttons are on screen now, so the automatic question after a note is not needed any more.
+                await self.core.post("/telegram/timezone-asked", identity)
         await self.notify(chat_id, text, reply_markup=self.zone_keyboard())
 
     async def zone_button(self, chat_id, identity, token):
@@ -475,7 +452,6 @@ class Bot:
             or type(moved) is not int or not 0 <= moved <= 100000
         ):
             raise RemoteFailure("core_invalid_response")
-        self.remember_zone_seen(chat_id)
         self.awaiting_zone.pop(chat_id, None)
         text = f"Часовой пояс: {label} ({utc}). Напоминания будут приходить по этому времени."
         if moved:

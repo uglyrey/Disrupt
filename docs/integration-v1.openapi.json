@@ -9521,6 +9521,11 @@
               }
             ],
             "title": "Ai Limit Resets At"
+          },
+          "ask_timezone": {
+            "type": "boolean",
+            "title": "Ask Timezone",
+            "default": false
           }
         },
         "additionalProperties": false,
