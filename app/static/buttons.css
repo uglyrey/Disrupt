@@ -1,0 +1,105 @@
+/* Buttons v1. One system for every button and button-like link of the app (admin is out of scope).
+   Loaded last. It owns height, radius, font, colours, hover, active, focus and disabled.
+   The older per-screen files keep only layout (display, width, margin, position, order).
+   The declarations are !important on purpose, so that an older rule with an id cannot bring a new look back.
+   Roles   button (no class) or .primary, .secondary, .quiet, .danger, .text-button, .icon-button
+   Sizes   .small, default, .large (see the tokens). The components below map the older class names to a role and a size.
+   Contrast of every text on its fill is at least 7:1, the focus ring is at least 5:1 on the page colours (see docs/buttons-v1.md). */
+:root{
+  --btn-h-sm:32px;--btn-h:40px;--btn-h-lg:48px;
+  --btn-radius:10px;--btn-weight:600;--btn-leading:1.25;
+  --btn-fs-sm:13px;--btn-fs:14px;--btn-fs-lg:15px;
+  --btn-px-sm:12px;--btn-px:16px;--btn-px-lg:20px;
+  --btn-primary:#345943;--btn-primary-hover:#2a4a37;--btn-on-primary:#fff;
+  --btn-secondary:#eaf0e6;--btn-secondary-hover:#dde8d5;--btn-on-secondary:#264431;
+  --btn-ink:#2d4d3a;--btn-quiet-hover:#e6ede0;--btn-line:#7b9382;--btn-line-hover:#5f7a69;
+  --btn-danger:#8c3b2b;--btn-danger-hover:#7a3224;
+  --btn-link:#2f5a3f;--btn-ring:#2f6b46;--btn-disabled:.5;
+}
+@media(max-width:640px){:root{--btn-h-sm:36px;--btn-h:44px}}
+
+/* ---- Shape: what every button shares ---- */
+button:where(:not([data-note-id])),a.telegram-channel-link,a.cta-primary,a.cta-quiet,a.cta-channel,a.button-link,a.nav-action,a.menu-item{
+  box-sizing:border-box!important;min-height:var(--btn-h)!important;margin-block:0;padding:8px var(--btn-px)!important;border:1px solid transparent!important;border-radius:var(--btn-radius)!important;
+  font-family:inherit;font-size:var(--btn-fs)!important;font-weight:var(--btn-weight)!important;line-height:var(--btn-leading)!important;letter-spacing:0;text-decoration:none;cursor:pointer;
+  transition:background-color .15s,border-color .15s,color .15s,box-shadow .15s}
+
+/* ---- Roles ---- */
+/* Primary: a button without a class, .primary, the landing .cta-primary */
+button:where(:not([class])):where(:not([data-note-id])),button.primary,a.primary,a.cta-primary,.cta-primary{background:var(--btn-primary)!important;border-color:var(--btn-primary)!important;color:var(--btn-on-primary)!important;filter:none!important}
+button:where(:not([class])):where(:not([data-note-id])):hover:not(:disabled),button.primary:hover:not(:disabled),a.primary:hover,a.cta-primary:hover,.cta-primary:hover{background:var(--btn-primary-hover)!important;border-color:var(--btn-primary-hover)!important;color:var(--btn-on-primary)!important}
+/* Secondary */
+button.secondary,a.secondary,a.cta-channel,.cta-channel,a.telegram-channel-link,a.button-link{background:var(--btn-secondary)!important;border-color:transparent!important;color:var(--btn-on-secondary)!important;filter:none!important}
+button.secondary:hover:not(:disabled),a.secondary:hover,a.cta-channel:hover,a.telegram-channel-link:hover,a.button-link:hover{background:var(--btn-secondary-hover)!important;border-color:transparent!important;color:var(--btn-on-secondary)!important}
+/* Quiet: outlined, no fill */
+button.quiet,a.quiet,a.cta-quiet,.cta-quiet,button.cookie-choice,a.button-link.alt{background:transparent!important;border-color:var(--btn-line)!important;color:var(--btn-ink)!important;filter:none!important}
+button.quiet:hover:not(:disabled),a.quiet:hover,a.cta-quiet:hover,.cta-quiet:hover,button.cookie-choice:hover:not(:disabled),a.button-link.alt:hover{background:var(--btn-quiet-hover)!important;border-color:var(--btn-line-hover)!important;color:var(--btn-ink)!important}
+/* Danger */
+button.danger,a.danger{background:var(--btn-danger)!important;border-color:var(--btn-danger)!important;color:#fff!important;filter:none!important}
+button.danger:hover:not(:disabled),a.danger:hover{background:var(--btn-danger-hover)!important;border-color:var(--btn-danger-hover)!important;color:#fff!important}
+/* Text: looks like a link, keeps the same hit area as a small button */
+button.text-button,button.text-link,button.reminder-link,button.cookie-settings-link,button.tk-note{min-height:var(--btn-h-sm)!important;padding:4px 6px!important;border-color:transparent!important;background:transparent!important;color:var(--btn-link)!important;font-size:var(--btn-fs-sm)!important;text-decoration:underline!important;text-underline-offset:3px;text-decoration-color:#9db6a4}
+button.text-button:hover:not(:disabled),button.text-link:hover:not(:disabled),button.reminder-link:hover:not(:disabled),button.cookie-settings-link:hover:not(:disabled),button.tk-note:hover:not(:disabled){background:transparent!important;border-color:transparent!important;color:#1f3a2a!important;text-decoration-color:currentColor}
+/* Disabled */
+button:disabled,button[aria-disabled=true]{opacity:var(--btn-disabled)!important;cursor:not-allowed!important;filter:none!important}
+button:not(:disabled):active{transform:translateY(1px)}
+
+/* ---- Sizes ---- */
+button.small,a.small,button.reminder-small,button.br-mini,button.note-reload,button.tk-note,button.trash-restore,button.trash-forget,.structure-check button,.timezone-banner button,.notice-bar button,.onboarding-head>button,.item button,.category-row button{min-height:var(--btn-h-sm)!important;padding:4px var(--btn-px-sm)!important;font-size:var(--btn-fs-sm)!important}
+button.large,a.large,a.cta-primary,a.cta-quiet,a.cta-channel,.cta-primary,.cta-quiet,#capture-submit,#mobile-library-toggle{min-height:var(--btn-h-lg)!important;padding:8px var(--btn-px-lg)!important;font-size:var(--btn-fs-lg)!important}
+/* On a phone the main action of a form fills the row and is large */
+@media(max-width:640px){
+  #capture-form>.actions #capture-submit{min-height:var(--btn-h-lg)!important}
+  /* The tools of a note turn into rows of a list in the phone menu */
+  #note-tools.is-open button.tool-btn{justify-content:flex-start;gap:12px;width:100%!important;min-width:0!important;height:var(--btn-h-lg)!important;min-height:var(--btn-h-lg)!important;padding:0 12px!important}
+}
+
+/* ---- Icon buttons: a square with an icon or a sign ---- */
+button.icon-button,button.tool-btn,button.pop-close,button.md-tool,button.search-clear,button.category-add,button.category-more,button.nav-more,button.menu-button,button.item-trash,button.tk-trash,button.item-remind,.dialog-heading>button{
+  width:var(--btn-h)!important;height:var(--btn-h)!important;min-height:var(--btn-h)!important;min-width:var(--btn-h)!important;padding:0!important;
+  background:transparent!important;border-color:transparent!important;color:var(--btn-ink)!important;line-height:1!important}
+button.icon-button:hover:not(:disabled),button.tool-btn:hover:not(:disabled),button.pop-close:hover:not(:disabled),button.md-tool:hover:not(:disabled),button.search-clear:hover:not(:disabled),button.category-add:hover:not(:disabled),button.category-more:hover:not(:disabled),button.nav-more:hover:not(:disabled),button.menu-button:hover:not(:disabled),button.item-trash:hover:not(:disabled),button.tk-trash:hover:not(:disabled),button.item-remind:hover:not(:disabled),.dialog-heading>button:hover:not(:disabled){
+  background:var(--btn-quiet-hover)!important;border-color:transparent!important;color:var(--btn-ink)!important}
+button.tool-btn[aria-expanded=true],button.menu-button[aria-expanded=true],button.nav-more[aria-expanded=true]{background:var(--btn-quiet-hover)!important;border-color:var(--btn-line)!important}
+button.pop-close,button.md-tool,button.search-clear,button.category-add,button.category-more,button.item-trash,button.tk-trash,button.item-remind,button.icon-button.small,.dialog-heading>button{width:var(--btn-h-sm)!important;height:var(--btn-h-sm)!important;min-height:var(--btn-h-sm)!important;min-width:var(--btn-h-sm)!important;font-size:18px!important}
+/* The header menu button and the note menu button show a border, they are the doors of the phone menus */
+button.menu-button,#note-card button.note-menu-button{background:#fff!important;border-color:var(--btn-line)!important}
+#note-card button.note-menu-button{width:auto!important;min-width:0!important;height:var(--btn-h)!important;padding:0 12px!important;gap:4px}
+
+/* ---- Selectable pills: header sections, categories, filters, tabs. One shape, one weight ---- */
+button.main-nav-item,button.category-button,.source-filter button,.kind-toggle button,.view-switch button,.note-tabs button,.br-seg button{
+  background:transparent!important;border-color:transparent!important;color:var(--btn-ink)!important;min-height:var(--btn-h-sm)!important;padding:4px var(--btn-px-sm)!important;font-size:var(--btn-fs-sm)!important;white-space:nowrap}
+button.main-nav-item,button.category-button{min-height:var(--btn-h)!important;font-size:var(--btn-fs)!important;padding:4px var(--btn-px)!important}
+.source-filter button{padding:4px 9px!important;border-color:var(--btn-line)!important;flex:none}
+button.main-nav-item:hover:not(:disabled),button.category-button:hover:not(:disabled),.source-filter button:hover:not(:disabled),.kind-toggle button:hover:not(:disabled),.view-switch button:hover:not(:disabled),.note-tabs button:hover:not(:disabled),.br-seg button:hover:not(:disabled){background:var(--btn-quiet-hover)!important;color:var(--btn-ink)!important;border-color:transparent!important}
+button.main-nav-item[aria-current],button.category-button[aria-pressed=true],.source-filter button[aria-pressed=true],.kind-toggle button[aria-pressed=true],.view-switch button[aria-pressed=true],.note-tabs button[aria-pressed=true],.br-seg button[aria-pressed=true],
+button.main-nav-item[aria-current]:hover:not(:disabled),button.category-button[aria-pressed=true]:hover:not(:disabled),.source-filter button[aria-pressed=true]:hover:not(:disabled),.kind-toggle button[aria-pressed=true]:hover:not(:disabled),.view-switch button[aria-pressed=true]:hover:not(:disabled),.note-tabs button[aria-pressed=true]:hover:not(:disabled),.br-seg button[aria-pressed=true]:hover:not(:disabled){
+  background:var(--btn-primary)!important;border-color:var(--btn-primary)!important;color:var(--btn-on-primary)!important}
+/* On a phone the section and category pills are also outlined, so that they read as buttons on the page */
+@media(max-width:640px){
+  button.category-button:not([aria-pressed=true]){background:#fff!important;border-color:var(--btn-line)!important}
+  .workspace.has-view button.category-button[aria-pressed=true]{background:#fff!important;border-color:var(--btn-line)!important;color:var(--btn-ink)!important}
+}
+
+/* ---- Menu rows: lists of actions in the side bar, menus and popovers ---- */
+button.nav-action,a.nav-action,button.menu-item,a.menu-item,button.category-menu-item,button.na-item{
+  width:100%;min-height:var(--btn-h)!important;padding:6px 12px!important;background:transparent!important;border-color:transparent!important;color:var(--btn-ink)!important;text-align:left;font-size:var(--btn-fs)!important}
+button.nav-action,a.nav-action{min-height:var(--btn-h-sm)!important;font-size:var(--btn-fs-sm)!important;font-weight:500!important}
+button.nav-action:hover:not(:disabled),a.nav-action:hover,button.menu-item:hover:not(:disabled),a.menu-item:hover,button.category-menu-item:hover:not(:disabled),button.category-menu-item:focus,button.na-item:hover:not(:disabled){background:var(--btn-quiet-hover)!important;color:var(--btn-ink)!important}
+button.menu-item[aria-current],a.menu-item[aria-current]{background:var(--btn-primary)!important;color:var(--btn-on-primary)!important}
+button.na-item.is-danger,button.category-menu-item[data-action=delete]{color:#7a2a1c!important}
+button.na-item.is-danger:hover:not(:disabled),button.category-menu-item[data-action=delete]:hover,button.category-menu-item[data-action=delete]:focus{background:#f6e4e0!important;color:#6b2216!important}
+@media(max-width:640px){button.menu-item,a.menu-item,.menu-sheet button.menu-item{min-height:var(--btn-h-lg)!important;font-size:var(--btn-fs-lg)!important}}
+
+/* ---- Odd ones that keep their own look but follow the scale ---- */
+button.thought-format-btn,button.md-done{min-height:var(--btn-h-sm)!important;padding:4px var(--btn-px-sm)!important;font-size:var(--btn-fs-sm)!important;background:transparent!important;border-color:transparent!important;color:var(--btn-ink)!important}
+button.thought-format-btn:hover:not(:disabled),button.thought-format-btn[aria-expanded=true],button.md-done:hover:not(:disabled){background:var(--btn-quiet-hover)!important;color:var(--btn-ink)!important}
+button.md-done{background:var(--btn-secondary)!important;color:var(--btn-on-secondary)!important}
+#note-toolbar button{min-height:var(--btn-h-sm)!important;font-size:var(--btn-fs-sm)!important}
+.guide-bubble button.guide-next,.guide-bubble button.guide-never{min-height:var(--btn-h-sm)!important;border-radius:var(--btn-radius)!important;font-size:var(--btn-fs-sm)!important;font-weight:var(--btn-weight)!important}
+
+/* ---- Focus ring: the same everywhere, two pixels, outside, never clipped by a fill ---- */
+button:focus-visible,a.telegram-channel-link:focus-visible,a.cta-primary:focus-visible,a.cta-quiet:focus-visible,a.cta-channel:focus-visible,a.button-link:focus-visible,a.nav-action:focus-visible,a.menu-item:focus-visible,summary:focus-visible{
+  outline:2px solid var(--btn-ring)!important;outline-offset:2px!important;box-shadow:none}
+.guide-bubble button:focus-visible{outline-color:#fff!important}
+@media(prefers-reduced-motion:reduce){button,a.telegram-channel-link,a.cta-primary,a.cta-quiet,a.cta-channel,a.button-link{transition:none}}
