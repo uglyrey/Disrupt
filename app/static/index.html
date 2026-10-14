@@ -263,15 +263,7 @@
                   <label for="reminder-text">О чём напомнить</label><textarea id="reminder-text" rows="2" maxlength="1000" required=""></textarea>
                   <div id="reminder-target-wrap"><label for="reminder-target">Напомнить о</label><select id="reminder-target"><option value="">Заметка целиком</option></select></div>
                   <p id="reminder-when-label" class="reminder-label">Когда</p>
-                  <div id="reminder-chips" class="reminder-chips" role="group" aria-labelledby="reminder-when-label">
-                    <button type="button" class="reminder-chip" data-pick="hour" aria-pressed="false">Через час</button>
-                    <button type="button" class="reminder-chip" data-pick="today" aria-pressed="false">Сегодня в 19:00</button>
-                    <button type="button" class="reminder-chip" data-pick="tomorrow" aria-pressed="false">Завтра в 9:00</button>
-                    <button type="button" class="reminder-chip" data-pick="monday" aria-pressed="false">В понедельник в 9:00</button>
-                    <button type="button" class="reminder-chip" data-pick="week" aria-pressed="false">Через неделю</button>
-                    <button type="button" class="reminder-chip" data-pick="custom" aria-pressed="false">Другое время</button>
-                  </div>
-                  <div id="reminder-custom" class="reminder-custom" hidden="">
+                  <div id="reminder-custom" class="reminder-custom" role="group" aria-labelledby="reminder-when-label">
                     <div><label for="reminder-date">Дата</label><input id="reminder-date" type="date"></div>
                     <div><label for="reminder-time">Время</label><input id="reminder-time" type="time" step="300"></div>
                   </div>
