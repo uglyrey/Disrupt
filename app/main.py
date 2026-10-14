@@ -42,6 +42,7 @@ from app.routes.notes_manage import build_router as notes_manage_router
 from app.routes.reminders import build_router as reminders_router
 from app.routes.review import build_router as review_router
 from app.routes.structure import build_router as structure_router
+from app.routes.timezone import build_router as timezone_router
 from app.routes.transcripts import build_router as transcripts_router
 from app.schemas import (
     CaptureResponse,
@@ -300,6 +301,7 @@ def create_app(
     app.include_router(internal_router(database, settings))
     app.include_router(structure_router(database))
     app.include_router(reminders_router(database))
+    app.include_router(timezone_router(database))
     app.include_router(audio_router(database, settings, audio_storage, create_audio_capture))
     app.include_router(transcripts_router(database))
     app.include_router(brain_router(database, settings))

@@ -37,6 +37,7 @@ BOT_COMMANDS = [
     {"command": "menu", "description": "Показать кнопки"},
     {"command": "help", "description": "Что умеет бот"},
     {"command": "save", "description": "Сохранить текст без ИИ"},
+    {"command": "timezone", "description": "Выбрать часовой пояс"},
 ]
 HELP_TEXT = (
     "Что умеют кнопки.\n"
@@ -58,6 +59,34 @@ LINK_TEXT = (
     "Подключить этот Telegram к аккаунту beresta? "
     "Нажимайте «Да», только если вы сами начали подключение на сайте beresta."
 )
+# Time zone. Buttons carry the IANA name: "tz:Europe/Moscow" chooses it, "tzy:..." confirms a place found by location.
+ZONE_PREFIX, ZONE_CONFIRM_PREFIX = "tz:", "tzy:"
+ZONE_OTHER, ZONE_NO = "tz:other", "tz:no"
+ZONE_NAME = re.compile(r"[A-Za-z0-9_+/-]{1,60}")
+ZONE_PRESETS = (
+    ("Калининград", "Europe/Kaliningrad"), ("Москва", "Europe/Moscow"),
+    ("Самара", "Europe/Samara"), ("Екатеринбург", "Asia/Yekaterinburg"),
+    ("Омск", "Asia/Omsk"), ("Новосибирск", "Asia/Novosibirsk"),
+    ("Красноярск", "Asia/Krasnoyarsk"), ("Иркутск", "Asia/Irkutsk"),
+    ("Якутск", "Asia/Yakutsk"), ("Владивосток", "Asia/Vladivostok"),
+)
+ZONE_ASK = "Чтобы напоминания приходили вовремя, выберите ваш часовой пояс."
+ZONE_OTHER_TEXT = (
+    "Отправьте местоположение кнопкой внизу или напишите крупный город рядом, например Томск. "
+    "Можно и смещение, например +5 или UTC+5. Координаты я не сохраняю."
+)
+ZONE_NOT_FOUND = "Не нашёл такой город. Напишите крупный город рядом."
+ZONE_LOCATION_MISS = "Не получилось определить пояс по местоположению. Выберите город кнопкой или напишите крупный город рядом."
+LOCATION_KEYBOARD = {
+    "keyboard": [[{"text": "📍 Отправить местоположение", "request_location": True}]],
+    "resize_keyboard": True,
+    "one_time_keyboard": True,
+}
+ZONE_TEXTS = {"часовой пояс", "мой часовой пояс", "часовой пояс?"}
+ZONE_WAIT_MAX_CHARS = 40
+# A second operation of the same Telegram update (the question after a saved note) needs its own update_id in the core.
+ZONE_UPDATE_SHIFT = 1 << 40
+UTC_TEXT = re.compile(r"UTC([+-]\d{1,2}(:\d{2})?)?")
 LOGIN_PREFIX, LINK_PREFIX = "login:", "link:"
 LOGIN_DECLINE, LINK_DECLINE = "login-no", "link-no"
 LOGIN_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -71,6 +100,14 @@ CHAT_LIMIT, CHAT_WINDOW = 20, 60.0  # messages per chat per minute, buttons are 
 CHAT_TABLE_MAX = 2000
 
 
+def plural(count, one, few, many):
+    if count % 10 == 1 and count % 100 != 11:
+        return one
+    if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14:
+        return few
+    return many
+
+
 class Bot:
     def __init__(self, settings: Settings, core: CoreClient, telegram: TelegramClient, state: OffsetStore):
         self.settings, self.core, self.telegram, self.state = settings, core, telegram, state
@@ -80,6 +117,8 @@ class Bot:
         self.manual_until = {}
         self.watchers = {}
         self.recent = {}  # chat_id -> times of recent messages, in memory only
+        self.awaiting_zone = {}  # chat_id -> until when the next short text is a city or an offset
+        self.zone_seen = set()  # chats known to have a zone or to have been asked, so no extra request per note
 
     @property
     def web(self):
@@ -201,6 +240,10 @@ class Bot:
                 token = callback.get("data")
                 if not isinstance(token, str) or not 1 <= len(token.encode()) <= 64:
                     return
+                if token.startswith((ZONE_PREFIX, ZONE_CONFIRM_PREFIX)):
+                    await self.answer_callback(callback)
+                    await self.zone_button(chat_id, identity, token)
+                    return
                 if token.startswith((LOGIN_PREFIX, LINK_PREFIX)) or token in {LOGIN_DECLINE, LINK_DECLINE}:
                     # Answer first so the button stops spinning even when the core refuses.
                     await self.answer_callback(callback)
@@ -215,6 +258,17 @@ class Bot:
             if isinstance(text, str) and text.strip() in BUTTONS:
                 await self.press(chat_id, text.strip())
                 return
+            if isinstance(text, str) and (command == "/timezone" or text.strip().lower() in ZONE_TEXTS):
+                await self.timezone_command(chat_id, identity, argument.strip() if command == "/timezone" else "")
+                return
+            if (
+                isinstance(text, str) and text.strip() and not command.startswith("/")
+                and self.awaiting_zone.get(chat_id, 0) > self.clock()
+            ):
+                if len(text.strip()) <= ZONE_WAIT_MAX_CHARS and "\n" not in text.strip():
+                    await self.typed_zone(chat_id, identity, text.strip())
+                    return
+                self.awaiting_zone.pop(chat_id, None)  # A long text is a note, not a city.
             if command in {"/menu", "/help"} or (command == "/start" and not argument.strip()):
                 if command == "/help":
                     await self.notify(chat_id, HELP_TEXT, reply_markup=MAIN_MENU)
@@ -263,6 +317,9 @@ class Bot:
                 result = await self.core.post(
                     "/telegram/voice", {**identity, "processing_mode": "ai"}, audio=audio
                 )
+            elif isinstance(message.get("location"), dict):
+                await self.location(chat_id, identity, message["location"])
+                return
             elif isinstance(message.get("audio"), dict) or isinstance(message.get("video_note"), dict):
                 await self.notify(chat_id, "Пока принимаю только голосовые сообщения. Запиши голосовое кнопкой микрофона.")
                 return
@@ -274,8 +331,157 @@ class Bot:
             url = self.core.validate_saved(result)
             saved = saved_reply(result)
             await self.notify(chat_id, saved, url)
+            await self.ask_zone_once(chat_id, identity)
         except Rejected as error:
             await self.notify(chat_id, REJECTIONS[str(error)], self.settings.web_url)
+
+    # ---- Time zone ----
+
+    @staticmethod
+    def zone_keyboard():
+        """Ten common Russian zones, two per row, and «Другой»."""
+        rows = []
+        for index in range(0, len(ZONE_PRESETS), 2):
+            rows.append([
+                {"text": label, "callback_data": ZONE_PREFIX + zone} for label, zone in ZONE_PRESETS[index:index + 2]
+            ])
+        rows.append([{"text": "Другой", "callback_data": ZONE_OTHER}])
+        return {"inline_keyboard": rows}
+
+    async def zone_state(self, identity):
+        """The zone state of the linked person, or None when this Telegram is not linked."""
+        data = await self.core.get(
+            "/telegram/timezone",
+            {"bot_id": identity["bot_id"], "telegram_user_id": identity["telegram_user_id"]},
+        )
+        if data is None:
+            return None
+        zone, label, utc = data.get("timezone"), data.get("label"), data.get("utc")
+        if (
+            not (zone is None or isinstance(zone, str))
+            or not (label is None or isinstance(label, str) and len(label) <= 64)
+            or not (utc is None or isinstance(utc, str) and UTC_TEXT.fullmatch(utc))
+            or type(data.get("asked")) is not bool
+        ):
+            raise RemoteFailure("core_invalid_response")
+        return data
+
+    def remember_zone_seen(self, chat_id):
+        if len(self.zone_seen) > CHAT_TABLE_MAX:
+            self.zone_seen.clear()
+        self.zone_seen.add(chat_id)
+
+    async def ask_zone_once(self, chat_id, identity):
+        """After the usual reply, ask for the zone one time. A failure here never touches the saved note."""
+        if chat_id in self.zone_seen:
+            return
+        try:
+            state = await self.zone_state(identity)
+            if state is None:
+                return
+            if state.get("timezone") or state.get("asked"):
+                self.remember_zone_seen(chat_id)
+                return
+            shifted = {**identity, "update_id": identity["update_id"] + ZONE_UPDATE_SHIFT}
+            result = await self.core.post("/telegram/timezone-asked", shifted)
+            self.remember_zone_seen(chat_id)
+            if result.get("first") is True:
+                await self.notify(chat_id, ZONE_ASK, reply_markup=self.zone_keyboard())
+        except (Rejected, RemoteFailure) as error:
+            logger.warning("bot_zone_ask_skipped code=%s", getattr(error, "code", "rejected"))
+
+    async def timezone_command(self, chat_id, identity, argument):
+        """/timezone shows the zone and the buttons. With a city or an offset after it, the zone is set at once."""
+        if argument:
+            await self.typed_zone(chat_id, identity, argument[:ZONE_WAIT_MAX_CHARS * 2])
+            return
+        state = await self.zone_state(identity)
+        if state is None:
+            raise Rejected("telegram_not_linked")
+        if state.get("timezone") and state.get("label") and state.get("utc"):
+            text = f"Ваш часовой пояс: {state['label']} ({state['utc']}). Выберите другой, если нужно."
+        else:
+            text = "Часовой пояс не выбран, напоминания идут по Москве. " + ZONE_ASK
+        self.remember_zone_seen(chat_id)
+        await self.notify(chat_id, text, reply_markup=self.zone_keyboard())
+
+    async def zone_button(self, chat_id, identity, token):
+        if token == ZONE_OTHER:
+            self.awaiting_zone[chat_id] = self.clock() + MANUAL_TTL
+            await self.notify(chat_id, ZONE_OTHER_TEXT, reply_markup=LOCATION_KEYBOARD)
+        elif token == ZONE_NO:
+            await self.notify(chat_id, "Хорошо, часовой пояс не меняю.", reply_markup=MAIN_MENU)
+        else:
+            zone = token[len(ZONE_CONFIRM_PREFIX):] if token.startswith(ZONE_CONFIRM_PREFIX) else token[len(ZONE_PREFIX):]
+            if not ZONE_NAME.fullmatch(zone):
+                raise Rejected("invalid_timezone")
+            await self.apply_zone(chat_id, identity, zone)
+
+    async def find_zone(self, identity, **what):
+        payload = {k: identity[k] for k in ("bot_id", "telegram_user_id", "chat_id")}
+        result = await self.core.post("/telegram/timezone-find", {**payload, **what})
+        if result.get("found") is not True:
+            return None
+        zone, label, utc, city = result.get("timezone"), result.get("label"), result.get("utc"), result.get("city")
+        if (
+            not isinstance(zone, str) or not ZONE_NAME.fullmatch(zone)
+            or not isinstance(label, str) or not 0 < len(label) <= 64
+            or not isinstance(utc, str) or not UTC_TEXT.fullmatch(utc)
+            or not (city is None or isinstance(city, str) and len(city) <= 64)
+        ):
+            raise RemoteFailure("core_invalid_response")
+        return result
+
+    async def typed_zone(self, chat_id, identity, text):
+        found = await self.find_zone(identity, text=text)
+        if found is None:
+            await self.notify(chat_id, ZONE_NOT_FOUND)  # Stays in the waiting state until the time runs out.
+            return
+        await self.apply_zone(chat_id, identity, found["timezone"])
+
+    async def location(self, chat_id, identity, place):
+        """A shared place. After the «Другой» question the zone is set; otherwise the person confirms it first.
+
+        The coordinates go to the core in one request and are dropped. They are not kept here and not logged.
+        """
+        latitude, longitude = place.get("latitude"), place.get("longitude")
+        if any(type(v) not in {int, float} for v in (latitude, longitude)):
+            await self.notify(chat_id, ZONE_LOCATION_MISS, reply_markup=MAIN_MENU)
+            return
+        asked = self.awaiting_zone.pop(chat_id, 0) > self.clock()
+        found = await self.find_zone(identity, latitude=latitude, longitude=longitude)
+        if found is None:
+            await self.notify(chat_id, ZONE_LOCATION_MISS, reply_markup=MAIN_MENU)
+            return
+        if asked:
+            await self.apply_zone(chat_id, identity, found["timezone"])
+            return
+        near = f"Похоже, вы рядом с городом {found['city']}. " if found.get("city") else ""
+        keyboard = [[
+            {"text": "Да, сохранить", "callback_data": ZONE_CONFIRM_PREFIX + found["timezone"]},
+            {"text": "Нет", "callback_data": ZONE_NO},
+        ]]
+        await self.notify(
+            chat_id, f"{near}Сохранить часовой пояс {found['label']} ({found['utc']})?",
+            reply_markup={"inline_keyboard": keyboard},
+        )
+
+    async def apply_zone(self, chat_id, identity, zone):
+        result = await self.core.post("/telegram/timezone", {**identity, "timezone": zone})
+        label, utc, moved = result.get("label"), result.get("utc"), result.get("moved")
+        if (
+            not isinstance(label, str) or not 0 < len(label) <= 64
+            or not isinstance(utc, str) or not UTC_TEXT.fullmatch(utc)
+            or type(moved) is not int or not 0 <= moved <= 100000
+        ):
+            raise RemoteFailure("core_invalid_response")
+        self.remember_zone_seen(chat_id)
+        self.awaiting_zone.pop(chat_id, None)
+        text = f"Часовой пояс: {label} ({utc}). Напоминания будут приходить по этому времени."
+        if moved:
+            text += f"\nПеренёс {moved} {plural(moved, 'напоминание', 'напоминания', 'напоминаний')} на это время."
+        # The main menu replaces the location button, so the temporary keyboard is gone.
+        await self.notify(chat_id, text, reply_markup=MAIN_MENU)
 
     async def answer_callback(self, callback, text=None, *, alert=False):
         payload = {"callback_query_id": callback["id"]}

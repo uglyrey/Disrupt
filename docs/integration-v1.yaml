@@ -3080,6 +3080,93 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/timezones": {
+      "get": {
+        "tags": [
+          "timezone"
+        ],
+        "summary": "Zones",
+        "description": "Canonical IANA zones with Russian names for Russia, the CIS and common cities. Offsets are for the current moment. Sorted by offset, then name. Requires a browser session. Changes also require CSRF and a same-origin request.",
+        "operationId": "zones_api_v1_timezones_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneList"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/account/timezone": {
+      "get": {
+        "tags": [
+          "timezone"
+        ],
+        "summary": "Read Timezone",
+        "description": "Requires a browser session. Changes also require CSRF and a same-origin request.",
+        "operationId": "read_timezone_api_v1_account_timezone_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountTimezone"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      },
+      "patch": {
+        "tags": [
+          "timezone"
+        ],
+        "summary": "Write Timezone",
+        "description": "`manual` always writes. `auto` (the browser clock) only fills an empty value and never overwrites an existing one. Reminders made by guess are moved to the new zone. Requires a browser session. Changes also require CSRF and a same-origin request.",
+        "operationId": "write_timezone_api_v1_account_timezone_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountTimezoneUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountTimezone"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/internal/v1/telegram/voice": {
       "post": {
         "operationId": "telegram_voice",
@@ -6116,6 +6203,81 @@
           "policy_version"
         ],
         "title": "AcceptPolicy"
+      },
+      "AccountTimezone": {
+        "properties": {
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "manual",
+                  "telegram"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "timezone",
+          "source",
+          "label"
+        ],
+        "title": "AccountTimezone"
+      },
+      "AccountTimezoneUpdate": {
+        "properties": {
+          "timezone": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "title": "Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "timezone",
+          "source"
+        ],
+        "title": "AccountTimezoneUpdate"
       },
       "ActionRequest": {
         "properties": {
@@ -9952,6 +10114,52 @@
           "version"
         ],
         "title": "VersionRequest"
+      },
+      "ZoneInfoItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "offset": {
+            "type": "string",
+            "title": "Offset"
+          },
+          "offset_minutes": {
+            "type": "integer",
+            "title": "Offset Minutes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "offset",
+          "offset_minutes"
+        ],
+        "title": "ZoneInfoItem"
+      },
+      "ZoneList": {
+        "properties": {
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/ZoneInfoItem"
+            },
+            "type": "array",
+            "title": "Zones"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "zones"
+        ],
+        "title": "ZoneList"
       }
     },
     "securitySchemes": {

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
+from app.account_timezone import mark_zone_asked, set_account_timezone, telegram_zone_state
 from app.analytics import record_event
 from app.contracts import (
     ActionRequest,
@@ -47,9 +48,13 @@ from app.schemas import (
     TelegramLink,
     TelegramLoginConfirm,
     TelegramText,
+    TelegramZoneAsked,
+    TelegramZoneFind,
+    TelegramZoneSet,
 )
 from app.security import hash_token, require_internal_service
 from app.services import cancel_item_reminders, capture_text, lock_account, save_revision
+from app.timezones import find_zone, label_for_zone, nearest_city, offset_minutes, utc_text, valid_zone
 
 
 def stored_response(row):
@@ -325,6 +330,55 @@ def build_router(database, settings):
             return {**saved, **telegram_state(db, settings, identity.user_id)}
 
         return process_update(db, body, "text", handle)
+
+    # The time zone of a Telegram user. None of these routes is in the published contract (docs/timezone-v1.md).
+    @router.get("/telegram/timezone", include_in_schema=False)
+    def zone_state(bot_id: int, telegram_user_id: int, db=Depends(database)):
+        identity = db.scalar(select(TelegramIdentity).where(
+            TelegramIdentity.bot_id == bot_id, TelegramIdentity.telegram_user_id == telegram_user_id,
+        ))
+        if identity is None:
+            raise HTTPException(404, "Telegram не подключён")
+        return telegram_zone_state(db.get(User, identity.user_id))
+
+    @router.post("/telegram/timezone", include_in_schema=False)
+    def zone_set(body: TelegramZoneSet, db=Depends(database)):
+        def handle(operation_id):
+            identity = telegram_identity(db, body)
+            if not valid_zone(body.timezone):
+                raise IntegrationRejection(422, "invalid_timezone", "Неизвестный часовой пояс")
+            user, moved = set_account_timezone(db, identity.user_id, body.timezone, "telegram")
+            mark_zone_asked(db, identity.user_id)  # An answer needs no later question.
+            return {**telegram_zone_state(user), "moved": moved}
+
+        return process_update(db, body, "timezone", handle)
+
+    @router.post("/telegram/timezone-asked", include_in_schema=False)
+    def zone_asked(body: TelegramZoneAsked, db=Depends(database)):
+        def handle(operation_id):
+            identity = telegram_identity(db, body)
+            return {"first": mark_zone_asked(db, identity.user_id)}
+
+        return process_update(db, body, "timezone_asked", handle)
+
+    @router.post("/telegram/timezone-find", include_in_schema=False)
+    def zone_find(body: TelegramZoneFind, db=Depends(database)):
+        """The zone a typed city, an offset or a shared location means. Coordinates stay in this call:
+        there is no Inbox row, no log line and no stored value."""
+        telegram_identity(db, body)
+        zone = city = None
+        if body.latitude is not None and body.longitude is not None:
+            found = nearest_city(body.latitude, body.longitude)
+            if found:
+                city, zone = found[0], found[1]
+        elif body.text is not None:
+            zone = find_zone(body.text)
+        if zone is None:
+            return {"found": False}
+        return {
+            "found": True, "timezone": zone, "label": label_for_zone(zone), "city": city,
+            "utc": utc_text(offset_minutes(zone)),
+        }
 
     @router.post("/telegram/actions", response_model=ActionResponse, response_model_exclude_none=True)
     def telegram_action(body: ActionRequest, db=Depends(database)):

@@ -126,7 +126,7 @@ def test_telegram_reply_says_the_reminder_was_set(reminders):
     (row,) = auto_rows(app)
     delivery = claim(client).json()["items"][0]
     assert delivery["text"].split("\n")[-1] == (
-        "Напоминание поставлено: завтра в 09:00, «Андрей завтра уточнит ситуацию.». "
+        "Напоминание поставлено: завтра в 09:00 по Москве, «Андрей завтра уточнит ситуацию.». "
         f"Изменить: {delivery['note_url']}&reminder={row.id}"
     )
     assert "Предлагаю" not in delivery["text"] and delivery["callback_token"] is None
