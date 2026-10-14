@@ -40,10 +40,13 @@ def test_real_adapter_preserves_text_and_replays_commit(app_factory, adapter, tm
     with TestClient(app) as browser:
         linked(browser)
         config = settings(adapter, tmp_path)
-        replies = []
+        replies, asks = [], []
 
         class Telegram:
-            async def reply(self, chat_id, text, url=None):
+            async def reply(self, chat_id, text, url=None, **extra):
+                if text == adapter["bot"].ZONE_ASK:
+                    asks.append(extra["reply_markup"])  # The one-time time zone question, not a note reply.
+                    return
                 replies.append((chat_id, text, url))
 
         async def run():
@@ -63,6 +66,7 @@ def test_real_adapter_preserves_text_and_replays_commit(app_factory, adapter, tm
 
         asyncio.run(run())
         assert len(replies) == 4
+        assert len(asks) == 2  # Asked with the first note, and again only because that same update was replayed.
         assert replies[0][2] == replies[1][2] and replies[2][2] == replies[3][2]
         with app.state.sessions() as db:
             captures = db.scalars(select(Capture).order_by(Capture.created_at, Capture.id)).all()
@@ -86,8 +90,9 @@ def test_real_adapter_voice_uses_application_router_and_keeps_original(app_facto
                 assert file_id == "synthetic-file"
                 return wav()
 
-            async def reply(self, chat_id, text, url=None):
-                replies.append((chat_id, url))
+            async def reply(self, chat_id, text, url=None, **extra):
+                if text != adapter["bot"].ZONE_ASK:
+                    replies.append((chat_id, url))
 
         async def run():
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app)) as client:

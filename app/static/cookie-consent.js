@@ -4,7 +4,8 @@
 (() => {
   const KEY = 'beresta.cookie-consent.v1', VERSION = 1;
   // Conveniences that are written to localStorage only after "Принять все".
-  const OPTIONAL_KEYS = ['beresta.onboarding.dismissed.v1', 'beresta.reminderZone'];
+  const OPTIONAL_KEYS = ['beresta.onboarding.dismissed.v1', 'beresta.reminderZone',
+    'beresta.timezoneDismissed'];
   let memoryChoice = null;
   const memoryValues = {};
 
@@ -74,7 +75,7 @@
     const title = node('p', 'cookie-title', 'Файлы cookie и память браузера'); title.id = 'cookie-consent-title';
     const text = node('p', 'cookie-text');
     text.id = 'cookie-consent-text';
-    text.append('Для входа нужны служебные cookie, они работают при любом выборе. Остальное необязательно, это запомненный часовой пояс напоминаний и скрытые подсказки. Рекламы и аналитики нет. ');
+    text.append('Для входа нужны служебные cookie, они работают при любом выборе. Остальное необязательно, это скрытые подсказки и ответ на вопрос о смене часового пояса. Рекламы и аналитики нет. ');
     const link = node('a', '', 'Подробнее о cookie'); link.href = '/cookies';
     text.append(link, '.');
     copy.append(title, text);

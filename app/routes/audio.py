@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile
 from starlette.responses import StreamingResponse
 
+from app.account_timezone import zone_question_due
 from app.audio_storage import AudioStorageUnavailable, AudioTooLarge, UnsupportedAudio
 from app.integration import IntegrationRejection
 from app.limits import telegram_state
@@ -99,6 +100,7 @@ def build_router(database, settings, storage, create_audio_capture):
                 if isinstance(job, Capture):
                     saved["ai_limit_exceeded"] = True  # Daily AI limit spent, the recording is kept without AI.
                 db.flush()  # The stored recording counts in the remaining units.
+                saved["ask_timezone"] = zone_question_due(db, identity.user_id)
                 return {**saved, **telegram_state(db, settings, identity.user_id)}
 
             return process_update(db, body, "voice", handle)
