@@ -1,7 +1,7 @@
 'use strict';
 (() => {
   const get=id=>document.getElementById(id);
-  const kinds={bug:'Ошибка',idea:'Предложение',question:'Вопрос',other:'Другое'};
+  const kinds={bug:'Ошибка',idea:'Предложение',question:'Вопрос',other:'Другое',recovery:'Восстановление аккаунта'};
   const statuses={new:'Новое',in_progress:'В работе',resolved:'Решено'};
   const views={statistics:'statistics-view',feedback:'feedback-inbox',archive:'archive-view',audit:'audit-view'};
   let offset=0,next=null,generation=0;
@@ -24,7 +24,7 @@
         const card=text('article','', 'feedback-card panel');
         card.append(text('p',`${kinds[row.kind] || row.kind} · ${statuses[row.status]} · ${new Date(row.created_at*1000).toLocaleString('ru-RU')}`,'muted'),text('h2',row.subject));
         for(const [label,value] of [['Описание',row.description],['Как повторить',row.steps],['Ожидание',row.expected],['Контакт',row.contact]])if(value){card.append(text('h3',label),text('p',value,'feedback-body'));}
-        card.append(text('p',`Обращение ${row.id} · Пользователь ${row.user_id}`,'muted'));
+        card.append(text('p',`Обращение ${row.id}`+(row.user_id?` · Пользователь ${row.user_id}`:' · Без аккаунта'),'muted'));
         const actions=text('div','', 'feedback-actions');
         for(const [status,label] of Object.entries(statuses)){
           const button=text('button',label,'secondary');button.type='button';button.disabled=status===row.status;

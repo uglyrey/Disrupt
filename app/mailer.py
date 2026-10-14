@@ -24,13 +24,13 @@ class MailDisabled(MailError):
 class Mailer(Protocol):
     enabled: bool
 
-    def send(self, to: str, subject: str, body: str) -> None: ...
+    def send(self, to: str, subject: str, body: str, *, reply_to: str | None = None) -> None: ...
 
 
 class DisabledMailer:
     enabled = False
 
-    def send(self, to: str, subject: str, body: str) -> None:
+    def send(self, to: str, subject: str, body: str, *, reply_to: str | None = None) -> None:
         raise MailDisabled(MAIL_DISABLED_TEXT)
 
 
@@ -43,9 +43,11 @@ class SmtpMailer:
         self.host, self.port, self.user = host, port, user
         self.password, self.sender, self.timeout = password, sender, timeout
 
-    def send(self, to: str, subject: str, body: str) -> None:
+    def send(self, to: str, subject: str, body: str, *, reply_to: str | None = None) -> None:
         message = EmailMessage()
         message["From"], message["To"], message["Subject"] = self.sender, to, subject
+        if reply_to:
+            message["Reply-To"] = reply_to
         message.set_content(body)
         try:
             with smtplib.SMTP(self.host, self.port, timeout=self.timeout) as smtp:
@@ -73,11 +75,13 @@ class SmtpBzMailer:
         self.api_key, self.sender, self.sender_name = api_key, sender, sender_name
         self.timeout, self.transport = timeout, transport
 
-    def send(self, to: str, subject: str, body: str) -> None:
+    def send(self, to: str, subject: str, body: str, *, reply_to: str | None = None) -> None:
         fields = {
             "from": self.sender, "name": self.sender_name, "to": to, "subject": subject,
             "html": "<p>" + html.escape(body).replace("\n", "<br>") + "</p>", "text": body,
         }
+        if reply_to:
+            fields["reply"] = reply_to
         try:
             with httpx.Client(timeout=self.timeout, transport=self.transport, follow_redirects=False) as client:
                 response = client.post(

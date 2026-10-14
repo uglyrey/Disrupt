@@ -204,9 +204,6 @@ footer{flex:none;padding:14px 20px;border-top:1px solid var(--line);background:v
   .note-tabs button{flex:none;padding:0 12px;white-space:nowrap}
   .view-switch{margin:20px 0 16px}
   #preview{font-size:16px}
-  .workspace.has-note>#mobile-library-toggle{display:flex;align-items:center;gap:8px;width:auto;min-height:40px;margin:12px 16px 0;padding:0 14px;border:1px solid #d5dfcf;background:#fff;color:var(--ink);font-size:13px}
-  .workspace.has-note>#mobile-library-toggle::after{content:'';width:7px;height:7px;border-right:2px solid #58705e;border-bottom:2px solid #58705e;transform:rotate(45deg) translate(-2px,-2px)}
-  .workspace.has-note>#mobile-library-toggle[aria-expanded=true]::after{transform:rotate(-135deg) translate(-1px,-1px)}
   .workspace.has-note .editor-column{padding-top:16px}
   .utility-dialog{padding:20px 18px;width:calc(100vw - 24px);max-height:90dvh}
   .utility-dialog .actions button{flex:1 1 auto}

@@ -7,6 +7,7 @@ import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -15,9 +16,16 @@ from app.mailer import MAIL_DISABLED_TEXT, MailError
 from app.models import EmailRegistrationPending as Pending
 from app.models import User
 from app.policy import POLICY_VERSION, require_adult, require_consent
-from app.schemas import EmailCredentials, EmailRegistrationConfirm, EmailRegistrationStart
+from app.schemas import (
+    EmailBody,
+    EmailCodeConfirm,
+    EmailCredentials,
+    EmailRegistrationConfirm,
+    EmailRegistrationStart,
+)
 from app.security import (
     DUMMY_PASSWORD_HASH,
+    UNUSABLE_PASSWORD,
     check_origin,
     hash_password,
     hash_token,
@@ -27,6 +35,8 @@ from app.security import (
 from app.sessions import create_session
 
 COOKIE = "notes_email_registration"
+CODE_COOKIE = "notes_email_code"
+CODE_PATH = "/api/v1/auth/email/code"
 PATH = "/api/v1/auth/email"
 LIFETIME = 600
 INVALID_CODE = "Код не подошёл или истёк. Проверьте его или запросите новый"
@@ -64,6 +74,8 @@ def build_router(database, settings):
     def options(request: Request):
         return {
             "login_enabled": settings.email_registration_enabled,
+            # Sign-in by a code from the mail: for existing accounts and for new addresses.
+            "code_login_enabled": bool(settings.email_registration_enabled and request.app.state.mailer.enabled),
             "registration_enabled": bool(
                 settings.email_registration_enabled and settings.allow_registration and request.app.state.mailer.enabled
             ),
@@ -161,6 +173,104 @@ def build_router(database, settings):
         record_event(db, user.id, "registered", user.id, outcome="email")
         result = create_session(db, response, user, request, settings, method="email")
         response.delete_cookie(COOKIE, path=PATH)
+        return result
+
+    # Sign-in by a code. No password: the code proves the mailbox, a new address makes an account.
+
+    @router.post(CODE_PATH + "/start", status_code=202)
+    def code_start(body: EmailBody, request: Request, response: Response, db=Depends(database)):
+        check_origin(request)
+        enabled()
+        mailer = request.app.state.mailer
+        if not mailer.enabled:
+            raise HTTPException(503, MAIL_DISABLED_TEXT)
+        ip = request.client.host if request.client else "unknown"
+        throttle(db, "email-code-start-ip:" + ip, limit=10)
+        throttle(db, "email-code-start-address:" + body.email, limit=3)
+        now = time.time()
+        recent = db.scalar(select(func.count()).select_from(Pending).where(
+            Pending.email == body.email, Pending.created_at > now - 3600,
+        ))
+        latest = db.scalar(select(func.max(Pending.created_at)).where(Pending.email == body.email))
+        if recent >= 5 or (latest is not None and latest > now - 60):
+            raise HTTPException(429, "Подождите перед новым письмом", headers={"Retry-After": "60"})
+        if db.scalar(select(func.count()).select_from(Pending).where(Pending.created_at > now - 86400)) >= 500:
+            raise HTTPException(429, "Отправка кодов временно ограничена. Попробуйте позже")
+        db.execute(delete(Pending).where(Pending.created_at < now - 86400))
+        db.execute(update(Pending).where(Pending.email == body.email, Pending.used_at.is_(None)).values(
+            used_at=now, password_hash="", binding_hash="", code_hash="",
+        ))
+        binding = secrets.token_urlsafe(32)
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        row = Pending(
+            email=body.email, password_hash="", binding_hash=hash_token(binding),
+            code_hash=digest(binding, code), policy_version=POLICY_VERSION, expires_at=now + LIFETIME,
+        )
+        db.add(row)
+        db.commit()
+        # The same letter and the same answer for a known and an unknown address.
+        try:
+            mailer.send(body.email, "Код входа в beresta", (
+                f"Ваш код входа: {code}\n\nОн действует 10 минут. "
+                "Введите его в том браузере, где запросили код.\n\n"
+                "Если вы не входили в beresta, проигнорируйте письмо."
+            ))
+        except MailError:
+            retire(row, time.time())
+            db.commit()
+            raise HTTPException(503, "Не удалось отправить код. Попробуйте позже") from None
+        response.set_cookie(CODE_COOKIE, binding, httponly=True, secure=settings.secure_cookies,
+                            samesite="lax", path=CODE_PATH, max_age=LIFETIME)
+        return {"expires_at": datetime.fromtimestamp(row.expires_at, UTC).isoformat(), "resend_after": 60}
+
+    @router.post(CODE_PATH + "/confirm")
+    def code_confirm(body: EmailCodeConfirm, request: Request, response: Response, db=Depends(database)):
+        check_origin(request)
+        enabled()
+        ip = request.client.host if request.client else "unknown"
+        throttle(db, "email-code-confirm-ip:" + ip, limit=30)
+        binding = request.cookies.get(CODE_COOKIE, "")
+        now = time.time()
+        row = None
+        if binding and len(binding) <= 100:
+            row = db.scalar(select(Pending).where(Pending.binding_hash == hash_token(binding)).with_for_update())
+        if (row is None or row.used_at is not None or row.expires_at <= now or row.attempts >= 5
+                or row.password_hash != ""):
+            raise HTTPException(400, INVALID_CODE)
+        if not hmac.compare_digest(digest(binding, body.code), row.code_hash):
+            row.attempts += 1
+            if row.attempts == 5:
+                retire(row, now)
+            db.commit()
+            raise HTTPException(400, INVALID_CODE)
+        user = db.scalar(select(User).where(User.email == row.email))
+        if user is not None and user.email_verified_at is None:
+            raise HTTPException(409, "Не удалось войти по почте. Напишите в поддержку")
+        if user is None:
+            # A new address. The code stays valid until the person agrees, so the page can ask and confirm again.
+            if not settings.allow_registration:
+                raise HTTPException(403, "Регистрация закрыта")
+            if not body.accept_policy or not body.confirm_age:
+                db.rollback()
+                return JSONResponse(
+                    {"detail": "Чтобы создать аккаунт, дайте согласие и подтвердите возраст", "code": "consent_required"},
+                    status_code=409,
+                )
+            require_consent(body.accept_policy, body.policy_version)
+            require_adult(body.confirm_age)
+            throttle(db, "register-day:" + ip, limit=settings.registrations_per_ip_per_day, window=86400)
+            user = User(username=available_name(db, row.email), email=row.email, email_verified_at=now,
+                        password_hash=UNUSABLE_PASSWORD, policy_version=POLICY_VERSION, policy_accepted_at=now)
+            db.add(user)
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                raise HTTPException(409, "Не удалось создать аккаунт. Попробуйте ещё раз") from None
+            record_event(db, user.id, "registered", user.id, outcome="email_code")
+        retire(row, now)
+        result = create_session(db, response, user, request, settings, method="email_code")
+        response.delete_cookie(CODE_COOKIE, path=CODE_PATH)
         return result
 
     @router.post(PATH + "/login")

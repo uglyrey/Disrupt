@@ -114,8 +114,6 @@ async function time() {
 }
 async function setWhen(date,clockTime) { input('reminder-date',date); input('reminder-time',clockTime); await time(); }
 function resolves() { return calls.filter(c => c.url.pathname === '/api/v1/reminders/resolve-time'); }
-function chip(kind) { return $('reminder-chips').querySelector(`[data-pick="${kind}"]`); }
-async function pickChip(kind) { chip(kind).click(); await time(); }
 const sleep = ms => new Promise(resolve => setTimeout(resolve,ms));
 function row(id) { return [...$('reminders-list').querySelectorAll('article')].find(card => card.dataset.id === id); }
 
@@ -142,6 +140,8 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
     assert.equal($('reminder-link').hidden,true,'A linked Telegram shows no warning');
     telegramLinked = false; $('reminders-refresh').click();
     await until(() => !$('reminder-telegram').hidden);
+    const focused = [], realFocus = w.HTMLElement.prototype.focus;
+    w.HTMLElement.prototype.focus = function(...args) { focused.push(this.id); return realFocus.apply(this,args); };
     $('items').querySelector('.item-remind').click();
     assert.equal($('reminder-target').value,note.items[0].id);
     assert.equal($('reminder-target').options.length,2,'Only note and open tasks are targets');
@@ -153,17 +153,22 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
     await until(() => $('reminder-zones').options.length === zoneList.length);
     assert.ok([...$('reminder-zones').options].some(option => option.value === 'Asia/Novosibirsk' && option.text.includes('Новосибирск')),'Suggestions come from the API list');
     assert.equal($('reminder-check-time').hidden,true,'There is no manual check step');
-    assert.equal($('reminder-custom').hidden,true);
+    assert.equal($('reminder-custom').hidden,false,'Date and time are always shown');
+    assert.equal($('reminder-chips'),null,'There are no preset buttons');
+    assert.equal(w.document.querySelectorAll('.reminder-chip,[data-pick]').length,0);
+    assert.equal($('reminder-date').type,'date'); assert.equal($('reminder-time').type,'time');
+    // 16:00 in Novosibirsk: the next round hour of today, already filled in and resolved.
+    assert.equal($('reminder-local').value,'2026-10-10T17:00:00'); assert.equal($('reminder-date').value,'2026-10-10'); assert.equal($('reminder-time').value,'17:00');
+    assert.equal(focused.at(-1),'reminder-time','The cursor starts on the time');
+    await time(); assert.equal($('reminder-confirm').disabled,false,'The default time resolves at once');
     assert.equal($('reminder-zone-edit').hidden,true);
     $('reminder-zone-change').click(); assert.equal($('reminder-zone-edit').hidden,false);
     input('reminder-zone','Europe/Moscow');
     assert.equal($('reminder-zone-name').textContent,'Москва (Europe/Moscow)');
-    await pickChip('tomorrow');
-    assert.equal($('reminder-local').value,'2026-10-11T09:00:00');
+    await time();
+    assert.equal($('reminder-local').value,'2026-10-10T17:00:00','A new zone keeps the wall time the person sees');
     assert.equal(resolves().at(-1).body.timezone,'Europe/Moscow');
-    assert.equal(resolves().at(-1).body.local_time,'2026-10-11T09:00:00');
-    $('reminder-chips').querySelector('[data-pick="custom"]').click();
-    assert.equal($('reminder-date').value,'2026-10-11'); assert.equal($('reminder-time').value,'09:00');
+    assert.equal(resolves().at(-1).body.local_time,'2026-10-10T17:00:00');
     await setWhen('2090-10-08','12:00');
     assert.equal($('reminder-local').value,'2090-10-08T12:00:00');
     assert.equal($('reminder-confirm').disabled,false);
@@ -249,48 +254,34 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
     ambiguous = false; await time(); assert.equal($('reminder-time-choices').hidden,true);
     $('reminder-discard').click();
 
-    // Quick picks use the fixed clock: Saturday 2026-10-10, 12:00 in Moscow.
-    $('reminder-new').click(); input('reminder-zone','Europe/Moscow');
-    assert.deepEqual([...$('reminder-chips').querySelectorAll('button')].map(b => [b.textContent,b.hidden]),[
-      ['Через час',false],['Сегодня в 19:00',false],['Завтра в 9:00',false],['В понедельник в 9:00',false],
-      ['Через неделю',false],['Другое время',false]]);
-    assert.ok([...$('reminder-chips').querySelectorAll('button')].every(b => b.getAttribute('aria-pressed') === 'false'));
-    for (const [kind,local] of [['hour','2026-10-10T13:00:00'],['today','2026-10-10T19:00:00'],['tomorrow','2026-10-11T09:00:00'],
-      ['monday','2026-10-12T09:00:00'],['week','2026-10-17T12:00:00'],['custom','2026-10-11T09:00:00']]) {
-      await pickChip(kind);
-      assert.equal(resolves().at(-1).body.local_time,local,kind); assert.equal($('reminder-local').value,local,kind);
-      assert.deepEqual([...$('reminder-chips').querySelectorAll('[aria-pressed="true"]')].map(b => b.dataset.pick),[kind]);
-      assert.equal($('reminder-custom').hidden,kind !== 'custom');
-      assert.equal($('reminder-confirm').disabled,false,'A picked chip resolves at once');
-    }
-    clock = RealDate.parse('2026-10-10T09:07:30Z'); await pickChip('hour');
-    assert.equal(resolves().at(-1).body.local_time,'2026-10-10T13:10:00','Rounded up to the next five minutes');
-    await pickChip('week'); assert.equal(resolves().at(-1).body.local_time,'2026-10-17T12:10:00');
-    $('reminder-discard').click();
-    clock = RealDate.parse('2026-10-10T16:00:00Z');
-    $('reminder-new').click(); input('reminder-zone','Europe/Moscow');
-    assert.equal(chip('today').hidden,true,'Today at 19:00 is hidden after 18:30');
-    assert.equal(chip('tomorrow').hidden,false);
-    await pickChip('tomorrow'); assert.equal(resolves().at(-1).body.local_time,'2026-10-11T09:00:00');
-    input('reminder-zone','Asia/Vladivostok');
+    // The default time uses the fixed clock: Saturday 2026-10-10, 12:00 in Moscow.
+    const defaultAt = instant => {
+      clock = RealDate.parse(instant); $('reminder-new').click();
+      const local = $('reminder-local').value; $('reminder-discard').click(); return local;
+    };
+    // The account zone is Novosibirsk, UTC+7.
+    assert.equal(defaultAt('2026-10-10T09:00:00Z'),'2026-10-10T17:00:00','Next round hour');
+    assert.equal(defaultAt('2026-10-10T09:07:30Z'),'2026-10-10T17:00:00','Past the hour: the next one');
+    assert.equal(defaultAt('2026-10-10T08:59:59Z'),'2026-10-10T16:00:00','One second before the hour');
+    assert.equal(defaultAt('2026-10-10T13:59:00Z'),'2026-10-10T21:00:00','20:59 still gets 21:00');
+    assert.equal(defaultAt('2026-10-10T14:00:00Z'),'2026-10-11T09:00:00','From 21:00 the next hour is late: tomorrow at 9:00');
+    assert.equal(defaultAt('2026-10-10T16:30:00Z'),'2026-10-11T09:00:00','23:30: the next round hour is tomorrow, so tomorrow at 9:00');
+    assert.equal(defaultAt('2026-10-10T20:50:00Z'),'2026-10-11T09:00:00','03:50 of the new day: 4:00 is too early, so 9:00 of that day');
+    assert.equal(defaultAt('2026-10-10T23:30:00Z'),'2026-10-11T07:00:00','06:30: the next hour, 7:00, is already fine');
+    assert.equal(defaultAt('2026-10-11T00:10:00Z'),'2026-10-11T08:00:00','07:10 gets 8:00');
+    clock = RealDate.parse('2026-10-10T09:00:00Z');
+    // Changing only the zone moves nothing but the zone. There is no preset to recompute.
+    $('reminder-new').click(); input('reminder-zone','Europe/Moscow'); await time();
+    const wall = $('reminder-local').value; input('reminder-zone','Asia/Vladivostok');
     await until(() => resolves().at(-1).body.timezone === 'Asia/Vladivostok'); await time();
-    assert.equal(resolves().at(-1).body.local_time,'2026-10-12T09:00:00','An active chip is recomputed in the new zone');
-    assert.equal(chip('tomorrow').getAttribute('aria-pressed'),'true');
+    assert.equal($('reminder-local').value,wall); assert.equal(resolves().at(-1).body.local_time,wall);
     $('reminder-discard').click();
-    clock = RealDate.parse('2026-10-11T09:00:00Z');
-    $('reminder-new').click(); input('reminder-zone','Europe/Moscow');
-    assert.equal(chip('monday').hidden,true,'On Sunday tomorrow is already Monday'); $('reminder-discard').click();
-    clock = RealDate.parse('2026-10-12T09:00:00Z');
-    $('reminder-new').click(); input('reminder-zone','Europe/Moscow'); await pickChip('monday');
-    assert.equal(resolves().at(-1).body.local_time,'2026-10-19T09:00:00','On Monday the next Monday is a week away');
-    $('reminder-discard').click(); clock = RealDate.parse('2026-10-10T09:00:00Z');
 
     // A past time is explained and cannot be confirmed.
-    $('reminder-new').click(); input('reminder-zone','Europe/Moscow'); past = true;
-    await pickChip('hour');
+    past = true; $('reminder-new').click(); input('reminder-zone','Europe/Moscow'); await time();
     assert.equal($('reminder-preview').textContent,'Это время уже прошло. Выберите другое.');
     assert.equal($('reminder-confirm').disabled,true); past = false;
-    await pickChip('hour'); assert.equal($('reminder-confirm').disabled,false);
+    input('reminder-time','18:00'); await time(); assert.equal($('reminder-confirm').disabled,false);
 
     // Automatic resolve is debounced: a burst of edits sends one request with the last value.
     w.reminderDebounceMs = 60; const before = resolves().length;
@@ -329,7 +320,7 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
     assert.equal($('reminder-target-wrap').hidden,true,'A note without open tasks has no target choice');
     $('reminder-new').click(); assert.equal($('reminder-target-wrap').hidden,true); assert.equal($('reminder-target').value,'');
     $('reminder-discard').click();
-    console.log('Reminder DOM checks passed: quick picks, automatic debounced resolve, past time, hidden target, zone confirmation, task targets, draft guards, lost-response replay, edit reconciliation, generation conflict, unknown warning, cancellation, DST choice, pagination and stale responses.');
+    console.log('Reminder DOM checks passed: default time without presets, automatic debounced resolve, past time, hidden target, zone confirmation, task targets, draft guards, lost-response replay, edit reconciliation, generation conflict, unknown warning, cancellation, DST choice, pagination and stale responses.');
   } finally {
     // Let in-flight list requests settle before the document goes away.
     for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));

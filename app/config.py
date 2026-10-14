@@ -190,6 +190,8 @@ class Settings:
     smtp_user: str = ""
     smtp_password_file: str = ""
     mail_from: str = ""
+    # Where requests to restore an account go. Needs the mailer; the request is stored either way.
+    support_email: str = "support@berestaapp.ru"
 
     def __post_init__(self):
         if self.review_enabled and (not self.public_origin.startswith("https://") or len(self.analytics_pseudonym_key) < 32):
@@ -427,4 +429,5 @@ class Settings:
             smtp_user=os.environ.get("NOTES_SMTP_USER", ""),
             smtp_password_file=os.environ.get("NOTES_SMTP_PASSWORD_FILE", ""),
             mail_from=os.environ.get("NOTES_MAIL_FROM", ""),
+            support_email=os.environ.get("NOTES_SUPPORT_EMAIL", cls.support_email),
         )
