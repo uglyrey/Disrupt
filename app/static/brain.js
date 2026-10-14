@@ -137,9 +137,8 @@
   for (const button of document.querySelectorAll('[data-brain-view]')) button.onclick = () => navigate(button.dataset.brainView);
   // "Все заметки" leaves a screen. Inside the notes workspace it only opens the list on a phone.
   $('nav-notes').onclick = () => {
-    if (current) { setHash(null); route(); return; }
-    $('workspace').classList.add('library-open');
-    $('mobile-library-toggle').setAttribute('aria-expanded', 'true');
+    if (current) { setHash(null); route(); }
+    if (window.BerestaPhone) window.BerestaPhone.openList(); else $('workspace').classList.add('library-open');
   };
   syncNav();
   window.addEventListener('hashchange', route);
