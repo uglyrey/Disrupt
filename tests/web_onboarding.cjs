@@ -18,15 +18,13 @@ function landing(){
  try{
   assert.equal($('auth').hidden,false);
   assert.ok($('landing-title'),'landing headline');
-  assert.equal($('auth-form').querySelector('button').value,'login');
-  $('landing-register').click();
-  assert.equal($('auth').dataset.intent,'register');assert.equal($('auth-title').textContent,'Создать аккаунт');
-  assert.equal($('password').getAttribute('autocomplete'),'new-password');
-  assert.equal($('auth-form').querySelector('button').value,'register','Enter must submit the register action');
-  assert.equal($('auth-form').querySelectorAll('button[type=submit]').length,2);
-  $('landing-login').click();
-  assert.equal($('auth').dataset.intent,'login');assert.equal($('auth-form').querySelector('button').value,'login');
-  $('landing-register-bottom').click();assert.equal($('auth').dataset.intent,'register');
+  // The window is always there: no sign-up buttons, one sign-in form, one «Войти» in the hero and one at the bottom.
+  assert.equal($('landing-register'),null);assert.equal($('landing-register-bottom'),null);
+  assert.equal($('auth-form').querySelectorAll('button[type=submit]').length,1);
+  assert.equal($('auth-form').querySelector('button[type=submit]').value,'login');
+  let scrolled=0;$('auth-card').scrollIntoView=()=>{scrolled++;};
+  $('landing-login').click();assert.equal(scrolled,1);assert.equal(w.document.activeElement.id,'signin-email');
+  $('landing-login-bottom').click();assert.equal(scrolled,2);assert.equal(w.document.activeElement.id,'signin-email');
  }finally{dom.window.close();}
 }
 async function firstRun({storage='ok',notes=[],preset=false}={}){
@@ -70,6 +68,6 @@ module.exports=async()=>{
  }finally{t.dom.window.close();}
  t=await firstRun({notes:[{id:'n1',title:'Заметка'}]});
  try{assert.equal(t.$('onboarding'),null,'not shown when notes exist');}finally{t.dom.window.close();}
- console.log('Onboarding checks passed: landing intent, first-run panel, dismissal, blocked storage.');
+ console.log('Onboarding checks passed: landing buttons, first-run panel, dismissal, blocked storage.');
 };
 if(require.main===module)module.exports().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,0 +1,21 @@
+/* The sign-in window: two main buttons, the email steps, small links. Colours come from workspace.css tokens. */
+.signin-buttons{display:grid;gap:12px;margin-top:20px}
+.signin-buttons .signin-button{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:52px;margin:0;padding:0 18px;border-radius:12px;font-size:16px;font-weight:650;line-height:1.2}
+.signin-icon{flex:none}
+.signin-button:disabled{cursor:not-allowed}
+.signin-buttons .field-hint{margin:-4px 2px 0;text-align:center}
+.signin-stage[hidden],.signin-links[hidden]{display:none}
+.signin-links{display:flex;flex-wrap:wrap;justify-content:center;gap:4px 16px;margin:18px 0 0}
+.signin-step-lead{margin:14px 0 0;font-size:14px;overflow-wrap:anywhere}
+.auth-card .actions{margin-top:20px}
+#code-form .actions,#signin-password .actions,#consent-form .actions{grid-template-columns:1fr}
+.code-input{text-align:center;font-size:26px;letter-spacing:.35em;font-variant-numeric:tabular-nums;padding-left:calc(14px + .35em)}
+.code-input::placeholder{letter-spacing:.35em;opacity:.4}
+.landing-cta.landing-cta-phone{display:none}
+.field-error{margin:6px 0 0;color:#8c3b2b;font-size:13px}
+.field-error[hidden]{display:none}
+input[aria-invalid]{border-color:#8c3b2b}
+/* The shared dark hover of polish.css would sit under dark text on the text buttons. */
+.signin-links .text-link:hover:not(:disabled),.auth-extra .text-link:hover:not(:disabled){background:transparent;color:#24372d}
+@media(max-width:980px){.landing-cta.landing-cta-phone{display:flex}}
+.field-hint a{color:var(--accent);text-underline-offset:3px}
