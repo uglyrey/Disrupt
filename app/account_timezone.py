@@ -32,7 +32,7 @@ def telegram_zone_state(user):
     }
 
 
-def move_guessed_reminders(db, user_id, zone, now):
+def move_guessed_reminders(db, user_id, zone, now, channel="web"):
     """Move reminders made with the service zone to the same wall-clock time in `zone`. Returns how many moved.
 
     Only pending future reminders with `zone_guessed` are moved. One that would land in the past stays
@@ -47,7 +47,7 @@ def move_guessed_reminders(db, user_id, zone, now):
             wall = datetime.fromtimestamp(row.scheduled_at, ZoneInfo(row.timezone)).replace(tzinfo=None)
             target = wall.replace(tzinfo=target_zone).timestamp()
             if target > now:
-                reschedule(db, row, target, zone, row.text, "system")
+                reschedule(db, row, target, zone, row.text, channel)
                 moved += 1
         row.zone_guessed = False
     return moved
@@ -67,7 +67,9 @@ def set_account_timezone(db, user_id, zone, source, *, now=None):
     user.timezone, user.timezone_source = zone, source
     moved = 0
     if previous != zone:
-        moved = move_guessed_reminders(db, user_id, zone, time.time() if now is None else now)
+        moved = move_guessed_reminders(
+            db, user_id, zone, time.time() if now is None else now, "telegram" if source == "telegram" else "web",
+        )
     return user, moved
 
 
