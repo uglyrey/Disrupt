@@ -75,10 +75,10 @@ function boot({me = 'Europe/Moscow', browser = 'Asia/Novosibirsk', zonesFail = f
     return reply({detail: 'Не найдено'}, 404);
   };
   const $ = id => w.document.getElementById(id);
-  // app.js is strict, so its api() is handed out on window the way other tests do it.
-  for (const name of ['cookie-consent.js', 'timezone.js', ...(reminders ? ['reminders.js'] : []), 'app.js', 'workspace.js']) {
-    w.eval(read(name) + (name === 'app.js' ? '\nwindow.__api = api;' : ''));
-  }
+  // app.js and workspace.js share top-level names (currentNote), so they go through one eval, as in the other tests.
+  // app.js is strict, so its api() is handed out on window.
+  for (const name of ['cookie-consent.js', 'timezone.js', ...(reminders ? ['reminders.js'] : [])]) w.eval(read(name));
+  w.eval(read('app.js') + '\n' + read('workspace.js') + '\nwindow.__api = api;');
   const wait = ms => new Promise(resolve => w.setTimeout(resolve, ms));
   const until = async (check, what) => { for (let i = 0; i < 300; i++) { if (check()) return; await wait(5); } throw new Error(`Timed out: ${what}`); };
   // A new sign-in with a given answer of /auth/me, as app.js does it.
