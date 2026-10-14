@@ -317,7 +317,7 @@
       when = new Intl.DateTimeFormat('ru-RU', {timeZone: info.next_timezone || undefined, weekday: 'short', day: 'numeric',
         month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).format(new Date(info.next_at));
     } catch (_) { when = info.next_at; }
-    const zone = info.next_timezone ? ` (${zoneNames[info.next_timezone] || info.next_timezone})` : '';
+    const zone = info.next_timezone ? ` (${window.BerestaTimezone?.label(info.next_timezone) || zoneNames[info.next_timezone] || info.next_timezone})` : '';
     line.append('Ближайшее напоминание: ', el('strong', `${when}${zone}`));
     if (info.upcoming_7d) line.append(el('span', ` · на неделю вперёд ${info.upcoming_7d}`, 'muted'));
     return line;
