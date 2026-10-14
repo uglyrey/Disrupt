@@ -6,6 +6,13 @@
 .landing-badge span{padding:2px 10px;border-radius:999px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
 .landing h1{font-size:clamp(34px,5vw,58px);line-height:1.06;letter-spacing:-.035em;font-weight:720;margin:0 0 22px;text-wrap:balance}
 .landing-lead{font-size:clamp(17px,1.6vw,19px);line-height:1.6;color:var(--l-sub);max-width:34em;margin:0 0 30px}
+.landing-privacy{display:flex;align-items:flex-start;gap:12px;margin:0 0 26px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--paper);font-size:13px;line-height:1.55;color:var(--l-sub)}
+.landing-privacy>svg{flex:none;margin-top:2px;color:var(--accent)}
+.landing-privacy>div{min-width:0}
+.landing-privacy p{margin:0}
+.landing-privacy p+p{margin-top:6px}
+.landing-privacy strong{font-size:14px;font-weight:650;color:var(--l-ink)}
+.landing-privacy a{color:var(--accent);text-underline-offset:3px}
 .landing-cta{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
 .cta-primary,.cta-quiet,.cta-channel{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 24px;border-radius:12px;font:inherit;font-size:15px;font-weight:650;text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s,transform .15s}
 .cta-primary{background:var(--accent);color:#fff;border:1px solid var(--accent);box-shadow:0 8px 22px -10px #345943}
