@@ -2,6 +2,9 @@
 services:
   api:
     environment:
+      NOTES_MAIL_ENABLED: "true"
+      NOTES_EMAIL_REGISTRATION_ENABLED: "true"
+      NOTES_MAIL_TRANSPORT: smtp_bz
       NOTES_SMTP_BZ_API_KEY_FILE: /run/secrets/smtp_bz_api_key
     secrets:
       - smtp_bz_api_key
