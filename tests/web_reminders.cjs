@@ -266,7 +266,9 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
     assert.equal(defaultAt('2026-10-10T13:59:00Z'),'2026-10-10T21:00:00','20:59 still gets 21:00');
     assert.equal(defaultAt('2026-10-10T14:00:00Z'),'2026-10-11T09:00:00','From 21:00 the next hour is late: tomorrow at 9:00');
     assert.equal(defaultAt('2026-10-10T16:30:00Z'),'2026-10-11T09:00:00','23:30: the next round hour is tomorrow, so tomorrow at 9:00');
-    assert.equal(defaultAt('2026-10-10T20:50:00Z'),'2026-10-11T04:00:00','After midnight it is a new day with its own next hour');
+    assert.equal(defaultAt('2026-10-10T20:50:00Z'),'2026-10-11T09:00:00','03:50 of the new day: 4:00 is too early, so 9:00 of that day');
+    assert.equal(defaultAt('2026-10-10T23:30:00Z'),'2026-10-11T07:00:00','06:30: the next hour, 7:00, is already fine');
+    assert.equal(defaultAt('2026-10-11T00:10:00Z'),'2026-10-11T08:00:00','07:10 gets 8:00');
     clock = RealDate.parse('2026-10-10T09:00:00Z');
     // Changing only the zone moves nothing but the zone. There is no preset to recompute.
     $('reminder-new').click(); input('reminder-zone','Europe/Moscow'); await time();

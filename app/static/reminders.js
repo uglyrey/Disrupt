@@ -60,12 +60,14 @@
     const day = dayParts(local), year = dayParts(nowWall(zone)).y;
     return `${weekdaysShort[day.w]}, ${day.d} ${monthsShort[day.m]}${day.y === year ? '' : ' ' + day.y}, ${hm(local)}`;
   }
-  // A new reminder starts at the next round hour of today. Late in the evening it starts tomorrow at 9:00.
+  // A new reminder starts at the next round hour of today, if that hour is a sensible one (from 7:00 to 21:00).
+  // Before 7:00 it starts at 9:00 today, late in the evening it starts tomorrow at 9:00.
   function defaultTime(zone) {
     const now = nowWall(zone).slice(0,16), hour = Math.floor(wallMs(now) / 3600000) + 1;
-    const next = wallFromMs(hour * 3600000);
-    if (next.slice(0,10) === now.slice(0,10) && +next.slice(11,13) < 22) return next;
-    return `${wallFromMs(wallMs(now.slice(0,10) + 'T00:00') + 86400000).slice(0,10)}T09:00`;
+    const next = wallFromMs(hour * 3600000), today = now.slice(0,10);
+    if (next.slice(0,10) === today && +next.slice(11,13) >= 7 && +next.slice(11,13) < 22) return next;
+    if (next.slice(0,10) === today && +next.slice(11,13) < 7) return `${today}T09:00`;
+    return `${wallFromMs(wallMs(today + 'T00:00') + 86400000).slice(0,10)}T09:00`;
   }
   function say(text = '') { $('reminders-message').textContent = text; }
   function fields() { return {item_id:$('reminder-target').value || null, text:$('reminder-text').value,

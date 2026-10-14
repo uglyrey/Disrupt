@@ -187,5 +187,16 @@ module.exports = async () => {
       assert.equal(entries.length, 1, 'Nothing was pushed');
     } finally { await new Promise(resolve => w.setTimeout(resolve, 10)); dom.window.close(); }
   }
+  // ---- Buttons: one stylesheet, loaded last, with the scale tokens ----
+  {
+    const html = read('index.html'), css = read('buttons.css');
+    const links = [...html.matchAll(/<link rel="stylesheet" href="\/static\/([^"]+)">/g)].map(m => m[1]);
+    assert.equal(links.at(-1), 'buttons.css', 'buttons.css is loaded after every other stylesheet');
+    for (const token of ['--btn-h-sm:32px', '--btn-h:40px', '--btn-h-lg:48px', '--btn-radius:10px', '--btn-weight:600']) assert.ok(css.includes(token), 'Token ' + token);
+    assert.ok(/max-width:640px\)\{:root\{--btn-h-sm:36px;--btn-h:44px\}/.test(css), 'Phone heights');
+    assert.ok(css.includes('outline:2px solid var(--btn-ring)'), 'One focus ring');
+    assert.ok(!/id="reminder-chips"/.test(html), 'No preset chips in the reminder form');
+    for (const id of ['reminder-date', 'reminder-time', 'reminder-zone']) assert.ok(html.includes('id="' + id + '"'), id);
+  }
   console.log('Mobile capture checks passed: capture field first, list by button and by menu, back button and browser Back, note and leave, drafts, sections, desktop untouched.');
 };
