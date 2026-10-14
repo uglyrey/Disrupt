@@ -65,7 +65,7 @@
     const proxy = item.dataset.proxy ? get(item.dataset.proxy) : null;
     // The dialogs that the original buttons open give the focus back to the original, which is hidden on a phone.
     // The menu button takes it instead.
-    const dialogs = item.dataset.proxy && /^open-(telegram|feedback|delete|trash)$/.test(item.dataset.proxy);
+    const dialogs = item.dataset.proxy && /^open-(telegram|feedback|delete|trash|timezone)$/.test(item.dataset.proxy);
     closeGeneral({restore: !dialogs && !proxy});
     if (proxy) {
       proxy.click();

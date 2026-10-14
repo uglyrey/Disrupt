@@ -17,6 +17,7 @@ from app.config import Settings
 from app.models import Capture, Item, Outbox, Reminder, User
 from app.reminder_proposals import mentions_time, propose_reminder, sentence_spans
 from app.services import cancel_reminder_deliveries, item_view, lock_account, owned_note, reminder_proposals
+from app.timezones import effective_zone, zone_guessed
 
 AUTO_KEY_PREFIX = "ai:"
 MAX_REMINDER_TEXT = 1000
@@ -138,7 +139,7 @@ def local_clock(row):
     return datetime.fromtimestamp(row.scheduled_at, ZoneInfo(row.timezone)).strftime("%H:%M")
 
 
-def add_auto_reminder(db, note, item, text, scheduled_at, timezone):
+def add_auto_reminder(db, note, item, text, scheduled_at, timezone, guessed=False):
     """One confirmed reminder for a task, keyed by the task so it is never made twice. None if it already exists."""
     key = AUTO_KEY_PREFIX + item.id
     digest = hashlib.sha256(json.dumps(
@@ -147,7 +148,7 @@ def add_auto_reminder(db, note, item, text, scheduled_at, timezone):
     ).encode()).hexdigest()
     row = Reminder(
         user_id=note.user_id, note_id=note.id, item_id=item.id, scheduled_at=scheduled_at,
-        timezone=timezone, text=text, idempotency_key=key, creation_hash=digest,
+        timezone=timezone, text=text, idempotency_key=key, creation_hash=digest, zone_guessed=guessed,
     )
     try:
         with db.begin_nested():
@@ -186,7 +187,7 @@ def auto_reminders(db, note, settings=None, now=None):
         local = datetime.fromisoformat(proposal["local_time"]).replace(tzinfo=ZoneInfo(proposal["timezone"]))
         if local.timestamp() <= stamp:
             continue
-        row = add_auto_reminder(db, note, item, text, local.timestamp(), proposal["timezone"])
+        row = add_auto_reminder(db, note, item, text, local.timestamp(), proposal["timezone"], zone_guessed(user))
         if row is not None:
             created.append(row)
     return created
@@ -217,7 +218,7 @@ def request_task_text(sentence, match):
     return rest[:1].upper() + rest[1:]
 
 
-def default_reminder_time(now, settings):
+def default_reminder_time(now, settings, zone=None):
     """When to remind about a request that names no time, as an aware datetime in the account zone.
 
     Between 08:00 and 21:00 local time it is now plus NOTES_REMINDER_DEFAULT_DELAY (an hour by default).
@@ -226,7 +227,7 @@ def default_reminder_time(now, settings):
     delay = settings.reminder_default_delay_seconds
     if delay <= 0:
         return None
-    zone = ZoneInfo(settings.limit_timezone)
+    zone = ZoneInfo(zone or settings.limit_timezone)
     local = now.astimezone(zone)
     if DAY_START <= local.hour < DAY_END:
         target = local + timedelta(seconds=delay)
@@ -279,7 +280,8 @@ def request_reminders(db, note, original, settings=None, now=None):
     """
     settings = settings or Settings()
     now = now or datetime.now(UTC)
-    zone = settings.limit_timezone
+    user = db.get(User, note.user_id)
+    zone, guessed = effective_zone(user, settings), zone_guessed(user)
     created = []
     for request in reminder_requests(db, note, original):
         if request["covered"]:
@@ -292,7 +294,7 @@ def request_reminders(db, note, original, settings=None, now=None):
         elif mentions_time(sentence):
             continue
         else:
-            local = default_reminder_time(now, settings)
+            local = default_reminder_time(now, settings, zone)
             if local is None:
                 continue
         if local.timestamp() <= now.timestamp():
@@ -312,7 +314,7 @@ def request_reminders(db, note, original, settings=None, now=None):
             db.add(task)
             db.flush()
         text = " ".join(task.text.split())[:MAX_REMINDER_TEXT].strip()
-        row = add_auto_reminder(db, note, task, text, local.timestamp(), zone)
+        row = add_auto_reminder(db, note, task, text, local.timestamp(), zone, guessed)
         if row is not None:
             created.append(row)
     return created

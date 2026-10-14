@@ -1,0 +1,18 @@
+.notice-bar.timezone-banner{padding:8px 28px;font-size:13px;background:#eef3e9;color:#2f4a38}
+.timezone-banner p{flex:1 1 280px}
+.timezone-banner-actions{display:flex;gap:8px;flex-wrap:wrap}
+.timezone-banner button{min-height:36px;padding:0 14px;font-size:13px}
+.timezone-dialog{width:min(560px,calc(100vw - 32px))}
+.timezone-list{position:relative;margin-top:10px;max-height:min(46vh,340px);overflow-y:auto;border:1px solid var(--line,#d7dfd2);border-radius:10px;background:#fff}
+.timezone-item{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"name offset" "id offset";gap:0 12px;align-items:center;width:100%;margin:0;padding:8px 12px;min-height:48px;border:0;border-bottom:1px solid #edf0e8;border-radius:0;background:transparent;color:#24352d;text-align:left;font-weight:500}
+.timezone-item:last-child{border-bottom:0}
+.timezone-item:hover{background:#f3f6ee;filter:none}
+.timezone-item[aria-pressed="true"]{background:#345943;color:#fff}
+.timezone-item[aria-current="true"] .timezone-name::after{content:" · сейчас";font-weight:400;opacity:.8}
+.timezone-item:focus-visible{outline:2px solid #719079;outline-offset:-2px}
+.timezone-name{grid-area:name;overflow-wrap:anywhere}
+.timezone-id{grid-area:id;font-size:12px;font-weight:400;opacity:.75;overflow-wrap:anywhere}
+.timezone-offset{grid-area:offset;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.timezone-dialog .actions button{min-height:42px}
+#timezone-status:not(:empty){padding:10px 12px;background:#edf3e7;border-radius:8px}
+@media(max-width:640px){.timezone-banner{padding:8px 16px}.timezone-banner-actions button{flex:1 1 auto}.timezone-list{max-height:38vh}}

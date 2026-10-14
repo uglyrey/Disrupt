@@ -6,12 +6,13 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import case, func, select
 
 from app.dashboard import build_dashboard
-from app.models import Item, Note
+from app.models import Item, Note, User
 from app.notes_manage import manual_edges
 from app.related import MIN_SCORE, NoteDoc, build_index, graph_edges, related_notes
 from app.security import get_login_session
 from app.services import owned_note
 from app.task_due import resolve_due
+from app.timezones import effective_zone
 
 CORPUS_LIMIT = 1000
 GRAPH_NEIGHBOURS = 3
@@ -122,10 +123,11 @@ def build_router(database, settings):
             Note.updated_at.desc(), Item.position, Item.id,
         ).limit(limit + 1).offset(offset)
         rows = db.execute(statement).all()
+        zone = effective_zone(db.get(User, session.user_id), settings)
         return {
             "status": status, "limit": limit, "offset": offset, "has_more": len(rows) > limit,
             "counts": {"open": counts.get("open", 0), "completed": counts.get("completed", 0)},
-            "items": [task_row(item, title, note_version, updated_at, created_at, settings.limit_timezone)
+            "items": [task_row(item, title, note_version, updated_at, created_at, zone)
                       for item, title, note_version, updated_at, created_at in rows[:limit]],
         }
 

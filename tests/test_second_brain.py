@@ -359,7 +359,7 @@ def test_processing_reply_offers_a_reminder_for_a_task_with_a_deadline(reminders
     text = delivery["text"]
     assert text.startswith("Заметка готова.")
     assert text.split("\n")[-1] == (
-        "Предлагаю напоминание: завтра в 09:00, «Андрей завтра уточнит ситуацию.». "
+        "Предлагаю напоминание: завтра в 09:00 по Москве, «Андрей завтра уточнит ситуацию.». "
         "Подтвердить или изменить время: " + delivery["note_url"] + "#remind"
     )
     assert "\n\nПредлагаю напоминание" in text

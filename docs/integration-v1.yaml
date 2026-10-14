@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "РЈРјРЅС‹Рµ Р·Р°РјРµС‚РєРё",
-    "description": "РЎС‚СЂСѓРєС‚СѓСЂРёСЂРѕРІР°РЅРёРµ РјС‹СЃР»РµР№. РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ СЂР°Р±РѕС‚Р°РµС‚ РёРјРёС‚Р°С†РёСЏ РР Р±РµР· СЃРµС‚РµРІС‹С… Р·Р°РїСЂРѕСЃРѕРІ.",
+    "title": "Умные заметки",
+    "description": "Структурирование мыслей. По умолчанию работает имитация ИИ без сетевых запросов.",
     "version": "0.1.0"
   },
   "paths": {
@@ -3095,6 +3095,93 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReminderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/timezones": {
+      "get": {
+        "tags": [
+          "timezone"
+        ],
+        "summary": "Zones",
+        "description": "Canonical IANA zones with Russian names for Russia, the CIS and common cities. Offsets are for the current moment. Sorted by offset, then name. Requires a browser session. Changes also require CSRF and a same-origin request.",
+        "operationId": "zones_api_v1_timezones_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ZoneList"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/account/timezone": {
+      "get": {
+        "tags": [
+          "timezone"
+        ],
+        "summary": "Read Timezone",
+        "description": "Requires a browser session. Changes also require CSRF and a same-origin request.",
+        "operationId": "read_timezone_api_v1_account_timezone_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountTimezone"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      },
+      "patch": {
+        "tags": [
+          "timezone"
+        ],
+        "summary": "Write Timezone",
+        "description": "`manual` always writes. `auto` (the browser clock) only fills an empty value and never overwrites an existing one. Reminders made by guess are moved to the new zone. Requires a browser session. Changes also require CSRF and a same-origin request.",
+        "operationId": "write_timezone_api_v1_account_timezone_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountTimezoneUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountTimezone"
                 }
               }
             }
@@ -7021,6 +7108,81 @@
         ],
         "title": "AcceptPolicy"
       },
+      "AccountTimezone": {
+        "properties": {
+          "timezone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "manual",
+                  "telegram"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "timezone",
+          "source",
+          "label"
+        ],
+        "title": "AccountTimezone"
+      },
+      "AccountTimezoneUpdate": {
+        "properties": {
+          "timezone": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "manual"
+            ],
+            "title": "Source"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "timezone",
+          "source"
+        ],
+        "title": "AccountTimezoneUpdate"
+      },
       "ActionRequest": {
         "properties": {
           "bot_id": {
@@ -7247,7 +7409,7 @@
           "generated_at"
         ],
         "title": "AiProviders",
-        "description": "РЎРѕСЃС‚РѕСЏРЅРёРµ РѕСЃРЅРѕРІРЅРѕРіРѕ РР-С€Р»СЋР·Р° Рё СЂР°СЃС…РѕРґ СЂРµР·РµСЂРІР°. РџРѕРґСЂРѕР±РЅРѕСЃС‚Рё РІ docs/ai-failover-v1.md."
+        "description": "Состояние основного ИИ-шлюза и расход резерва. Подробности в docs/ai-failover-v1.md."
       },
       "AssistantAsk": {
         "properties": {
@@ -10468,6 +10630,11 @@
               }
             ],
             "title": "Ai Limit Resets At"
+          },
+          "ask_timezone": {
+            "type": "boolean",
+            "title": "Ask Timezone",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -11078,6 +11245,52 @@
           "version"
         ],
         "title": "VersionRequest"
+      },
+      "ZoneInfoItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "offset": {
+            "type": "string",
+            "title": "Offset"
+          },
+          "offset_minutes": {
+            "type": "integer",
+            "title": "Offset Minutes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "offset",
+          "offset_minutes"
+        ],
+        "title": "ZoneInfoItem"
+      },
+      "ZoneList": {
+        "properties": {
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/ZoneInfoItem"
+            },
+            "type": "array",
+            "title": "Zones"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "zones"
+        ],
+        "title": "ZoneList"
       }
     },
     "securitySchemes": {
