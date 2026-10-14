@@ -52,11 +52,11 @@ for path, endpoint in [
     )
 spec = app.openapi()
 spec["paths"]["/internal/v1/telegram/updates"]["post"]["responses"]["200"]["content"]["application/json"]["examples"] = {
-    mode: {"value": json.loads(Path(f"docs/fixtures/telegram-save-{mode}.json").read_text())}
+    mode: {"value": json.loads(Path(f"docs/fixtures/telegram-save-{mode}.json").read_text(encoding="utf-8"))}
     for mode in ("ai", "manual")
 }
 spec["paths"]["/admin-api/v1/summary"]["get"]["responses"]["200"]["content"]["application/json"]["example"] = json.loads(
-    Path("docs/fixtures/admin-summary.json").read_text()
+    Path("docs/fixtures/admin-summary.json").read_text(encoding="utf-8")
 )
 for path, operations in spec["paths"].items():
     for method, operation in operations.items():
@@ -247,7 +247,7 @@ examples = {
     "telegram_text": {
         mode: {
             "request": {**base, "text": "  Пример записи\n", "processing_mode": mode},
-            "response": json.loads(Path(f"docs/fixtures/telegram-save-{mode}.json").read_text()),
+            "response": json.loads(Path(f"docs/fixtures/telegram-save-{mode}.json").read_text(encoding="utf-8")),
         }
         for mode in ("ai", "manual")
     },
@@ -262,7 +262,7 @@ examples = {
         },
         "responses": [{"status": "completed"}, {"status": "already_completed"}],
     },
-    "errors": json.loads(Path("docs/fixtures/integration-errors.json").read_text()),
+    "errors": json.loads(Path("docs/fixtures/integration-errors.json").read_text(encoding="utf-8")),
 }
 for path, method in [
     ("/internal/v1/telegram/link-request", "post"),
@@ -278,8 +278,8 @@ for path, method in [
         if values and "application/json" in response.get("content", {}):
             response["content"]["application/json"]["examples"] = values
 serialized = json.dumps(spec, ensure_ascii=False, indent=2) + "\n"
-Path("docs/integration-v1.openapi.json").write_text(serialized)
+Path("docs/integration-v1.openapi.json").write_text(serialized, encoding="utf-8")
 # JSON is also valid YAML. Both consumer filenames are generated from the same object.
-Path("docs/integration-v1.yaml").write_text(serialized)
-Path("docs/integration-v1-examples.json").write_text(json.dumps(examples, ensure_ascii=False, indent=2) + "\n")
+Path("docs/integration-v1.yaml").write_text(serialized, encoding="utf-8")
+Path("docs/integration-v1-examples.json").write_text(json.dumps(examples, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 app.state.engine.dispose()

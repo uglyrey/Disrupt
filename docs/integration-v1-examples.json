@@ -25,7 +25,7 @@
         "update_id": 12,
         "telegram_user_id": 2345678901234,
         "chat_id": 2345678901234,
-        "text": "  Пример записи\n",
+        "text": "  РџСЂРёРјРµСЂ Р·Р°РїРёСЃРё\n",
         "processing_mode": "ai"
       },
       "response": {
@@ -41,7 +41,7 @@
         "update_id": 12,
         "telegram_user_id": 2345678901234,
         "chat_id": 2345678901234,
-        "text": "  Пример записи\n",
+        "text": "  РџСЂРёРјРµСЂ Р·Р°РїРёСЃРё\n",
         "processing_mode": "manual"
       },
       "response": {
