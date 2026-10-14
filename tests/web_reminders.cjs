@@ -1,5 +1,10 @@
 'use strict';
 let telegramLinked = false;
+// The zone of the account decides the default zone of a new reminder. The browser zone of the test is only the second choice.
+const accountTimezone = 'Asia/Novosibirsk';
+const zoneList = [['Europe/Moscow','Москва',180],['Europe/Berlin','Берлин',60],['Asia/Yekaterinburg','Екатеринбург',300],
+  ['Asia/Novosibirsk','Новосибирск',420],['Asia/Vladivostok','Владивосток',600],['UTC','UTC',0]]
+  .map(([id,label,offset_minutes]) => ({id,label,offset_minutes,offset:''}));
 const assert = require('node:assert/strict');
 const {randomUUID} = require('node:crypto');
 const fs = require('node:fs');
@@ -36,7 +41,8 @@ w.fetch = async (input,options={}) => {
   const body = options.body ? JSON.parse(options.body) : null;
   calls.push({url,method,body,options});
   if (url.pathname === '/health' || url.pathname === '/api/v1/provider/usage') return reply({simulation:true});
-  if (url.pathname === '/api/v1/auth/me') return reply({username:'Тест',csrf_token:'synthetic-csrf'});
+  if (url.pathname === '/api/v1/auth/me') return reply({username:'Тест',csrf_token:'synthetic-csrf',timezone:accountTimezone});
+  if (url.pathname === '/api/v1/timezones') return reply({zones:zoneList});
   if (url.pathname === '/api/v1/categories' || url.pathname === '/api/v1/jobs') return reply([]);
   if (url.pathname === '/api/v1/telegram/links') return reply({identities:telegramLinked ? [{bot_id:1,telegram_user_id:2,notifications_enabled:true,delivery_status:'available'}] : [],pending:[]});
   if (url.pathname === '/api/v1/notes') return reply([note,other]);
@@ -115,6 +121,7 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
 
 (async () => {
   try {
+    w.eval(fs.readFileSync(path.join(root,'timezone.js'),'utf8'));
     w.eval(fs.readFileSync(path.join(root,'reminders.js'),'utf8'));
     w.eval(fs.readFileSync(path.join(root,'app.js'),'utf8'));
     await until(() => $('notes').querySelectorAll('button').length === 2);
@@ -141,7 +148,10 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
     assert.equal($('reminder-text').value,'Позвонить');
     assert.equal($('reminder-confirm').disabled,true);
     assert.equal($('reminder-confirm').textContent,'Напомнить');
-    assert.equal($('reminder-zone').value,w.Intl.DateTimeFormat().resolvedOptions().timeZone,'Zone defaults to the browser zone');
+    assert.equal($('reminder-zone').value,accountTimezone,'Zone defaults to the zone of the account');
+    assert.equal($('reminder-zone-name').textContent,'Новосибирск (Asia/Novosibirsk)');
+    await until(() => $('reminder-zones').options.length === zoneList.length);
+    assert.ok([...$('reminder-zones').options].some(option => option.value === 'Asia/Novosibirsk' && option.text.includes('Новосибирск')),'Suggestions come from the API list');
     assert.equal($('reminder-check-time').hidden,true,'There is no manual check step');
     assert.equal($('reminder-custom').hidden,true);
     assert.equal($('reminder-zone-edit').hidden,true);
@@ -223,7 +233,7 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
     assert.equal(row(first.id).querySelector('[data-action="cancel"]').disabled,true);
 
     $('reminder-new').click();
-    assert.equal($('reminder-zone').value,'Europe/Moscow','A confirmed zone is remembered for the next reminder');
+    assert.equal($('reminder-zone').value,accountTimezone,'The next reminder starts in the account zone, not in the zone used last');
     input('reminder-zone','Europe/Berlin'); ambiguous = true;
     input('reminder-local','2090-10-29T02:30'); await time();
     assert.equal($('reminder-date').value,'2090-10-29'); assert.equal($('reminder-time').value,'02:30');

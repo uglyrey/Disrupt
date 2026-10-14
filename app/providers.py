@@ -130,7 +130,8 @@ def parse_retry_after(value, *, now=None):
 
 
 class LLMProvider(Protocol):
-    def structure(self, text: str, *, categories: tuple[str, ...] = ()) -> StructuredNote: ...
+    # `timezone` is the IANA zone of the account for this job. A provider that does not take it uses its own.
+    def structure(self, text: str, *, categories: tuple[str, ...] = (), timezone: str | None = None) -> StructuredNote: ...
 
     def assistant(self, kind: str, context, *, question: str | None = None) -> dict: ...
 
@@ -376,7 +377,7 @@ class MockProvider:
             markdown="\n\n".join(sections) or text, conclusions=[], items=[], category_name=None,
         )
 
-    def structure(self, text, *, categories=()):
+    def structure(self, text, *, categories=(), timezone=None):
         if text == DEMO_TEXT:
             return StructuredNote(
                 title="Запуск проекта",
@@ -628,8 +629,8 @@ class CloudRuProvider:
         self._timezone = timezone
         self.endpoint = base_url + "/chat/completions"
 
-    def structure(self, text, *, categories=()):
-        return self.structure_with_usage(text, categories=categories, on_usage=lambda _: None)
+    def structure(self, text, *, categories=(), timezone=None):
+        return self.structure_with_usage(text, categories=categories, on_usage=lambda _: None, timezone=timezone)
 
     @staticmethod
     def unwrap_content(content):
@@ -797,7 +798,7 @@ class CloudRuProvider:
             raise ProviderError("provider_invalid_response")
         return "".join(parts), finish_reason, usage
 
-    def structure_with_usage(self, text, *, categories=(), on_usage):
+    def structure_with_usage(self, text, *, categories=(), on_usage, timezone=None):
         try:
             content, finish_reason = self._chat(
                 {
@@ -807,7 +808,7 @@ class CloudRuProvider:
                     "response_format": self.response_format(StructuredNote),
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": structure_context(categories, self._timezone)},
+                        {"role": "user", "content": structure_context(categories, timezone or self._timezone)},
                         {"role": "user", "content": json.dumps({"note_text": text}, ensure_ascii=False)},
                     ],
                 },

@@ -461,6 +461,24 @@ class TelegramLoginConfirm(TelegramOperation):
     first_name: str | None = Field(default=None, max_length=128)
 
 
+class TelegramZoneSet(TelegramOperation):
+    timezone: str = Field(min_length=1, max_length=64)
+
+
+class TelegramZoneAsked(TelegramOperation):
+    pass
+
+
+class TelegramZoneFind(StrictModel):
+    """A stateless question: which zone does this text or this place mean. Nothing is stored."""
+    bot_id: TelegramID
+    telegram_user_id: TelegramID
+    chat_id: TelegramID
+    text: str | None = Field(default=None, max_length=64)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+
 class TelegramLink(TelegramOperation):
     code: str = Field(min_length=22, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
@@ -484,6 +502,8 @@ class TelegramCaptureResponse(StrictModel):
     ai_limit_exceeded: bool = False
     ai_units_remaining: int | None = None
     ai_limit_resets_at: str | None = None
+    # True once: the account has no time zone and was never asked. The bot then asks with city buttons.
+    ask_timezone: bool = False
 
 
 class IntegrationErrorDetail(StrictModel):
@@ -557,3 +577,36 @@ class GuideState(StrictModel):
 
 class GuidesResponse(StrictModel):
     guides: dict[str, GuideState]
+
+
+# ---- Time zone of the account (docs/timezone-v1.md) ----
+
+class ZoneInfoItem(StrictModel):
+    id: str
+    label: str
+    offset: str
+    offset_minutes: int
+
+
+class ZoneList(StrictModel):
+    zones: list[ZoneInfoItem]
+
+
+class AccountTimezone(StrictModel):
+    timezone: str | None
+    source: Literal["auto", "manual", "telegram"] | None
+    label: str | None
+
+
+class AccountTimezoneUpdate(StrictModel):
+    timezone: str = Field(min_length=1, max_length=64)
+    source: Literal["auto", "manual"]
+
+    @field_validator("timezone")
+    @classmethod
+    def known_zone(cls, value):
+        from app.timezones import valid_zone
+
+        if not valid_zone(value):
+            raise ValueError("Unknown IANA timezone")
+        return value

@@ -13,11 +13,12 @@ from sqlalchemy import and_, or_, select
 
 from app.analytics import record_event
 from app.components import record as record_component
-from app.models import Capture, Item, Job, Note, Outbox, Reminder, TelegramIdentity
+from app.models import Capture, Item, Job, Note, Outbox, Reminder, TelegramIdentity, User
 from app.reminder_proposals import label_for
 from app.reminders import AUTO_KEY_PREFIX, NOT_UNDERSTOOD, unscheduled_requests
 from app.security import hash_token
 from app.services import item_view, lock_account, reminder_proposals
+from app.timezones import by_zone, zone_guessed
 
 
 def locked_delivery(db, delivery_id):
@@ -150,7 +151,9 @@ def auto_reminder_hint(db, note, settings, now):
     def when(row):
         zone = ZoneInfo(row.timezone)
         local = datetime.fromtimestamp(row.scheduled_at, zone).replace(tzinfo=None)
-        return label_for(local, datetime.fromtimestamp(now, zone).replace(tzinfo=None))
+        text = label_for(local, datetime.fromtimestamp(now, zone).replace(tzinfo=None))
+        # The account has no zone yet, so the time was read in the service zone. Say which one.
+        return text + " " + by_zone(row.timezone) if row.zone_guessed else text
 
     if len(rows) == 1:
         return f"Напоминание поставлено: {when(first)}, «{short_task(first.text)}». Изменить: {link}"
@@ -180,8 +183,11 @@ def reminder_hint(db, note, settings, now=None):
         proposal = proposals.get(item["id"])
         if proposal:
             link = settings.public_origin + "/?capture=" + note.capture_id + "#remind"
+            when = proposal["label"]
+            if zone_guessed(db.get(User, note.user_id)):
+                when += " " + by_zone(proposal["timezone"])
             line = (
-                f"Предлагаю напоминание: {proposal['label']}, «{short_task(item['text'])}». "
+                f"Предлагаю напоминание: {when}, «{short_task(item['text'])}». "
                 f"Подтвердить или изменить время: {link}"
             )
             return line + ("\n" + missed if missed else "")

@@ -11,6 +11,7 @@ from app.config import Settings
 from app.models import LoginSession, User
 from app.policy import POLICY_VERSION
 from app.security import COOKIE_NAME, hash_token
+from app.timezones import valid_zone
 
 
 def user_payload(user: User, csrf: str) -> dict:
@@ -21,6 +22,7 @@ def user_payload(user: User, csrf: str) -> dict:
         "policy_current": user.policy_version == POLICY_VERSION,
         "policy_version": POLICY_VERSION,
         "deletion_requested": user.deletion_requested_at is not None,
+        "timezone": user.timezone if valid_zone(user.timezone) else None,
     }
 
 

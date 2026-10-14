@@ -62,6 +62,11 @@ class User(Base):
     marketing_consent_revoked_at: Mapped[float | None] = mapped_column(Float, nullable=True)
     # Where the person is in the short guided tips: {"note_tools": {"step": 0, "done": false}, ...}. Empty until used.
     guide_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # The person's own IANA zone. Empty until detected or chosen; then the service zone is used by guess.
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    timezone_source: Mapped[str | None] = mapped_column(String(16), nullable=True)  # auto, manual, telegram
+    # When the Telegram bot asked for the zone. It asks once on its own.
+    timezone_asked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class LoginSession(Base):
@@ -307,6 +312,8 @@ class Reminder(Base):
     confirmed_at: Mapped[float] = mapped_column(Float, default=time.time)
     idempotency_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
     creation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Made with the service zone because the account had none. Moved when the person sets a zone.
+    zone_guessed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class Inbox(Base):
