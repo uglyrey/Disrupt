@@ -1,26 +1,42 @@
+﻿param(
+    [ValidateRange(1024,65535)][int]$LocalPort = 18000,
+    [switch]$CheckOnly,
+    [switch]$TestConnection
+)
 $ErrorActionPreference = 'Stop'
-$taskProbe = New-Object Net.Sockets.TcpClient
-$taskOccupied = $false
-try { $taskProbe.Connect('127.0.0.1',18000); $taskOccupied = $true } catch {} finally { $taskProbe.Dispose() }
-if ($taskOccupied) { throw 'Local port 18000 is already in use. Close the previous tunnel first.' }
+. (Join-Path $PSScriptRoot 'admin-tunnel.ps1')
+$taskPlan = Get-BerestaAdminTunnelPlan -PreferredPort $LocalPort -SkipReuse:$TestConnection
+$taskUrl = 'http://127.0.0.1:' + $taskPlan.Port + '/admin'
+if ($CheckOnly) { $taskPlan; return }
+if ($taskPlan.Reuse) {
+    Write-Host ('Рабочий туннель уже запущен. Админка: ' + $taskUrl)
+    if (!$TestConnection) { Start-Process $taskUrl }
+    return
+}
+if ($taskPlan.Port -ne $LocalPort) {
+    Write-Host ('Порт ' + $LocalPort + ' занят. Используем свободный порт ' + $taskPlan.Port + '.')
+}
 $taskOptions = @('-N','-o','IPQoS=none','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',
     '-o','HostKeyAlias=178.217.98.101','-o','ConnectTimeout=20','-o','ForwardAgent=no',
     '-o','ExitOnForwardFailure=yes','-o','ServerAliveInterval=30','-o','ServerAliveCountMax=3',
-    '-L','127.0.0.1:18000:10.77.0.1:18000','-J','root@185.106.94.251','root@10.77.0.1')
-$taskSshProcess = Start-Process -FilePath ssh.exe -ArgumentList $taskOptions -PassThru -WindowStyle Hidden
+    '-L',('127.0.0.1:' + $taskPlan.Port + ':10.77.0.1:18000'),'-J','root@185.106.94.251','root@10.77.0.1')
+$taskSshProcess = Start-Process -FilePath (Get-BerestaSshPath) -ArgumentList $taskOptions -PassThru -WindowStyle Hidden
 try {
     $taskReady = $false
-    for ($taskAttempt = 0; $taskAttempt -lt 20; $taskAttempt++) {
-        if ($taskSshProcess.HasExited) { throw 'SSH tunnel could not start. Check ssh-agent and whether port 18000 is already in use.' }
-        $taskTcp = New-Object Net.Sockets.TcpClient
-        try { $taskTcp.Connect('127.0.0.1',18000); $taskReady = $true } catch {} finally { $taskTcp.Dispose() }
-        if ($taskReady) { break }
+    $taskDeadline = [DateTime]::UtcNow.AddSeconds(45)
+    while ([DateTime]::UtcNow -lt $taskDeadline) {
+        $taskSshProcess.Refresh()
+        if ($taskSshProcess.HasExited) { throw 'Не удалось подключиться по SSH. Проверьте интернет и загруженный ключ в ssh-agent.' }
+        if (Test-BerestaAdminEndpoint -Port $taskPlan.Port) { $taskReady = $true; break }
         Start-Sleep -Milliseconds 500
     }
-    if (!$taskReady -or $taskSshProcess.HasExited) { throw 'SSH tunnel is not ready.' }
-    Start-Process 'http://127.0.0.1:18000/admin'
-    Read-Host 'Keep this window open while using the admin page. Press Enter to close the tunnel' | Out-Null
+    if (!$taskReady) { throw 'Туннель создан, но админка не отвечает. Попробуйте запустить ещё раз.' }
+    Write-Host ('Админка доступна: ' + $taskUrl)
+    if ($TestConnection) { return }
+    Start-Process $taskUrl
+    Read-Host 'Оставьте это окно открытым. Нажмите Enter, чтобы закрыть созданный туннель' | Out-Null
 } finally {
-    if (!$taskSshProcess.HasExited) { $taskSshProcess.Kill() }
+    $taskSshProcess.Refresh()
+    if (!$taskSshProcess.HasExited) { $taskSshProcess.Kill(); $taskSshProcess.WaitForExit(5000) | Out-Null }
     $taskSshProcess.Dispose()
 }
