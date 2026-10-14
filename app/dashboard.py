@@ -1,7 +1,7 @@
 """Dashboard numbers without AI. Plain counts over the user's own rows, no note text.
 
-Days are local days in NOTES_LIMIT_TIMEZONE, the same zone the daily AI limit uses. The account has no
-time zone of its own yet; reminders carry a zone each, but that is a per-reminder choice, not a profile.
+Days are local days in the zone of the account, else in NOTES_LIMIT_TIMEZONE. The daily AI numbers
+(`ai`) keep using NOTES_LIMIT_TIMEZONE, because the limit is a quota and not the person's clock.
 """
 
 import time
@@ -12,7 +12,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from app.limits import daily_state
-from app.models import Capture, Category, Item, Note, ProductEvent, Reminder
+from app.models import Capture, Category, Item, Note, ProductEvent, Reminder, User
+from app.timezones import effective_zone
 
 STREAK_LOOKBACK_DAYS = 400
 UPCOMING_DAYS = 7
@@ -38,7 +39,8 @@ def streak_length(days_with_captures, today):
 
 def build_dashboard(db, settings, user_id, days, now=None):
     now = time.time() if now is None else now
-    zone = ZoneInfo(settings.limit_timezone)
+    zone_name = effective_zone(db.get(User, user_id), settings)
+    zone = ZoneInfo(zone_name)
     today = local_day(now, zone)
     first_day = today - timedelta(days=days - 1)
     period_start = day_floor(first_day, zone)
@@ -125,7 +127,7 @@ def build_dashboard(db, settings, user_id, days, now=None):
     total_tasks = task_open + task_done
     return {
         "days": days,
-        "timezone": settings.limit_timezone,
+        "timezone": zone_name,
         "period": {"from": first_day.isoformat(), "to": today.isoformat()},
         "totals": {"notes": total_notes, "notes_in_period": len(note_stamps)},
         "captures": {

@@ -8,6 +8,7 @@ keeps failing. A retry takes the same job and capture, so it does not charge the
 requests (`app/assistant.py`) stay at-most-once.
 """
 
+import inspect
 import signal
 import threading
 import time
@@ -58,12 +59,21 @@ from app.reminders import auto_reminders, request_reminders
 from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide, routing_code
 from app.services import lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_fallback_speech_provider, make_speech_provider
+from app.timezones import effective_zone
 from app.usage import UsageRecorder
 
 PROCESSING_FAILED_TEXT = (
     "Не получилось разобрать запись с ИИ. Исходник сохранён. "
     "Откройте beresta, в истории его можно отправить ещё раз или сохранить без ИИ."
 )
+
+
+def takes_timezone(call):
+    """True when a provider method accepts the account zone. Simple providers of tests and old adapters may not."""
+    try:
+        return "timezone" in inspect.signature(call).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def cancel_processing_reply(db, job_id):
@@ -367,15 +377,19 @@ class Worker:
                         select(Category).where(Category.user_id == user_id).order_by(Category.id).limit(100)
                     )
                 }
+                # The model reads «завтра» and «в пятницу» in the zone of the person. Quotas stay on the service zone.
+                user_zone = effective_zone(db.get(User, user_id), self.settings)
                 if self.settings.provider == "cloudru" and not attempt.fallback:
                     self.reserve_budget(db, user_id)
             provider = self.fallback_provider if attempt.fallback else self.provider
 
             def structure(on_usage):
                 measured = getattr(provider, "structure_with_usage", None)
+                call = measured or provider.structure
+                extra = {"timezone": user_zone} if takes_timezone(call) else {}
                 result = (
-                    measured(original, categories=tuple(category_context), on_usage=on_usage)
-                    if measured else provider.structure(original, categories=tuple(category_context))
+                    measured(original, categories=tuple(category_context), on_usage=on_usage, **extra)
+                    if measured else provider.structure(original, categories=tuple(category_context), **extra)
                 )
                 checked = validate_result(result, original)
                 rule = self.guard.structured_violation(checked, original)

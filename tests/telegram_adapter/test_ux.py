@@ -203,7 +203,7 @@ def test_set_my_commands_sends_russian_command_list(settings):
         bot, c, t, _, replies, _ = await session(settings, [])
         async with c, t:
             await bot.setup()
-            assert [item["command"] for item in replies[0]["commands"]] == ["start", "menu", "help", "save"]
+            assert [item["command"] for item in replies[0]["commands"]] == ["start", "menu", "help", "save", "timezone"]
 
     asyncio.run(scenario())
 

@@ -7,7 +7,7 @@
   let note = null, bridge = null, generation = 0, listRequest = 0, timeRequest = 0;
   let locked = false, busy = false, editing = null, baseline = '', preview = null, comparison = null, conflicted = false;
   let pendingCreate = null, uncertainEdit = null, rows = [], more = false, timer = null;
-  let resolveTimer = null, pick = '', rememberedZone = '', telegram = {linked:null,error:false};
+  let resolveTimer = null, listed = false, pick = '', telegram = {linked:null,error:false};
   const labels = {confirmed:'Подтверждено',sent:'Отправлено',blocked:'Telegram недоступен',
     unknown:'Результат отправки неизвестен',cancelled:'Отменено',completed:'Выполнено'};
   const deliveryLabels = {pending:'Ожидает отправки',leased:'Готовится к отправке',authorized:'Отправляется',
@@ -17,28 +17,31 @@
   const weekdaysShort = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
   const monthsShort = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
-  const zoneNames = {'Europe/Moscow':'Москва','Europe/Berlin':'Берлин','Asia/Yekaterinburg':'Екатеринбург',
-    'Asia/Novosibirsk':'Новосибирск','Asia/Vladivostok':'Владивосток',UTC:'UTC'};
-  const zoneKey = 'beresta.reminderZone';
+  // Zone names and the list of zones come from timezone.js (the API list, with a short built-in one as a fallback).
+  const tz = () => window.BerestaTimezone;
   // A link from Telegram ends with ?reminder=<id>. The list opens on that reminder once, for its own note.
   let linked = new URLSearchParams(location.search).get('reminder'), highlighted = null;
   function validZone(zone) {
     try { new Intl.DateTimeFormat('en-CA',{timeZone:zone}); return Boolean(zone); } catch (_) { return false; }
   }
+  // The zone of the account, then the zone of the device clock, then Moscow.
   function defaultZone() {
-    let saved = rememberedZone;
-    if (!saved) { try { saved = (window.berestaConsent && window.berestaConsent.read(zoneKey)) || ''; } catch (_) { saved = ''; } }
+    const saved = tz()?.accountZone() || '';
     if (saved && validZone(saved)) return saved;
-    const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let browser = '';
+    try { browser = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (_) { browser = ''; }
     return browser && validZone(browser) ? browser : 'Europe/Moscow';
   }
-  function rememberZone(zone) {
-    rememberedZone = zone;
-    // Written to localStorage only after "Принять все" (see cookie-consent.js), otherwise kept for this tab.
-    try { if (window.berestaConsent) window.berestaConsent.write(zoneKey,zone); } catch (_) { /* storage may be blocked */ }
+  function zoneShort(zone) { return tz()?.label(zone) || zone; }
+  function zoneLine(zone) { const name = tz()?.label(zone); return name ? `${name} (${zone})` : zone; }
+  // The suggestions of the zone field. The short list shows at once, the full one replaces it when it arrives.
+  function fillZones() {
+    if (!tz()) return;
+    const draw = list => $('reminder-zones').replaceChildren(...list.map(row =>
+      new Option(`${row.label}, ${tz().utc(row.offset_minutes)}`,row.id)));
+    draw(tz().knownZones());
+    tz().zones().then(draw);
   }
-  function zoneShort(zone) { return zoneNames[zone] || zone; }
-  function zoneLine(zone) { return zoneNames[zone] ? `${zoneNames[zone]} (${zone})` : zone; }
   function debounceDelay() { return typeof window.reminderDebounceMs === 'number' ? window.reminderDebounceMs : 300; }
   // Wall-clock strings "YYYY-MM-DDTHH:MM[:SS]" are shifted as plain UTC numbers, so no browser zone leaks in.
   function wallMs(value) {
@@ -182,7 +185,7 @@
     $('reminder-form-title').textContent = row ? 'Изменить напоминание' : 'Новое напоминание';
     $('reminder-text').value = row?.text || item?.text || note.title;
     const proposedZone = proposal && validZone(proposal.timezone) ? proposal.timezone : '';
-    $('reminder-zone').value = row?.timezone || proposedZone || defaultZone(); drawZone(); drawChips();
+    $('reminder-zone').value = row?.timezone || proposedZone || defaultZone(); drawZone(); drawChips(); fillZones();
     if (row) { setLocal(wallTime(row.scheduled_at,row.timezone)); setPick('custom'); }
     else if (proposedZone && proposal.local_time) { setLocal(proposal.local_time); setPick('custom'); }
     $('reminder-form').hidden = false; baseline = fingerprint(); controls();
@@ -265,7 +268,7 @@
       } while (page.length === limit && data.length < wanted);
       rows = append ? [...new Map([...rows,...data].map(row => [row.id,row])).values()] : data;
       more = page.length === limit;
-      drawRows(); if (!silent) say();
+      listed = true; drawRows(); if (!silent) say();
       if (!silent && !append) revealLinked();
     } catch (_) {
       if (view === generation && request === listRequest) say('Не удалось обновить напоминания. Попробуйте ещё раз.');
@@ -349,7 +352,7 @@
         headers:edit ? {} : {'Idempotency-Key':pendingCreate.key},
       });
       if (view !== generation) return;
-      rememberZone(body.timezone); clearForm(); await refresh(); await linkStatus();
+      clearForm(); await refresh(); await linkStatus();
       const text = row.previous_attempt_unknown ? 'Сохранено. Предыдущая отправка могла состояться.' : 'Напоминание подтверждено.';
       say(text); bridge.notify(text);
     } catch (error) {
@@ -386,7 +389,7 @@
     } finally { setWork(false); }
   }
   function hide() {
-    generation++; listRequest++; timeRequest++; note = null; rows = []; highlighted = null;
+    generation++; listRequest++; timeRequest++; note = null; rows = []; listed = false; highlighted = null;
     clearInterval(timer); timer = null; clearForm();
   }
   function show(value, callbacks) {
@@ -425,6 +428,11 @@
     invalidateTime(); say('Ваши поля сохранены. Подтвердите изменения текущей версии.'); checkTime();
   };
   $('reminder-link').onclick = () => { $('telegram-settings').open = true; $('link-code').focus(); };
+  // The account zone or the names arrived: rows and the zone line show the new names.
+  document.addEventListener('beresta:timezone',() => {
+    if (!note || !bridge || !listed) return;
+    drawRows(); if (!$('reminder-form').hidden) drawZone();
+  });
   window.addEventListener('pagehide',hide);
   window.BerestaReminders = {show,hide,dirty,setLocked,startForTask:(item,proposal) => startForm(null,item,proposal)};
 })();

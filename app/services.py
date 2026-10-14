@@ -11,7 +11,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
 from app.audio_contracts import AUDIO_MEDIA_TYPES, MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS, StoredAudioLike
-from app.config import Settings
 from app.integration import IntegrationRejection
 from app.limits import LIMIT_OUTCOME, capture_cost, within_daily_limit
 from app.models import (
@@ -29,6 +28,7 @@ from app.models import (
     new_id,
 )
 from app.reminder_proposals import propose_reminder
+from app.timezones import effective_zone
 
 MAX_CATEGORIES = 100
 MAX_ITEMS = 30
@@ -452,7 +452,7 @@ def reminder_proposals(db, user_id, items, settings=None, now=None):
         Reminder.user_id == user_id, Reminder.item_id.in_([i["id"] for i in tasks]),
         Reminder.status != "cancelled",
     )))
-    zone = (settings.limit_timezone if settings else Settings.limit_timezone)
+    zone = effective_zone(db.get(User, user_id), settings)
     now = now or datetime.now(UTC)
     proposals = {}
     for item in tasks:
