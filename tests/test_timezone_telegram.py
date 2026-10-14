@@ -88,11 +88,13 @@ def test_real_bot_asks_once_then_parses_an_offset_and_moves_guessed_reminders(re
         assert row.timezone == "Asia/Novosibirsk" and row.zone_guessed is False and row.generation == 2
 
 
-def test_real_bot_answers_a_city_it_does_not_know_and_a_known_one(reminders, tmp_path):
+def test_real_bot_saves_a_non_city_as_a_note_and_sets_a_known_city(reminders, tmp_path):
     app, client, ids = reminders
-    sent = drive(app, tmp_path, [press(10, "tz:other"), update(11, text="Нигде-на-свете"), update(12, text="Омск")])
-    assert sent[1]["text"] == "Не нашёл такой город. Напишите крупный город рядом."
-    assert sent[2]["text"].startswith("Часовой пояс: Омск (UTC+6).")
+    sent = drive(app, tmp_path, [press(10, "tz:other"), update(11, text="Купить хлеб")])
+    assert sent[2]["text"].startswith("Это не похоже на город, поэтому сохранил как запись.")
+    assert account(app, ids)[0] is None
+    sent = drive(app, tmp_path, [press(12, "tz:other"), update(13, text="Омск")])
+    assert sent[1]["text"].startswith("Часовой пояс: Омск (UTC+6).")
     assert account(app, ids)[0] == "Asia/Omsk"
 
 

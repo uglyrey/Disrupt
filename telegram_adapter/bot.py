@@ -75,6 +75,7 @@ ZONE_OTHER_TEXT = (
     "Отправьте местоположение кнопкой внизу или напишите крупный город рядом, например Томск. "
     "Можно и смещение, например +5 или UTC+5. Координаты я не сохраняю."
 )
+ZONE_NOT_A_CITY = "Это не похоже на город, поэтому сохранил как запись. Часовой пояс можно выбрать командой /timezone."
 ZONE_NOT_FOUND = "Не нашёл такой город. Напишите крупный город рядом."
 ZONE_LOCATION_MISS = "Не получилось определить пояс по местоположению. Выберите город кнопкой или напишите крупный город рядом."
 LOCATION_KEYBOARD = {
@@ -258,14 +259,18 @@ class Bot:
             if isinstance(text, str) and (command == "/timezone" or text.strip().lower() in ZONE_TEXTS):
                 await self.timezone_command(chat_id, identity, argument.strip() if command == "/timezone" else "")
                 return
+            not_a_city = False
             if (
                 isinstance(text, str) and text.strip() and not command.startswith("/")
                 and self.awaiting_zone.get(chat_id, 0) > self.clock()
             ):
                 if len(text.strip()) <= ZONE_WAIT_MAX_CHARS and "\n" not in text.strip():
-                    await self.typed_zone(chat_id, identity, text.strip())
-                    return
-                self.awaiting_zone.pop(chat_id, None)  # A long text is a note, not a city.
+                    found = await self.find_zone(identity, text=text.strip())
+                    if found is not None:
+                        await self.apply_zone(chat_id, identity, found["timezone"])
+                        return
+                    not_a_city = True  # A note must never be lost: it goes the usual way, with one extra line.
+                self.awaiting_zone.pop(chat_id, None)  # Not a city (long or unknown), so it is a note.
             if command in {"/menu", "/help"} or (command == "/start" and not argument.strip()):
                 if command == "/help":
                     await self.notify(chat_id, HELP_TEXT, reply_markup=MAIN_MENU)
@@ -328,6 +333,8 @@ class Bot:
             url = self.core.validate_saved(result)
             saved = saved_reply(result)
             await self.notify(chat_id, saved, url)
+            if not_a_city:
+                await self.notify(chat_id, ZONE_NOT_A_CITY)
             if result.get("ask_timezone") is True:
                 # The core says this account has no zone and was never asked. It marks the question as asked.
                 await self.notify(chat_id, ZONE_ASK, reply_markup=self.zone_keyboard())
