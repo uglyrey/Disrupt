@@ -164,12 +164,12 @@ def test_disabled_feature_and_disabled_mail_send_nothing(app_factory):
     mail = Mail()
     app = app_factory(mailer=mail)
     with TestClient(app) as client:
-        assert client.get(BASE + "/options").json() == {"login_enabled": False, "registration_enabled": False}
+        assert client.get(BASE + "/options").json() == {"login_enabled": False, "registration_enabled": False, "code_login_enabled": False}
         assert begin(client).status_code == 503
     mail.enabled = False
     app = app_factory(mailer=mail, email_registration_enabled=True)
     with TestClient(app) as client:
-        assert client.get(BASE + "/options").json() == {"login_enabled": True, "registration_enabled": False}
+        assert client.get(BASE + "/options").json() == {"login_enabled": True, "registration_enabled": False, "code_login_enabled": False}
         assert begin(client).status_code == 503
     assert mail.sent == []
 

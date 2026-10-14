@@ -11,6 +11,7 @@ import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, WebSocket
+from fastapi.responses import JSONResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -32,6 +33,7 @@ from app.schemas import (
     AcceptPolicy,
     DeletionRequest,
     EmailBody,
+    PasswordChange,
     PasswordReset,
     RecoveryRequest,
     TelegramLoginStart,
@@ -39,8 +41,10 @@ from app.schemas import (
 )
 from app.security import (
     COOKIE_NAME,
+    UNUSABLE_PASSWORD,
     check_origin,
     get_login_session,
+    has_usable_password,
     hash_password,
     hash_token,
     throttle,
@@ -237,8 +241,8 @@ def build_router(database, settings):
             if created:
                 user = User(
                     username=free_username(db, row),
-                    # Nobody knows this password. The owner of the Telegram account sets a real one through recovery.
-                    password_hash=hash_password(secrets.token_urlsafe(48)),
+                    # No password. The owner of the Telegram account can set one through recovery.
+                    password_hash=UNUSABLE_PASSWORD,
                 )
                 db.add(user)
                 db.flush()
@@ -347,6 +351,29 @@ def build_router(database, settings):
         # A reset ends every session, including one an intruder may hold.
         db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
         record_event(db, user.id, "password_reset", row.id, outcome=row.channel)
+        db.commit()
+        return {"status": "ok"}
+
+    @router.post("/api/v1/account/password")
+    def change_password(body: PasswordChange, request: Request, db=Depends(database)):
+        session = get_login_session(request, db, write=True)
+        user = db.get(User, session.user_id)
+        if not has_usable_password(user.password_hash):
+            return JSONResponse(
+                {"detail": "У аккаунта нет пароля. Вход идёт через Telegram или по коду из почты", "code": "no_password"},
+                status_code=409,
+            )
+        throttle(db, "password-change:" + user.id, limit=5)
+        if not verify_password(body.old_password, user.password_hash):
+            raise HTTPException(403, "Неверный текущий пароль")
+        if body.new_password == body.old_password:
+            raise HTTPException(422, "Новый пароль должен отличаться от текущего")
+        user.password_hash = hash_password(body.new_password)
+        # Other devices sign in again; this browser stays.
+        db.execute(delete(LoginSession).where(
+            LoginSession.user_id == user.id, LoginSession.token_hash != session.token_hash,
+        ))
+        record_event(db, user.id, "password_changed", new_id())
         db.commit()
         return {"status": "ok"}
 
