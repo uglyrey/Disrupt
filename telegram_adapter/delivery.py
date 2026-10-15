@@ -112,6 +112,18 @@ class DeliverySender:
             if callback is not None and not re.fullmatch(r"[A-Za-z0-9_-]{43}", callback):
                 raise ValueError()
             self.core.validate_saved({"capture_id": item["delivery_id"], "status": "saved", "note_url": item["note_url"]})
+            confirm = item.get("confirm", [])
+            if not isinstance(confirm, list) or len(confirm) > 3:
+                raise ValueError()
+            for entry in confirm:
+                if not isinstance(entry, dict) or set(entry) - {"reminder_id", "generation", "alt_label"}:
+                    raise ValueError()
+                UUID(entry["reminder_id"])
+                if type(entry["generation"]) is not int or not 1 <= entry["generation"] < 10**9:
+                    raise ValueError()
+                label = entry.get("alt_label")
+                if label is not None and (not isinstance(label, str) or not 1 <= len(label) <= 40 or not label.isprintable()):
+                    raise ValueError()
         except (ValueError, KeyError, TypeError, AttributeError):
             raise RemoteFailure("core_invalid_delivery", fatal=True) from None
 

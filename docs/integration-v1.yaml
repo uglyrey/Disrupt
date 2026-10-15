@@ -7233,6 +7233,38 @@
         ],
         "title": "ConclusionResponse"
       },
+      "ConfirmButtons": {
+        "properties": {
+          "reminder_id": {
+            "type": "string",
+            "title": "Reminder Id"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Generation"
+          },
+          "alt_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alt Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reminder_id",
+          "generation"
+        ],
+        "title": "ConfirmButtons",
+        "description": "Under a message that asks «Верно?» about the time of a reminder: one pair of buttons per reminder."
+      },
       "Costs": {
         "properties": {
           "currency": {
@@ -7728,6 +7760,14 @@
               }
             ],
             "title": "Callback Token"
+          },
+          "confirm": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmButtons"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Confirm"
           }
         },
         "additionalProperties": false,
@@ -9481,6 +9521,23 @@
           "previous_attempt_unknown": {
             "type": "boolean",
             "title": "Previous Attempt Unknown"
+          },
+          "time_check": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ask",
+                  "unclear",
+                  "confirmed",
+                  "corrected"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Check"
           }
         },
         "additionalProperties": false,

@@ -452,9 +452,10 @@ class Worker:
                     )
                     db.add(row)
                     created.append(row)
+                db.flush()
+                for row, item in zip(created, result.items, strict=True):
                     if item.due_at:
                         model_times[row.id] = item.due_at
-                db.flush()
                 if job_kind == "merge":
                     # Open tasks, reminders and links of the originals move over, the originals go to the trash.
                     # The reminders of the originals are already settled, so the note gets no new automatic ones.
