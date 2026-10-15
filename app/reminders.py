@@ -15,8 +15,9 @@ from sqlalchemy.exc import IntegrityError
 from app.analytics import record_event
 from app.config import Settings
 from app.models import Capture, Item, Outbox, Reminder, User
-from app.reminder_proposals import mentions_time, propose_reminder, sentence_spans
-from app.services import cancel_reminder_deliveries, item_view, lock_account, owned_note, reminder_proposals
+from app.reminder_proposals import mentions_time, sentence_spans
+from app.services import cancel_reminder_deliveries, lock_account, owned_note
+from app.time_check import ASK, CORRECTED, NEEDS_CHECK, UNCLEAR, Reading, decide
 from app.timezones import effective_zone, zone_guessed
 
 AUTO_KEY_PREFIX = "ai:"
@@ -41,6 +42,7 @@ def reminder_view(db, reminder):
         "confirmed_at": datetime.fromtimestamp(reminder.confirmed_at, UTC).isoformat(),
         "delivery_status": delivery,
         "previous_attempt_unknown": previous_unknown,
+        "time_check": reminder.time_check,
     }
 
 
@@ -117,6 +119,8 @@ def reschedule(db, row, scheduled_at, timezone, text, channel="web"):
     row.scheduled_at, row.timezone, row.text = scheduled_at, timezone, text
     row.status, row.confirmed_at = "confirmed", time.time()
     row.generation += 1
+    # The person (or a snooze) chose this time, so a pending question about the old one is settled.
+    row.time_check, row.time_alt = (CORRECTED if row.time_check in NEEDS_CHECK else row.time_check), None
     record_event(db, row.user_id, "reminder_confirmed", f"{row.id}:{row.generation}", channel, subject_id=row.note_id)
 
 
@@ -139,7 +143,25 @@ def local_clock(row):
     return datetime.fromtimestamp(row.scheduled_at, ZoneInfo(row.timezone)).strftime("%H:%M")
 
 
-def add_auto_reminder(db, note, item, text, scheduled_at, timezone, guessed=False):
+def instant_of(local, zone):
+    """UTC timestamp of a naive local wall time in `zone`, or None if that time does not exist (a DST gap)."""
+    aware = local.replace(tzinfo=ZoneInfo(zone))
+    instant = aware.astimezone(UTC)
+    if instant.astimezone(ZoneInfo(zone)).replace(tzinfo=None) != local:
+        return None
+    return instant.timestamp()
+
+
+def reading_instants(reading, zone, stamp):
+    """(scheduled_at, alternative) as UTC timestamps for a reading. scheduled_at is None unless it is ahead of `stamp`."""
+    when = instant_of(reading.when, zone) if reading.when is not None else None
+    if when is None or when <= stamp:
+        return None, None
+    alt = instant_of(reading.alt, zone) if reading.alt is not None else None
+    return when, alt if alt is not None and alt > stamp and alt != when else None
+
+
+def add_auto_reminder(db, note, item, text, scheduled_at, timezone, guessed=False, time_check=None, time_alt=None):
     """One confirmed reminder for a task, keyed by the task so it is never made twice. None if it already exists."""
     key = AUTO_KEY_PREFIX + item.id
     digest = hashlib.sha256(json.dumps(
@@ -149,6 +171,7 @@ def add_auto_reminder(db, note, item, text, scheduled_at, timezone, guessed=Fals
     row = Reminder(
         user_id=note.user_id, note_id=note.id, item_id=item.id, scheduled_at=scheduled_at,
         timezone=timezone, text=text, idempotency_key=key, creation_hash=digest, zone_guessed=guessed,
+        time_check=time_check, time_alt=time_alt,
     )
     try:
         with db.begin_nested():
@@ -159,12 +182,14 @@ def add_auto_reminder(db, note, item, text, scheduled_at, timezone, guessed=Fals
     return row
 
 
-def auto_reminders(db, note, settings=None, now=None):
+def auto_reminders(db, note, settings=None, now=None, model_times=None):
     """Set a confirmed reminder for every open task of a fresh note whose deadline can be read.
 
-    Same parser and zone as the proposals on the note screen. The reminder is tied to the task and
-    never made twice: its idempotency key is built from the task. A time in the past gives nothing.
-    The caller holds the account lock and owns the transaction. Returns the created reminders.
+    The time is the model's `due_at` (`model_times`: item id to local `YYYY-MM-DDTHH:MM`) cross-checked with the
+    parser reading `due_text`, see `app.time_check.decide`. A reminder whose time is a guess is marked
+    `time_check = ask`. The reminder is tied to the task and never made twice: its idempotency key is built
+    from the task. A time in the past gives nothing. The caller holds the account lock and owns the transaction.
+    Returns the created reminders.
     """
     user = db.get(User, note.user_id)
     if user is None or not user.ai_reminders_enabled:
@@ -173,21 +198,29 @@ def auto_reminders(db, note, settings=None, now=None):
         Item.note_id == note.id, Item.user_id == note.user_id, Item.kind == "task", Item.status == "open",
         Item.deleted_at.is_(None),
     ).order_by(Item.position, Item.id)).all()
-    proposals = reminder_proposals(db, note.user_id, [item_view(item) for item in items], settings, now)
-    stamp = (now or datetime.now(UTC)).timestamp()
+    if not items:
+        return []
+    taken = set(db.scalars(select(Reminder.item_id).where(
+        Reminder.user_id == note.user_id, Reminder.item_id.in_([i.id for i in items]), Reminder.status != "cancelled",
+    )))
+    zone = effective_zone(user, settings)
+    moment = now or datetime.now(UTC)
+    local_now = moment.astimezone(ZoneInfo(zone)).replace(tzinfo=None)
     created = []
     for item in items:
-        proposal = proposals.get(item.id)
         text = " ".join(item.text.split())[:MAX_REMINDER_TEXT].strip()
-        if not proposal or not text:
+        if not item.due_text or not text or item.id in taken:
             continue
         key = AUTO_KEY_PREFIX + item.id
         if db.scalar(select(Reminder.id).where(Reminder.user_id == note.user_id, Reminder.idempotency_key == key)):
             continue
-        local = datetime.fromisoformat(proposal["local_time"]).replace(tzinfo=ZoneInfo(proposal["timezone"]))
-        if local.timestamp() <= stamp:
+        reading = decide(item.due_text, (model_times or {}).get(item.id), local_now)
+        when, alt = reading_instants(reading, zone, moment.timestamp())
+        if when is None:
             continue
-        row = add_auto_reminder(db, note, item, text, local.timestamp(), proposal["timezone"], zone_guessed(user))
+        row = add_auto_reminder(
+            db, note, item, text, when, zone, zone_guessed(user), reading.check, alt if reading.check == ASK else None,
+        )
         if row is not None:
             created.append(row)
     return created
@@ -268,37 +301,41 @@ def reminder_requests(db, note, original):
     return found
 
 
-def request_reminders(db, note, original, settings=None, now=None):
+def request_reminders(db, note, original, settings=None, now=None, model_times=None):
     """Make sure every explicit «напомни ...» of the original has a reminder. No AI call is made.
 
-    The time comes from the same parser as the proposals, read from the task's quoted deadline first
-    and from the whole sentence second. A sentence without any time gets the default time. A sentence
-    whose time cannot be used (already past, for example) gets nothing and is reported by
-    `unscheduled_requests`. When the model made no task for the sentence, a task is added with the
-    sentence as its quote. Idempotent through the `ai:<item id>` key. The caller owns the transaction
-    and the account lock. Returns the created reminders.
+    The time is read from the task's quoted deadline first (with the model's `due_at` from `model_times`, see
+    `app.time_check.decide`) and from the whole sentence second. A sentence without any time gets the default
+    time, marked `ask`. A sentence that names a time nobody could read (already past, for example) gets the
+    default time too, marked `unclear`, so the person is asked instead of left without a reminder. Only when
+    the default time is switched off (delay 0) such a sentence stays without a reminder and is reported by
+    `unscheduled_requests`. When the model made no task for the sentence, a task is added with the sentence as
+    its quote. Idempotent through the `ai:<item id>` key. The caller owns the transaction and the account lock.
+    Returns the created reminders.
     """
     settings = settings or Settings()
     now = now or datetime.now(UTC)
     user = db.get(User, note.user_id)
     zone, guessed = effective_zone(user, settings), zone_guessed(user)
+    local_now = now.astimezone(ZoneInfo(zone)).replace(tzinfo=None)
     created = []
     for request in reminder_requests(db, note, original):
         if request["covered"]:
             continue
         sentence, task = request["sentence"], request["task"]
-        proposal = task and task.due_text and propose_reminder(task.due_text, now, zone)
-        proposal = proposal or propose_reminder(sentence, now, zone)
-        if proposal:
-            local = datetime.fromisoformat(proposal["local_time"]).replace(tzinfo=ZoneInfo(proposal["timezone"]))
-        elif mentions_time(sentence):
-            continue
-        else:
-            local = default_reminder_time(now, settings, zone)
-            if local is None:
+        reading = Reading(None)
+        if task and task.due_text:
+            reading = decide(task.due_text, (model_times or {}).get(task.id), local_now)
+        if reading.when is None:
+            reading = decide(sentence, None, local_now)
+        when, alt = reading_instants(reading, zone, now.timestamp())
+        check = reading.check
+        if when is None:
+            named = bool(task and task.due_text) or mentions_time(sentence)
+            default = default_reminder_time(now, settings, zone)
+            if default is None or default.timestamp() <= now.timestamp():
                 continue
-        if local.timestamp() <= now.timestamp():
-            continue
+            when, alt, check = default.timestamp(), None, UNCLEAR if named else ASK
         if task is None:
             count = db.scalar(select(func.count()).select_from(Item).where(
                 Item.note_id == note.id, Item.deleted_at.is_(None),
@@ -314,7 +351,7 @@ def request_reminders(db, note, original, settings=None, now=None):
             db.add(task)
             db.flush()
         text = " ".join(task.text.split())[:MAX_REMINDER_TEXT].strip()
-        row = add_auto_reminder(db, note, task, text, local.timestamp(), zone, guessed)
+        row = add_auto_reminder(db, note, task, text, when, zone, guessed, check, alt if check == ASK else None)
         if row is not None:
             created.append(row)
     return created

@@ -59,6 +59,7 @@ from app.reminders import auto_reminders, request_reminders
 from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide, routing_code
 from app.services import lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_fallback_speech_provider, make_speech_provider
+from app.time_requests import run_time_request_once
 from app.timezones import effective_zone
 from app.usage import UsageRecorder
 
@@ -361,7 +362,8 @@ class Worker:
     def run_once(self):
         job_id = self.claim()
         if job_id is None:
-            return run_assistant_once(self)  # Capture jobs always go first.
+            # Capture jobs always go first, then the tiny reminder time requests, then the assistant.
+            return run_time_request_once(self) or run_assistant_once(self)
         attempt = None
         try:
             if self.merge_sources_gone(job_id):
@@ -436,6 +438,7 @@ class Worker:
                 db.add(note)
                 db.flush()
                 created = []
+                model_times = {}  # item id to the local deadline the model worked out, for the reminder cross-check
                 for position, item in enumerate(result.items):
                     row = Item(
                         user_id=user_id,
@@ -452,6 +455,9 @@ class Worker:
                     db.add(row)
                     created.append(row)
                 db.flush()
+                for row, item in zip(created, result.items, strict=True):
+                    if item.due_at:
+                        model_times[row.id] = item.due_at
                 if job_kind == "merge":
                     # Open tasks, reminders and links of the originals move over, the originals go to the trash.
                     # The reminders of the originals are already settled, so the note gets no new automatic ones.
@@ -463,8 +469,8 @@ class Worker:
                     try:
                         # The note matters more than its reminders: a failure here leaves the note as it is.
                         with db.begin_nested():
-                            auto_reminders(db, note, self.settings)
-                            request_reminders(db, note, original, self.settings)
+                            auto_reminders(db, note, self.settings, model_times=model_times)
+                            request_reminders(db, note, original, self.settings, model_times=model_times)
                     except Exception as exc:
                         log_error("auto_reminder_failed", "internal_error", log_file=self.settings.error_log_file,
                                   job_id=job_id, exception=exc)

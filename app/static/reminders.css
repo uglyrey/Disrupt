@@ -30,7 +30,8 @@
 .reminder-when { font-size: 15px; color: #24352d; }
 .reminder-status { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #eaf0e6; color: #345943; }
 .reminder-what { color: #24352d; }
-.reminder-actions { display: flex; gap: 6px; margin-top: 8px; }
+.reminder-actions { display: flex; gap: 6px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.reminder-check { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #fbf0d4; color: #6b4e0b; }
 @media (max-width: 480px) {
   .reminder-custom { grid-template-columns: 1fr; }
 }

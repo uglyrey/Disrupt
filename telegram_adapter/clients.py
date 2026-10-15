@@ -16,6 +16,31 @@ ACTION_PREFIXES = {"d:": "done", "h:": "snooze_hour", "t:": "snooze_tomorrow"}
 TOKEN_CHARS = re.compile(r"[A-Za-z0-9_-]{1,62}")
 
 
+# «Верно?» under a message about a guessed reminder time: «Верно», «Изменить время», and the other reading.
+# The data is the prefix, the reminder id and its generation, at most 49 bytes.
+CONFIRM_PREFIXES = {"rv": "ok", "re": "edit", "ra": "alt"}
+CONFIRM_DATA = re.compile(r"r([vea]):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([1-9][0-9]{0,8})")
+
+
+def confirm_rows(entries):
+    """Inline keyboard rows for the reminders a message asks about: one pair per reminder, plus the other reading."""
+    numbered = len(entries) > 1
+    rows = []
+    for number, entry in enumerate(entries, 1):
+        suffix = f" {number}" if numbered else ""
+        tail = f"{entry['reminder_id']}:{entry['generation']}"
+        if entry.get("edit_only"):
+            rows.append([{"text": "Изменить время" + suffix, "callback_data": "re:" + tail}])
+            continue
+        rows.append([
+            {"text": "Верно" + suffix, "callback_data": "rv:" + tail},
+            {"text": "Изменить время" + suffix, "callback_data": "re:" + tail},
+        ])
+        if entry.get("alt_label"):
+            rows.append([{"text": entry["alt_label"], "callback_data": "ra:" + tail}])
+    return rows
+
+
 class RemoteFailure(Exception):
     """Sanitized error: never retain response bodies, URLs containing tokens, or note text."""
 
@@ -45,6 +70,7 @@ REJECTIONS = {
     "login_expired": "Ссылка входа истекла. Начни вход в beresta ещё раз.",
     "login_used": "Эта ссылка уже использована. Если нужно, начни вход в beresta заново.",
     "login_forbidden": "Этот Telegram не связан с аккаунтом, который просит подтверждение.",
+    "time_passed": "Это время уже прошло. Нажмите «Изменить время» и напишите новое.",
     "invalid_timezone": "Не нашёл такой часовой пояс. Выберите его кнопкой или напишите крупный город рядом.",
 }
 
@@ -188,6 +214,10 @@ class TelegramClient:
             "link_preview_options": {"is_disabled": True},
             "reply_markup": {"inline_keyboard": [[{"text": "Открыть Beresta", "url": item["note_url"]}]]},
         }
+        confirm = item.get("confirm") or []
+        if confirm:
+            # A message that asks «Верно?» about the time: its pairs of buttons, and the link under them.
+            payload["reply_markup"]["inline_keyboard"] = [*confirm_rows(confirm), *payload["reply_markup"]["inline_keyboard"]]
         token = item["callback_token"]
         if token is not None:
             # A reminder: three actions in one row and a link to the reminder under them.

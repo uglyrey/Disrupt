@@ -14,6 +14,8 @@ PROGRAM_BASE_URL = "https://shared1.multitool.works:4000/v1"
 OFFICIAL_BASE_URL = "https://foundation-models.api.cloud.ru/v1"
 ALLOWED_MODEL_BASE_URLS = {PROGRAM_BASE_URL, OFFICIAL_BASE_URL}
 LLM_READ_TIMEOUT_SECONDS = 90
+STT_PROMPT_MAX = 200
+STT_PROMPT_DEFAULT = "Напомни сегодня в 16:00 позвонить маме. Завтра в 9:30 встреча. 15 октября в 14:00."
 LLM_READ_TIMEOUT_RANGE = (30, 240)
 RESPONSE_BYTE_LIMIT = 256000
 
@@ -158,6 +160,8 @@ class Settings:
     revision_keep: int = 50
     # Корзина. Удалённая заметка лежит столько дней, потом планировщик стирает её насовсем. Подробности в docs/notes-manage-v1.md.
     trash_days: int = 30
+    # Подсказка для распознавания речи (параметр prompt). Учит писать время и даты цифрами. Пустая строка отключает. До 200 знаков.
+    stt_prompt: str = STT_PROMPT_DEFAULT
     # WebSocket для входа и привязки Telegram. Подробности в docs/telegram-live-v1.md. Лимиты считаются на процесс.
     ws_poll_seconds: float = 1.0
     ws_max_seconds: float = 360.0
@@ -238,6 +242,8 @@ class Settings:
             raise ValueError("Revision coalesce and session seconds are out of range")
         if self.revision_keep != 0 and not 5 <= self.revision_keep <= 1000:
             raise ValueError("NOTES_REVISION_KEEP must be 0 or between 5 and 1000")
+        if len(self.stt_prompt) > STT_PROMPT_MAX or "\x00" in self.stt_prompt:
+            raise ValueError(f"NOTES_STT_PROMPT must be at most {STT_PROMPT_MAX} characters")
         if not 1 <= self.trash_days <= 3650:
             raise ValueError("NOTES_TRASH_DAYS must be between 1 and 3650")
         if self.fallback_enabled:
@@ -410,6 +416,7 @@ class Settings:
             revision_session_max_seconds=int(os.environ.get("NOTES_REVISION_SESSION_MAX_SECONDS", "3600")),
             revision_keep=int(os.environ.get("NOTES_REVISION_KEEP", "50")),
             trash_days=int(os.environ.get("NOTES_TRASH_DAYS", "30")),
+            stt_prompt=os.environ.get("NOTES_STT_PROMPT", STT_PROMPT_DEFAULT).strip(),
             retry_user_per_hour=int(os.environ.get("NOTES_RETRY_USER_PER_HOUR", "10")),
             retry_global_per_hour=int(os.environ.get("NOTES_RETRY_GLOBAL_PER_HOUR", "60")),
             retry_breaker_failures=int(os.environ.get("NOTES_RETRY_BREAKER_FAILURES", "5")),

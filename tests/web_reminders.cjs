@@ -237,6 +237,18 @@ function row(id) { return [...$('reminders-list').querySelectorAll('article')].f
     assert.ok($('reminders-message').textContent.includes('могла состояться'));
     assert.equal(row(first.id).querySelector('[data-action="cancel"]').disabled,true);
 
+    // A guessed time shows a small note next to «Изменить». A settled or cancelled one does not.
+    const guessed = {...first,id:randomUUID(),status:'confirmed',scheduled_at:'2090-10-08T09:00:00+00:00',
+      time_check:'ask',previous_attempt_unknown:false,delivery_status:null,generation:1};
+    reminders.push(guessed);
+    $('reminders-refresh').click(); await until(() => row(guessed.id));
+    assert.equal(row(guessed.id).querySelector('.reminder-check').textContent,'Проверьте время');
+    assert.equal(row(first.id).querySelector('.reminder-check'),null,'A reminder without a question has no note');
+    guessed.time_check = 'corrected';
+    $('reminders-refresh').click(); await until(() => !row(guessed.id).querySelector('.reminder-check'));
+    reminders.pop();
+    $('reminders-refresh').click(); await until(() => !row(guessed.id));
+
     $('reminder-new').click();
     assert.equal($('reminder-zone').value,accountTimezone,'The next reminder starts in the account zone, not in the zone used last');
     input('reminder-zone','Europe/Berlin'); ambiguous = true;

@@ -5,6 +5,8 @@ import time
 
 from .clients import (
     ACTION_PREFIXES,
+    CONFIRM_DATA,
+    CONFIRM_PREFIXES,
     MAX_AUDIO_BYTES,
     REJECTIONS,
     TOKEN_CHARS,
@@ -12,6 +14,7 @@ from .clients import (
     Rejected,
     RemoteFailure,
     TelegramClient,
+    confirm_rows,
 )
 from .config import Settings
 from .limit_text import saved_reply
@@ -86,6 +89,14 @@ LOCATION_KEYBOARD = {
 ZONE_TEXTS = {"часовой пояс", "мой часовой пояс", "часовой пояс?"}
 ZONE_WAIT_MAX_CHARS = 40
 UTC_TEXT = re.compile(r"UTC([+-]\d{1,2}(:\d{2})?)?")
+# Reminder time. «Изменить время» opens a short wait: the next short text is the time, not a note.
+TIME_ASK = "Напишите, когда напомнить. Например «сегодня в 16» или «завтра в 9:30»."
+TIME_UNCLEAR = "Не понял время. Напишите, например «сегодня в 16»."
+NOT_A_TIME = "Это не похоже на время, поэтому сохранил как запись. Время можно поменять кнопкой «Изменить время»."
+TIME_GONE = "Напоминание уже изменено или прошло, поэтому сохранил это как запись."
+TIME_PENDING = "Секунду, разбираю время…"
+TIME_WAIT_MAX_CHARS = 120
+LABEL = re.compile(r"[^\x00-\x1f]{1,80}")
 LOGIN_PREFIX, LINK_PREFIX = "login:", "link:"
 LOGIN_DECLINE, LINK_DECLINE = "login-no", "link-no"
 LOGIN_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
@@ -117,6 +128,7 @@ class Bot:
         self.watchers = {}
         self.recent = {}  # chat_id -> times of recent messages, in memory only
         self.awaiting_zone = {}  # chat_id -> until when the next short text is a city or an offset
+        self.awaiting_time = {}  # chat_id -> the reminder whose new time the next short text is
 
     @property
     def web(self):
@@ -242,6 +254,10 @@ class Bot:
                     await self.answer_callback(callback)
                     await self.zone_button(chat_id, identity, token)
                     return
+                confirm = CONFIRM_DATA.fullmatch(token)
+                if confirm:
+                    await self.confirm_button(callback, chat_id, identity, confirm)
+                    return
                 if token.startswith((LOGIN_PREFIX, LINK_PREFIX)) or token in {LOGIN_DECLINE, LINK_DECLINE}:
                     # Answer first so the button stops spinning even when the core refuses.
                     await self.answer_callback(callback)
@@ -259,6 +275,19 @@ class Bot:
             if isinstance(text, str) and (command == "/timezone" or text.strip().lower() in ZONE_TEXTS):
                 await self.timezone_command(chat_id, identity, argument.strip() if command == "/timezone" else "")
                 return
+            note_line = None
+            waiting = self.awaiting_time.get(chat_id)
+            if waiting is not None and waiting["until"] <= self.clock():
+                del self.awaiting_time[chat_id]
+                waiting = None
+            if waiting is not None and isinstance(text, str) and text.strip() and not command.startswith("/"):
+                note_line = NOT_A_TIME  # A long or many-line text is a note, not a time.
+                if len(text.strip()) <= TIME_WAIT_MAX_CHARS and "\n" not in text.strip():
+                    outcome = await self.answer_time(chat_id, identity, waiting, text.strip())
+                    if outcome == "handled":
+                        return
+                    note_line = TIME_GONE if outcome == "gone" else NOT_A_TIME
+                self.awaiting_time.pop(chat_id, None)  # Not a time (long or unclear), so it is a note.
             not_a_city = False
             if (
                 isinstance(text, str) and text.strip() and not command.startswith("/")
@@ -335,6 +364,8 @@ class Bot:
             await self.notify(chat_id, saved, url)
             if not_a_city:
                 await self.notify(chat_id, ZONE_NOT_A_CITY)
+            if note_line:
+                await self.notify(chat_id, note_line)
             if result.get("ask_timezone") is True:
                 # The core says this account has no zone and was never asked. It marks the question as asked.
                 await self.notify(chat_id, ZONE_ASK, reply_markup=self.zone_keyboard())
@@ -477,6 +508,135 @@ class Bot:
         except RemoteFailure as error:
             if error.fatal:
                 raise
+
+    @staticmethod
+    def entry_of(data):
+        """The reminder id and generation of a core answer that asks again, checked."""
+        reminder_id, generation = data.get("reminder_id"), data.get("generation")
+        alt = data.get("alt_label")
+        if (
+            not isinstance(reminder_id, str) or not CONFIRM_DATA.fullmatch(f"rv:{reminder_id}:1")
+            or type(generation) is not int or not 1 <= generation < 10**9
+            or not (alt is None or isinstance(alt, str) and LABEL.fullmatch(alt))
+        ):
+            raise RemoteFailure("core_invalid_response")
+        return {"reminder_id": reminder_id, "generation": generation, "alt_label": alt}
+
+    @staticmethod
+    def label_of(data):
+        label = data.get("label")
+        if not isinstance(label, str) or not LABEL.fullmatch(label):
+            raise RemoteFailure("core_invalid_response")
+        return label
+
+    async def confirm_button(self, callback, chat_id, identity, match):
+        """«Верно», «Изменить время» or the other reading under a message about a guessed time. The core decides."""
+        action = CONFIRM_PREFIXES["r" + match.group(1)]
+        reminder_id, generation = match.group(2), int(match.group(3))
+        payload = {**identity, "reminder_id": reminder_id, "generation": generation, "action": action}
+        try:
+            result = await self.core.post("/telegram/reminder-confirm", payload)
+        except Rejected as error:
+            await self.answer_callback(callback, REJECTIONS[str(error)], alert=True)
+            return
+        status = result.get("status")
+        message = callback["message"]
+        if status == "confirmed":
+            await self.answer_callback(callback, "Верно")
+            await self.settle_message(message, chat_id, reminder_id, mark=True)
+        elif status == "ask_time":
+            await self.answer_callback(callback)
+            self.awaiting_time[chat_id] = {
+                "reminder_id": reminder_id, "generation": generation, "until": self.clock() + MANUAL_TTL,
+                "message": message,
+            }
+            await self.notify(chat_id, TIME_ASK)
+        elif status == "corrected":
+            text = f"Готово, напомню {self.label_of(result)}."
+            await self.answer_callback(callback, text)
+            await self.settle_message(message, chat_id, reminder_id, outcome=text)
+        else:
+            raise RemoteFailure("core_invalid_response")
+
+    async def answer_time(self, chat_id, identity, waiting, text):
+        """The written time. Returns handled, not_time (save the text as a note) or gone (also a note)."""
+        payload = {**identity, "reminder_id": waiting["reminder_id"], "generation": waiting["generation"], "text": text}
+        try:
+            result = await self.core.post("/telegram/reminder-time", payload)
+        except Rejected as error:
+            if str(error) == "action_expired":
+                return "gone"
+            raise
+        status = result.get("status")
+        if status == "not_time":
+            return "not_time"
+        if status == "unclear":
+            await self.notify(chat_id, TIME_UNCLEAR)  # Still waiting: the time may be written again.
+            return "handled"
+        if status == "pending":
+            # The worker reads it with the model. Its answer arrives as an ordinary delivery, with the buttons.
+            await self.notify(chat_id, TIME_PENDING)
+        elif status == "set":
+            await self.notify(chat_id, f"Готово, напомню {self.label_of(result)}.")
+        elif status == "ask":
+            entry = self.entry_of(result)
+            await self.notify(
+                chat_id, f"Поставил на {self.label_of(result)}. Верно?",
+                reply_markup={"inline_keyboard": confirm_rows([entry])},
+            )
+        else:
+            raise RemoteFailure("core_invalid_response")
+        self.awaiting_time.pop(chat_id, None)
+        await self.settle_message(waiting["message"], chat_id, waiting["reminder_id"])
+        return "handled"
+
+    async def settle_message(self, message, chat_id, reminder_id, *, mark=False, outcome=None):
+        """Take this reminder's buttons away from the message. «Верно» adds ✓, a new time adds the outcome line."""
+        message_id = message.get("message_id")
+        markup = message.get("reply_markup")
+        rows = markup.get("inline_keyboard") if isinstance(markup, dict) else None
+        rows = rows if isinstance(rows, list) else []
+        left, ok_label = [], ""
+        for row in rows:
+            kept = []
+            for button in row if isinstance(row, list) else []:
+                data = button.get("callback_data") if isinstance(button, dict) else None
+                if isinstance(data, str) and reminder_id in data:
+                    if data.startswith("rv:"):
+                        ok_label = button.get("text", "")
+                    continue
+                kept.append(button)
+            if kept:
+                left.append(kept)
+        original = message.get("text")
+        suffix = ""
+        if mark:
+            number = ok_label.rsplit(" ", 1)[-1] if ok_label.count(" ") else ""
+            suffix = f"\n✓ {number}" if number.isdigit() else " ✓"
+        elif outcome:
+            suffix = "\n\n" + outcome
+        if type(message_id) is int:
+            try:
+                if suffix and isinstance(original, str) and original and (
+                    len((original + suffix).encode("utf-16-le")) // 2 <= TELEGRAM_UNITS
+                ):
+                    await self.telegram.call("editMessageText", {
+                        "chat_id": chat_id, "message_id": message_id, "text": original + suffix,
+                        "link_preview_options": {"is_disabled": True}, "reply_markup": {"inline_keyboard": left},
+                    })
+                else:
+                    await self.telegram.call("editMessageReplyMarkup", {
+                        "chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": left},
+                    })
+                    if outcome:
+                        await self.notify(chat_id, outcome)
+                return
+            except RemoteFailure as error:
+                if error.fatal:
+                    raise
+                logger.warning("bot_edit_failed code=%s", error.code)
+        if outcome:
+            await self.notify(chat_id, outcome)
 
     async def reminder_button(self, callback, chat_id, identity, data):
         """Done, in an hour or tomorrow under a delivered reminder. The core decides, the bot reports."""
