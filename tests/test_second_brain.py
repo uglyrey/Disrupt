@@ -294,6 +294,7 @@ def test_note_detail_proposes_a_reminder_for_an_open_task_with_a_deadline(app, c
     assert task["due_text"] == "завтра"
     assert task["proposed_reminder"] == {
         "local_time": f"{tomorrow:%Y-%m-%d}T09:00:00", "timezone": "Europe/Moscow", "label": "завтра в 09:00",
+        "certain": True, "alternatives": [],
     }
     assert [i["proposed_reminder"] for i in note["items"] if i["kind"] != "task"] == [None]
     stored = client.get(f"/api/v1/notes/{note['id']}/revisions").json()[0]["items"]

@@ -394,6 +394,9 @@ class ProposedReminder(StrictModel):
     local_time: str
     timezone: str
     label: str
+    # False when the spoken time had two readings: the form asks the person to confirm. Other readings are local ISO times.
+    certain: bool = True
+    alternatives: list[str] = Field(default_factory=list, max_length=4)
 
 
 class ItemResponse(StrictModel):

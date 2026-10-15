@@ -9147,6 +9147,19 @@
           "label": {
             "type": "string",
             "title": "Label"
+          },
+          "certain": {
+            "type": "boolean",
+            "title": "Certain",
+            "default": true
+          },
+          "alternatives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Alternatives"
           }
         },
         "additionalProperties": false,
