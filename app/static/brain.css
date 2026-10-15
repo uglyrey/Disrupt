@@ -157,10 +157,6 @@ button.br-chip:hover:not(:disabled){background:#eef2e8;filter:none}
 /* Phone: the library hides behind the toggle while a view is open */
 @media(max-width:640px){
   .workspace.has-view .category-navigation .category-button[aria-pressed=true]{background:#fff;border-color:#d5dfcf;color:#526353}
-  .workspace.has-view>#mobile-library-toggle{display:flex;align-items:center;gap:8px;width:auto;min-height:40px;margin:12px 16px 0;padding:0 14px;border:1px solid #d5dfcf;background:#fff;color:var(--ink);font-size:13px}
-  .workspace.has-view>#mobile-library-toggle::after{content:'';width:7px;height:7px;border-right:2px solid #58705e;border-bottom:2px solid #58705e;transform:rotate(45deg) translate(-2px,-2px)}
-  .workspace.has-view>#mobile-library-toggle[aria-expanded=true]::after{transform:rotate(-135deg) translate(-1px,-1px)}
-  .workspace.has-view:not(.library-open)>.library-column{display:none}
   .workspace.has-view .editor-column{padding-top:16px}
   .br-head{align-items:flex-start}
   .br-seg{width:100%}

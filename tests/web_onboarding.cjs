@@ -18,10 +18,13 @@ function landing(){
  try{
   assert.equal($('auth').hidden,false);
   assert.ok($('landing-title'),'landing headline');
-  assert.equal($('auth-form').querySelector('button').value,'login');
+  assert.equal($('landing-register'),null);
+  assert.equal($('landing-register-bottom'),null);
+  let scrolled=0;$('auth-card').scrollIntoView=()=>{scrolled++;};
   $('landing-login').click();
-  assert.equal($('auth').dataset.intent,'login');assert.equal($('auth-form').querySelector('button').value,'login');
-  assert.equal($('legacy-login').open,true);
+  $('landing-login-bottom').click();
+  assert.equal(scrolled,2);
+  assert.equal(w.document.activeElement.id,'signin-email');
   assert.equal($('auth-form').querySelectorAll('button[type=submit]').length,1);
  }finally{dom.window.close();}
 }

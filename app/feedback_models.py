@@ -13,11 +13,12 @@ class Feedback(Base):
     __tablename__ = 'feedback'
     __table_args__ = (
         UniqueConstraint('user_id', 'idempotency_key', name='uq_feedback_user_key'),
-        CheckConstraint("kind IN ('bug','idea','question','other')", name='ck_feedback_kind'),
+        CheckConstraint("kind IN ('bug','idea','question','other','recovery')", name='ck_feedback_kind'),
         CheckConstraint("status IN ('new','in_progress','resolved')", name='ck_feedback_status'),
     )
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: Mapped[str] = mapped_column(ForeignKey('users.id'), index=True)
+    # Empty for «recovery»: the person cannot sign in, so there is no account to point at.
+    user_id: Mapped[str | None] = mapped_column(ForeignKey('users.id'), index=True, nullable=True)
     idempotency_key: Mapped[str] = mapped_column(String(100))
     payload_hash: Mapped[str] = mapped_column(String(64))
     kind: Mapped[str] = mapped_column(String(16))

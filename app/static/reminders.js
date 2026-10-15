@@ -7,7 +7,7 @@
   let note = null, bridge = null, generation = 0, listRequest = 0, timeRequest = 0;
   let locked = false, busy = false, editing = null, baseline = '', preview = null, comparison = null, conflicted = false;
   let pendingCreate = null, uncertainEdit = null, rows = [], more = false, timer = null;
-  let resolveTimer = null, listed = false, pick = '', telegram = {linked:null,error:false};
+  let resolveTimer = null, listed = false, telegram = {linked:null,error:false};
   const labels = {confirmed:'Подтверждено',sent:'Отправлено',blocked:'Telegram недоступен',
     unknown:'Результат отправки неизвестен',cancelled:'Отменено',completed:'Выполнено'};
   const deliveryLabels = {pending:'Ожидает отправки',leased:'Готовится к отправке',authorized:'Отправляется',
@@ -49,7 +49,6 @@
     return Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6] || 0));
   }
   function wallFromMs(ms) { return new Date(ms).toISOString().slice(0,16); }
-  function roundUp5(value) { return wallFromMs(Math.ceil(wallMs(value) / 300000) * 300000); }
   function hm(value) { return `${+value.slice(11,13)}:${value.slice(14,16)}`; }
   function dayParts(value) { const d = new Date(wallMs(value.slice(0,10) + 'T00:00')); return {d:d.getUTCDate(),m:d.getUTCMonth(),y:d.getUTCFullYear(),w:d.getUTCDay()}; }
   function nowWall(zone) { return wallTime(Date.now(),zone); }
@@ -61,14 +60,14 @@
     const day = dayParts(local), year = dayParts(nowWall(zone)).y;
     return `${weekdaysShort[day.w]}, ${day.d} ${monthsShort[day.m]}${day.y === year ? '' : ' ' + day.y}, ${hm(local)}`;
   }
-  function pickTime(kind, zone) {
-    const now = nowWall(zone).slice(0,16), midnight = wallMs(now.slice(0,10) + 'T00:00');
-    const at = (days, time) => `${wallFromMs(midnight + days * 86400000).slice(0,10)}T${time}`;
-    if (kind === 'hour') return roundUp5(wallTime(Date.now() + 3600000,zone));
-    if (kind === 'today') return at(0,'19:00');
-    if (kind === 'monday') return at((8 - dayParts(now).w) % 7 || 7,'09:00');
-    if (kind === 'week') return roundUp5(new Date(wallMs(nowWall(zone)) + 7 * 86400000).toISOString().slice(0,19));
-    return at(1,'09:00');
+  // A new reminder starts at the next round hour of today, if that hour is a sensible one (from 7:00 to 21:00).
+  // Before 7:00 it starts at 9:00 today, late in the evening it starts tomorrow at 9:00.
+  function defaultTime(zone) {
+    const now = nowWall(zone).slice(0,16), hour = Math.floor(wallMs(now) / 3600000) + 1;
+    const next = wallFromMs(hour * 3600000), today = now.slice(0,10);
+    if (next.slice(0,10) === today && +next.slice(11,13) >= 7 && +next.slice(11,13) < 22) return next;
+    if (next.slice(0,10) === today && +next.slice(11,13) < 7) return `${today}T09:00`;
+    return `${wallFromMs(wallMs(today + 'T00:00') + 86400000).slice(0,10)}T09:00`;
   }
   function say(text = '') { $('reminders-message').textContent = text; }
   function fields() { return {item_id:$('reminder-target').value || null, text:$('reminder-text').value,
@@ -119,31 +118,9 @@
     const date = $('reminder-date').value, time = $('reminder-time').value.slice(0,5);
     $('reminder-local').value = date && time ? `${date}T${time}:00` : '';
   }
-  function setPick(kind) {
-    pick = kind;
-    for (const chip of $('reminder-chips').querySelectorAll('button')) chip.setAttribute('aria-pressed',String(chip.dataset.pick === kind));
-    $('reminder-custom').hidden = kind !== 'custom';
-  }
-  function drawChips() {
-    const zone = $('reminder-zone').value.trim();
-    const now = validZone(zone) ? nowWall(zone) : null;
-    for (const chip of $('reminder-chips').querySelectorAll('button')) {
-      let hidden = false;
-      if (now && chip.dataset.pick === 'today') hidden = +now.slice(11,13) * 60 + +now.slice(14,16) >= 18 * 60 + 30;
-      if (now && chip.dataset.pick === 'monday') hidden = dayParts(now).w === 0;
-      chip.hidden = hidden;
-    }
-  }
   function drawZone() {
     const zone = $('reminder-zone').value.trim();
     $('reminder-zone-name').textContent = zone ? zoneLine(zone) : 'не указан';
-  }
-  function applyPick(kind) {
-    const zone = $('reminder-zone').value.trim();
-    if (!validZone(zone)) { $('reminder-zone-edit').hidden = false; return say('Укажите часовой пояс, например Europe/Moscow.'); }
-    if (kind === 'custom' && pick === 'custom') return $('reminder-date').focus();
-    setPick(kind); setLocal(pickTime(kind,zone)); say(); invalidateTime();
-    if (kind === 'custom') { $('reminder-date').focus(); scheduleResolve(0); } else checkTime();
   }
   function wallTime(value, timezone) {
     const parts = new Intl.DateTimeFormat('en-CA',{timeZone:timezone,year:'numeric',month:'2-digit',day:'2-digit',
@@ -160,7 +137,7 @@
     conflicted = false;
     $('reminder-form').hidden = true; $('reminder-conflict').hidden = true;
     $('reminder-remote').hidden = true; $('reminder-use-version').hidden = true;
-    $('reminder-text').value = ''; setLocal(''); setPick('');
+    $('reminder-text').value = ''; setLocal('');
     $('reminder-zone-edit').hidden = true; $('reminder-zone-change').setAttribute('aria-expanded','false');
     invalidateTime(); baseline = fingerprint();
   }
@@ -185,9 +162,10 @@
     $('reminder-form-title').textContent = row ? 'Изменить напоминание' : 'Новое напоминание';
     $('reminder-text').value = row?.text || item?.text || note.title;
     const proposedZone = proposal && validZone(proposal.timezone) ? proposal.timezone : '';
-    $('reminder-zone').value = row?.timezone || proposedZone || defaultZone(); drawZone(); drawChips(); fillZones();
-    if (row) { setLocal(wallTime(row.scheduled_at,row.timezone)); setPick('custom'); }
-    else if (proposedZone && proposal.local_time) { setLocal(proposal.local_time); setPick('custom'); }
+    $('reminder-zone').value = row?.timezone || proposedZone || defaultZone(); drawZone(); fillZones();
+    if (row) setLocal(wallTime(row.scheduled_at,row.timezone));
+    else if (proposedZone && proposal.local_time) setLocal(proposal.local_time);
+    else setLocal(defaultTime($('reminder-zone').value.trim()));
     $('reminder-form').hidden = false; baseline = fingerprint(); controls();
     if (proposedZone && proposal.local_time && !row) {
       checkTime().then(() => {
@@ -195,7 +173,7 @@
         else if (!$('reminder-confirm').disabled) $('reminder-confirm').focus();
       });
       $('reminder-form').scrollIntoView?.({block:'nearest'});
-    } else if (row) checkTime(); else $('reminder-chips').querySelector('button:not([hidden])').focus();
+    } else { checkTime(); if (!row) $('reminder-time').focus(); }
   }
   function rowTime(row) {
     try {
@@ -402,13 +380,9 @@
   $('reminders-more').onclick = () => refresh(true);
   $('reminder-check-time').onclick = checkTime;
   $('reminder-time-choice').onchange = drawPreview;
-  for (const chip of $('reminder-chips').querySelectorAll('button')) chip.onclick = () => applyPick(chip.dataset.pick);
-  $('reminder-date').oninput = $('reminder-time').oninput = () => { syncLocal(); setPick('custom'); timeChanged(); };
-  $('reminder-local').oninput = () => { setLocal($('reminder-local').value); if (!pick) setPick('custom'); timeChanged(); };
-  $('reminder-zone').oninput = () => {
-    drawZone(); drawChips();
-    if (pick && pick !== 'custom' && validZone($('reminder-zone').value.trim())) applyPick(pick); else timeChanged();
-  };
+  $('reminder-date').oninput = $('reminder-time').oninput = () => { syncLocal(); timeChanged(); };
+  $('reminder-local').oninput = () => { setLocal($('reminder-local').value); timeChanged(); };
+  $('reminder-zone').oninput = () => { drawZone(); timeChanged(); };
   $('reminder-zone-change').onclick = () => {
     const open = $('reminder-zone-edit').hidden; $('reminder-zone-edit').hidden = !open;
     $('reminder-zone-change').setAttribute('aria-expanded',String(open)); if (open) $('reminder-zone').focus();

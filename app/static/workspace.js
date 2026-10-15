@@ -26,6 +26,32 @@
   new MutationObserver(syncNote).observe(get('source-card'),{attributes:true,attributeFilter:['hidden']});
   new MutationObserver(syncNote).observe(get('notes'),{childList:true});
   get('mobile-library-toggle').onclick=()=>{const open=get('workspace').classList.toggle('library-open');get('mobile-library-toggle').setAttribute('aria-expanded',String(open));};
+  const phoneBack = get('mobile-back');
+  function phoneBackLabel() {
+    const text = get('workspace').classList.contains('library-open') ? 'Новая запись' : 'Назад';
+    if (get('mobile-back-label').textContent !== text) get('mobile-back-label').textContent = text;
+  }
+  new MutationObserver(phoneBackLabel).observe(get('workspace'), {attributes:true,attributeFilter:['class']});
+  phoneBack.onclick = () => {
+    if (history.state?.berestaNavigation === 1 && history.state.index > 0) history.back();
+    else if (get('workspace').classList.contains('library-open')) {
+      get('workspace').classList.remove('library-open');
+      get('mobile-library-toggle').setAttribute('aria-expanded', 'false');
+    }
+    else get('new-note').click();
+  };
+  function phoneLibraryCount() {
+    const badge = get('mobile-library-count');
+    const filtered = filter.value !== '' || get('search-query').value.trim() !== '';
+    const count = get('notes').querySelectorAll('button[data-note-id]').length;
+    const value = filtered || !count ? '' : count + (get('more-notes').hidden ? '' : '+');
+    if (badge.textContent !== value) badge.textContent = value;
+    badge.hidden = !value;
+  }
+  new MutationObserver(phoneLibraryCount).observe(get('notes'), {childList:true});
+  new MutationObserver(phoneLibraryCount).observe(get('more-notes'), {attributes:true,attributeFilter:['hidden']});
+  get('search-form').addEventListener('submit', () => setTimeout(phoneLibraryCount, 0));
+  window.BerestaPhone = {openList() { if (!get('workspace').classList.contains('library-open')) get('mobile-library-toggle').click(); }};
   get('new-note').addEventListener('click',()=>{if(get('capture-card').hidden)return;window.BerestaFocus?.closeAll();if(!get('thought').disabled)get('thought').focus();});
   // ---- Category navigation: plus button, inline create and rename, context menu, delete dialog ----
   window.categoryLongPressMs = 500;

@@ -192,8 +192,9 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
     await require('./web_cookies.cjs')();
     await require('./web_timezone.cjs')();
     await require('./web_auth.cjs')();
-    await require('./web_email_auth.cjs')();
     await require('./web_contact_methods.cjs')();
+    await require('./web_signin.cjs')();
+    await require('./web_mobile_capture.cjs')();
     await require('./web_brain.cjs')();
     await require('./web_search_digests.cjs')();
     await require('./web_notes_manage.cjs')();

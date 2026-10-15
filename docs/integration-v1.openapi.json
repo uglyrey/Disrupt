@@ -89,6 +89,47 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/support/recovery": {
+      "post": {
+        "tags": [
+          "feedback"
+        ],
+        "summary": "Recovery",
+        "description": "A request from someone who cannot sign in. Stored in the inbox; mailed to support when mail is on.",
+        "operationId": "recovery_api_v1_support_recovery_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportRecovery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/api/v1/feedback": {
       "post": {
         "tags": [
@@ -6130,6 +6171,46 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/account/password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change Password",
+        "operationId": "change_password_api_v1_account_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/api/v1/account/accept-policy": {
       "post": {
         "tags": [
@@ -6527,6 +6608,86 @@
         },
         "responses": {
           "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/auth/email/code/start": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Code Start",
+        "operationId": "code_start_api_v1_auth_email_code_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/auth/email/code/confirm": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Code Confirm",
+        "operationId": "code_confirm_api_v1_auth_email_code_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailCodeConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -8571,6 +8732,50 @@
         ],
         "title": "EmailBody"
       },
+      "EmailCodeConfirm": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 6,
+            "minLength": 6,
+            "pattern": "^[0-9]{6}$",
+            "title": "Code"
+          },
+          "accept_policy": {
+            "type": "boolean",
+            "title": "Accept Policy",
+            "default": false
+          },
+          "policy_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Version"
+          },
+          "confirm_age": {
+            "type": "boolean",
+            "title": "Confirm Age",
+            "default": false
+          },
+          "marketing_opt_in": {
+            "type": "boolean",
+            "title": "Marketing Opt In",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "EmailCodeConfirm"
+      },
       "EmailCredentials": {
         "properties": {
           "email": {
@@ -8779,7 +8984,8 @@
               "bug",
               "idea",
               "question",
-              "other"
+              "other",
+              "recovery"
             ],
             "title": "Kind"
           },
@@ -8818,7 +9024,14 @@
             "title": "Id"
           },
           "user_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "User Id"
           },
           "status": {
@@ -9942,6 +10155,29 @@
         ],
         "title": "NoteSummary"
       },
+      "PasswordChange": {
+        "properties": {
+          "old_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Old Password"
+          },
+          "new_password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 10,
+            "title": "New Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "old_password",
+          "new_password"
+        ],
+        "title": "PasswordChange"
+      },
       "PasswordReset": {
         "properties": {
           "token": {
@@ -10577,6 +10813,34 @@
           "pending_d7"
         ],
         "title": "Retention"
+      },
+      "SupportRecovery": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Email"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "accept_processing": {
+            "type": "boolean",
+            "title": "Accept Processing",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "email",
+          "text"
+        ],
+        "title": "SupportRecovery"
       },
       "TelegramCaptureResponse": {
         "properties": {

@@ -112,6 +112,32 @@ class EmailRegistrationConfirm(StrictModel):
     code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
 
 
+class EmailCodeConfirm(StrictModel):
+    code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
+    # Needed only for a new address. The server asks for them with the code «consent_required».
+    accept_policy: bool = False
+    policy_version: str | None = Field(default=None, max_length=32)
+    confirm_age: bool = False
+    marketing_opt_in: bool = False
+
+
+class PasswordChange(StrictModel):
+    old_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+class SupportRecovery(EmailBody):
+    text: str = Field(min_length=1, max_length=2000)
+    accept_processing: bool = False
+
+    @field_validator("text")
+    @classmethod
+    def readable(cls, value):
+        if not value.strip() or "\x00" in value:
+            raise ValueError("Text must contain non-whitespace characters and no null bytes")
+        return value
+
+
 class TextCapture(StrictModel):
     text: str = Field(min_length=1, max_length=12000)
     processing_mode: Literal["ai", "manual"] = "ai"

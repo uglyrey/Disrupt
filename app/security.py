@@ -40,7 +40,17 @@ def hash_password(password: str) -> str:
     return "scrypt$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(digest).decode()
 
 
+# Accounts made through Telegram or by an email code have no password. Nothing matches this value.
+UNUSABLE_PASSWORD = "!"
+
+
+def has_usable_password(encoded: str) -> bool:
+    return encoded.startswith("scrypt$")
+
+
 def verify_password(password: str, encoded: str) -> bool:
+    if not has_usable_password(encoded):
+        return False
     _, salt, expected = encoded.split("$")
     digest = hashlib.scrypt(password.encode(), salt=base64.b64decode(salt), n=16384, r=8, p=1)
     return hmac.compare_digest(digest, base64.b64decode(expected))
@@ -49,7 +59,7 @@ def verify_password(password: str, encoded: str) -> bool:
 DUMMY_PASSWORD_HASH = hash_password("not-an-account-password")
 
 
-def throttle(db, identifier: str, limit: int = 10, window: int = 60):
+def throttle(db, identifier: str, limit: int = 10, window: int = 60, message: str | None = None):
     now = time.time()
     key = hash_token(identifier)
     insert = sqlite_insert if db.bind.dialect.name == "sqlite" else pg_insert
@@ -68,6 +78,8 @@ def throttle(db, identifier: str, limit: int = 10, window: int = 60):
     db.execute(delete(LoginThrottle).where(LoginThrottle.window_start < now - 86400))
     db.commit()
     if not accepted:
+        if message:
+            raise HTTPException(429, message, headers={"Retry-After": str(window)})
         if window > 60:
             raise HTTPException(
                 429, "С вашего адреса сегодня создано слишком много аккаунтов. Попробуйте завтра.",

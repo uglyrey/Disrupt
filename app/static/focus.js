@@ -120,7 +120,7 @@
     if (get('reminder-form').hidden) return;
     openTool('reminders', {focus: false});
     if (!tools.get('reminders').pop.contains(document.activeElement)) {
-      const target = !get('reminder-confirm').disabled ? get('reminder-confirm') : get('reminder-chips').querySelector('button:not([hidden])');
+      const target = !get('reminder-confirm').disabled ? get('reminder-confirm') : get('reminder-time');
       target?.focus();
     }
   }).observe(get('reminder-form'), {attributes: true, attributeFilter: ['hidden']});

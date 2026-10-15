@@ -48,5 +48,5 @@ def test_policy_mentions_cookies_age_and_current_version(client):
 
 def test_landing_explains_the_ai_allowance_up_front(client):
     page = client.get("/").text
-    assert 'id="landing-ai-allowance"' in page and "30 единиц" in page and "бесплатна" in page
+    assert 'id="landing-ai-allowance"' in page and "100 единиц" in page and "бесплатна" in page
     assert "Ваши записи видите только вы" not in page
