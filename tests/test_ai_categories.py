@@ -168,7 +168,7 @@ def test_prompt_has_the_new_rules():
         "due_text содержит точную цитату срока",
     ]:
         assert fragment in SYSTEM_PROMPT, fragment
-    assert len(SYSTEM_PROMPT) <= 3500  # 2903 before the reminder rule, plus the short merge rule
+    assert len(SYSTEM_PROMPT) <= 3779  # 3436 before the time rule (reminder-confirm-v1), plus 10%
 
 
 def test_structure_context_is_json_data_with_local_date():
@@ -177,6 +177,7 @@ def test_structure_context_is_json_data_with_local_date():
     assert data == {
         "today": "2026-10-12",
         "weekday": "понедельник",
+        "now": "01:30",
         "timezone": "Europe/Moscow",
         "existing_categories": ["Работа", "Дом"],
     }
@@ -200,7 +201,7 @@ def test_cloudru_sends_date_context_as_data_before_the_text():
     assert [m["role"] for m in messages] == ["system", "user", "user"]
     assert messages[0]["content"] == SYSTEM_PROMPT
     context = json.loads(messages[1]["content"])
-    assert set(context) == {"today", "weekday", "timezone", "existing_categories"}
+    assert set(context) == {"today", "weekday", "now", "timezone", "existing_categories"}
     assert context["timezone"] == "Asia/Yekaterinburg" and context["existing_categories"] == ["Покупки"]
     datetime.strptime(context["today"], "%Y-%m-%d")
     assert messages[2] == {"role": "user", "content": json.dumps({"note_text": "Купить хлеб завтра"}, ensure_ascii=False)}

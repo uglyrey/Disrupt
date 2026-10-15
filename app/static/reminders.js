@@ -203,6 +203,9 @@
       edit.onclick = () => startForm(row);
       const cancel = node('button','Отменить','quiet reminder-small'); cancel.type = 'button'; cancel.dataset.action = 'cancel';
       cancel.disabled = row.status === 'cancelled' || row.status === 'completed'; cancel.onclick = () => cancelReminder(row);
+      // A time that was a guess waits for the person: a small note next to «Изменить», no new dialog.
+      const guess = row.status === 'confirmed' && ['ask','unclear'].includes(row.time_check) && Date.parse(row.scheduled_at) > Date.now();
+      if (guess) actions.append(node('span','Проверьте время','reminder-check'));
       actions.append(edit,cancel); card.append(actions); $('reminders-list').append(card);
     }
     drawTelegram(); controls();

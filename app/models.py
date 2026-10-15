@@ -314,6 +314,11 @@ class Reminder(Base):
     creation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Made with the service zone because the account had none. Moved when the person sets a zone.
     zone_guessed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Was the time checked with the person: ask and unclear wait for «Верно», confirmed and corrected are settled.
+    # Empty for reminders whose time was certain (docs/reminder-confirm-v1.md).
+    time_check: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # The other reading of an unclear time (UTC timestamp), offered as a button. Empty when there is none.
+    time_alt: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class Inbox(Base):
@@ -360,6 +365,8 @@ class Outbox(Base):
     # Account messages (for example a password reset link). The text is erased once the attempt is final.
     message_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     message_text: Mapped[str | None] = mapped_column(EncryptedText("outbox.message_text"), nullable=True)
+    # Reminders whose time the message asks about (ids only). The buttons are built from them when it is claimed.
+    message_reminders: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class TelegramDigestSettings(Base):
@@ -482,6 +489,35 @@ class ProviderUsage(Base):
     cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
     occurred_at: Mapped[float] = mapped_column(Float, default=time.time, index=True)
+
+
+class TimeRequest(Base):
+    """A written answer to «Изменить время» that our parser could not read, waiting for one small AI call.
+
+    The API only writes this row. The worker, which alone holds the model key, resolves it and puts the reply into
+    the outbox. No foreign key to reminders: the reminder may be purged while the row waits, the worker then answers
+    "gone". The text is erased once the row is final. See docs/reminder-confirm-v1.md.
+    """
+
+    __tablename__ = "time_requests"
+    __table_args__ = (
+        UniqueConstraint("bot_id", "update_id", name="uq_time_requests_update"),
+        CheckConstraint("status IN ('queued', 'running', 'done', 'failed')", name="ck_time_requests_status"),
+        Index("ix_time_requests_status_created", "status", "created_at"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    reminder_id: Mapped[str] = mapped_column(String(36))
+    generation: Mapped[int] = mapped_column(Integer)
+    bot_id: Mapped[int] = mapped_column(BigInteger)
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    update_id: Mapped[int] = mapped_column(BigInteger)
+    answer: Mapped[str | None] = mapped_column(EncryptedText("time_requests.answer"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    lease_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[float] = mapped_column(Float, default=time.time)
+    finished_at: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class AssistantRequest(Base):
