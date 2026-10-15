@@ -7254,6 +7254,11 @@
               }
             ],
             "title": "Alt Label"
+          },
+          "edit_only": {
+            "type": "boolean",
+            "title": "Edit Only",
+            "default": false
           }
         },
         "additionalProperties": false,
