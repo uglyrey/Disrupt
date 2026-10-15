@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from app.integration import IntegrationRejection
 from app.models import Item, Note, Reminder
-from app.reminder_proposals import label_for
+from app.reminder_proposals import label_for, mentions_time
 from app.reminders import instant_of, reschedule
 from app.time_check import ASK, CONFIRMED, CORRECTED, NEEDS_CHECK, parse_words, read_model_time
 
@@ -72,21 +72,23 @@ def apply_time(db, row, stamp, check, alt=None):
     row.time_check, row.time_alt = check, alt
 
 
-def button_entries(db, user_id, reminder_ids, now=None):
+def button_entries(db, user_id, reminder_ids, now=None, *, edit_only=False):
     """What the bot needs to draw «Верно» / «Изменить время» for each reminder that is still waiting.
 
     One dict per reminder, at most three, in the order given: reminder_id, generation, alt_label (or None).
+    With `edit_only` the reminder only has to be waiting (any state): the entry is for «Изменить время» alone.
     """
     now = time.time() if now is None else now
     entries = []
     for reminder_id in reminder_ids:
         row = waiting_reminder(db, user_id, reminder_id, now)
-        if row is None or row.time_check not in NEEDS_CHECK:
+        if row is None or (not edit_only and row.time_check not in NEEDS_CHECK):
             continue
-        alt = row.time_alt if row.time_alt and row.time_alt > now else None
+        alt = row.time_alt if row.time_alt and row.time_alt > now and not edit_only else None
         entries.append({
             "reminder_id": row.id, "generation": row.generation,
             "alt_label": short_label(row, now, alt) if alt else None,
+            **({"edit_only": True} if edit_only else {}),
         })
         if len(entries) == MAX_BUTTON_REMINDERS:
             break
@@ -119,11 +121,12 @@ def confirm_action(db, user_id, reminder_id, generation, action, now=None):
     return {"status": "corrected", "label": time_label(row, now)}
 
 
-def answer_time(db, user_id, reminder_id, generation, text, ai_value, now=None):
-    """Handle the written answer to «Изменить время». `ai_value` is the AI's local time or None (asked only if needed).
+def answer_time(db, user_id, reminder_id, generation, text, ai_value=None, now=None, defer=None):
+    """Handle the written answer to «Изменить время». No AI here: `ai_value` is the time the worker got from it.
 
     status set: moved, corrected. ask: moved to our best guess and the person is asked again.
-    unclear: nothing understood, nothing changed.
+    unclear: nothing understood, nothing changed. pending: our parser found nothing but the text names some time,
+    and `defer(row)` queued it for the worker (it returns False when the person has too many waiting: unclear).
     """
     now = time.time() if now is None else now
     row = waiting_reminder(db, user_id, reminder_id, now)
@@ -147,4 +150,6 @@ def answer_time(db, user_id, reminder_id, generation, text, ai_value, now=None):
     if stamp is not None and stamp > now:
         apply_time(db, row, stamp, CORRECTED)
         return {"status": "set", "label": time_label(row, now)}
+    if ai_value is None and defer is not None and mentions_time(text) and defer(row):
+        return {"status": "pending"}
     return {"status": "unclear"}

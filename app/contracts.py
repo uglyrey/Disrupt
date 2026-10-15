@@ -43,6 +43,8 @@ class ConfirmButtons(StrictModel):
     generation: int = Field(ge=1)
     # Text of the third button, the other reading of the time («В 04:00»). Empty if there is none.
     alt_label: str | None = None
+    # True: only «Изменить время» is drawn (the person must start the correction again).
+    edit_only: bool = False
 
 
 class Delivery(StrictModel):

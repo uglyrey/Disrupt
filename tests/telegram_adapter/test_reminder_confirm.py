@@ -9,7 +9,7 @@ import json
 import httpx
 import pytest
 
-from telegram_adapter.bot import MANUAL_TTL, NOT_A_TIME, TIME_ASK, TIME_GONE, TIME_UNCLEAR
+from telegram_adapter.bot import MANUAL_TTL, NOT_A_TIME, TIME_ASK, TIME_GONE, TIME_PENDING, TIME_UNCLEAR
 from telegram_adapter.clients import CONFIRM_DATA, REJECTIONS, CoreClient, TelegramClient, confirm_rows
 from telegram_adapter.delivery import DeliverySender
 from tests.telegram_adapter.test_adapter import SAVED, TOKEN, message, session
@@ -95,6 +95,13 @@ def test_without_another_reading_there_is_no_third_button_and_several_pairs_are_
         ["Верно 1", "Изменить время 1"], ["Верно 2", "Изменить время 2"]]
 
 
+def test_an_edit_only_entry_draws_just_the_edit_button():
+    rows = confirm_rows([{**entry(alt=None), "edit_only": True}])
+    assert [[b["text"] for b in row] for row in rows] == [["Изменить время"]]
+    assert [b["callback_data"] for row in rows for b in row] == [f"re:{RID}:1"]
+    assert all(CONFIRM_DATA.fullmatch(b["callback_data"]) for row in rows for b in row)
+
+
 def sending(item):
     posted = []
 
@@ -123,7 +130,7 @@ def test_the_delivery_draws_the_pairs_above_the_link():
 
 @pytest.mark.parametrize("confirm", [
     "x", [entry()] * 4, [{"reminder_id": "not-a-uuid", "generation": 1}], [entry(generation=0)],
-    [entry(generation="1")], [entry(alt="a" * 41)], [{**entry(), "extra": 1}], [entry(alt="a\nb")], ["x"],
+    [entry(generation="1")], [{**entry(), "edit_only": "yes"}], [entry(alt="a" * 41)], [{**entry(), "extra": 1}], [entry(alt="a\nb")], ["x"],
 ])
 def test_a_malformed_confirm_list_stops_the_sender(settings, confirm):
     from telegram_adapter.clients import RemoteFailure
@@ -134,6 +141,7 @@ def test_a_malformed_confirm_list_stops_the_sender(settings, confirm):
     with pytest.raises(RemoteFailure):
         sender.validate_claim(item)
     sender.validate_claim({**item, "confirm": [entry()]})
+    sender.validate_claim({**item, "confirm": [{**entry(alt=None), "edit_only": True}]})
     sender.validate_claim({k: v for k, v in item.items() if k != "confirm"})
 
 
@@ -207,6 +215,17 @@ def test_edit_asks_for_a_time_and_the_next_text_is_the_time_not_a_note(settings)
     markup_edit = [r for r in replies if "reply_markup" in r and "text" not in r]
     assert markup_edit and markup_edit[0]["message_id"] == 7
     assert markup_edit[0]["reply_markup"] == {"inline_keyboard": [[{"text": "Открыть Beresta", "url": URL}]]}
+
+
+def test_a_pending_answer_says_one_moment_ends_the_wait_and_takes_the_old_buttons_away(settings):
+    core = Core(confirm=[{"status": "ask_time", "label": "x"}], time=[{"status": "pending"}])
+    bot, replies = run(settings, [press(f"re:{RID}:1"), message(41, "после обеда часа в три")], core)
+    assert [r["text"] for r in sent(replies)] == [TIME_ASK, TIME_PENDING]
+    assert TIME_PENDING == "Секунду, разбираю время…"
+    assert bot.awaiting_time == {}  # The worker answers later through an ordinary delivery.
+    assert "/telegram/updates" not in core.paths()
+    edited = [r for r in replies if "reply_markup" in r and "text" not in r]
+    assert edited and edited[0]["reply_markup"] == {"inline_keyboard": [[{"text": "Открыть Beresta", "url": URL}]]}
 
 
 def test_an_unclear_answer_keeps_waiting_and_the_next_one_works(settings):

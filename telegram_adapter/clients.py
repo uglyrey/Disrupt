@@ -29,6 +29,9 @@ def confirm_rows(entries):
     for number, entry in enumerate(entries, 1):
         suffix = f" {number}" if numbered else ""
         tail = f"{entry['reminder_id']}:{entry['generation']}"
+        if entry.get("edit_only"):
+            rows.append([{"text": "Изменить время" + suffix, "callback_data": "re:" + tail}])
+            continue
         rows.append([
             {"text": "Верно" + suffix, "callback_data": "rv:" + tail},
             {"text": "Изменить время" + suffix, "callback_data": "re:" + tail},

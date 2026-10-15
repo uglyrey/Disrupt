@@ -334,7 +334,9 @@ def claim_deliveries(db, body, settings):
                 row.status, row.error_code, row.message_text = "cancelled", "delivery_invalid", None
                 continue
             reminder = note = None
-            confirm = button_entries(db, row.user_id, row.message_reminders or [], now)
+            confirm = button_entries(
+                db, row.user_id, row.message_reminders or [], now, edit_only=row.message_kind == "reminder_time_edit",
+            )
         else:
             target = current_target(db, row, now)
             if target is None:

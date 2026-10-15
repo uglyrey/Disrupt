@@ -94,6 +94,7 @@ TIME_ASK = "Напишите, когда напомнить. Например «
 TIME_UNCLEAR = "Не понял время. Напишите, например «сегодня в 16»."
 NOT_A_TIME = "Это не похоже на время, поэтому сохранил как запись. Время можно поменять кнопкой «Изменить время»."
 TIME_GONE = "Напоминание уже изменено или прошло, поэтому сохранил это как запись."
+TIME_PENDING = "Секунду, разбираю время…"
 TIME_WAIT_MAX_CHARS = 120
 LABEL = re.compile(r"[^\x00-\x1f]{1,80}")
 LOGIN_PREFIX, LINK_PREFIX = "login:", "link:"
@@ -572,7 +573,10 @@ class Bot:
         if status == "unclear":
             await self.notify(chat_id, TIME_UNCLEAR)  # Still waiting: the time may be written again.
             return "handled"
-        if status == "set":
+        if status == "pending":
+            # The worker reads it with the model. Its answer arrives as an ordinary delivery, with the buttons.
+            await self.notify(chat_id, TIME_PENDING)
+        elif status == "set":
             await self.notify(chat_id, f"Готово, напомню {self.label_of(result)}.")
         elif status == "ask":
             entry = self.entry_of(result)

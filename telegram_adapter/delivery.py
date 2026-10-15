@@ -116,10 +116,12 @@ class DeliverySender:
             if not isinstance(confirm, list) or len(confirm) > 3:
                 raise ValueError()
             for entry in confirm:
-                if not isinstance(entry, dict) or set(entry) - {"reminder_id", "generation", "alt_label"}:
+                if not isinstance(entry, dict) or set(entry) - {"reminder_id", "generation", "alt_label", "edit_only"}:
                     raise ValueError()
                 UUID(entry["reminder_id"])
                 if type(entry["generation"]) is not int or not 1 <= entry["generation"] < 10**9:
+                    raise ValueError()
+                if type(entry.get("edit_only", False)) is not bool:
                     raise ValueError()
                 label = entry.get("alt_label")
                 if label is not None and (not isinstance(label, str) or not 1 <= len(label) <= 40 or not label.isprintable()):

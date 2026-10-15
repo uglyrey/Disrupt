@@ -1,6 +1,7 @@
 """One tiny AI call for a reminder time that our parser could not read from the person's written answer.
 
-Used only by the Telegram answer to «Изменить время» (docs/reminder-confirm-v1.md). It goes through the same
+Used only by the worker, for a queued `TimeRequest` (the Telegram answer to «Изменить время», see
+docs/reminder-confirm-v1.md). The API process never calls it. It goes through the same
 provider stack as the notes: the main gateway first, one try on the reserve when the gateway does not answer,
 one repeat after an unusable answer, the per-user live call limit and the daily money checks, a receipt per
 call, and the output guard. It costs no AI unit of the person. It never raises: a failure is `None`.
@@ -32,35 +33,14 @@ def model_name(provider):
 
 
 class TimeResolver:
-    """Built once per app. The heavy parts (worker, keys) are made on the first use, never at start-up."""
+    """Works inside the worker process, which alone holds the model key (docs/model-budget-v1.md)."""
 
-    def __init__(self, sessions, settings, provider=None, fallback_provider=None):
-        self.sessions, self.settings = sessions, settings
-        self.provider, self.fallback_provider = provider, fallback_provider
-        self._worker = None
-        self._failed = False
-
-    @property
-    def worker(self):
-        if self._worker is None and not self._failed:
-            from app.providers import make_fallback_provider
-            from app.worker import Worker
-
-            try:
-                fallback = self.fallback_provider
-                if fallback is None and self.provider is None:
-                    fallback = make_fallback_provider(self.settings)
-                self._worker = Worker(self.sessions, self.settings, self.provider, fallback_provider=fallback)
-            except Exception as exc:
-                self._failed = True
-                log_error("time_ai_unavailable", "internal_error", log_file=self.settings.error_log_file, exception=exc)
-        return self._worker
+    def __init__(self, worker):
+        self.worker, self.settings = worker, worker.settings
 
     def resolve(self, user_id, operation_id, data):
         """The local time `YYYY-MM-DDTHH:MM` the answer in `data` means, or None. Never raises."""
         worker = self.worker
-        if worker is None:
-            return None
         try:
             return self._resolve(worker, user_id, operation_id, data)
         except ProviderError as exc:

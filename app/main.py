@@ -80,7 +80,6 @@ from app.services import (
     search_notes,
 )
 from app.sessions import create_session, user_payload
-from app.time_ai import TimeResolver
 from app.worker import Worker
 
 STATIC = Path(__file__).parent / "static"
@@ -302,7 +301,7 @@ def create_app(
     app.include_router(feedback_router(database))
     app.include_router(admin_router(database, STATIC, settings))
     app.include_router(review_router(database, STATIC, settings))
-    app.include_router(internal_router(database, settings, TimeResolver(sessions, settings, provider)))
+    app.include_router(internal_router(database, settings))
     app.include_router(structure_router(database))
     app.include_router(reminders_router(database))
     app.include_router(timezone_router(database))
