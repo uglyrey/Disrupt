@@ -2,6 +2,7 @@
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 
 from app.db import make_database
@@ -70,7 +71,7 @@ def test_upgrade_from_installed_production_head_preserves_mail_consent(tmp_path,
         command.upgrade(config, "head")
         command.check(config)
         with engine.connect() as db:
-            assert db.execute(text("SELECT version_num FROM alembic_version")).scalar() == "a17d6c9e24f0"
+            assert db.execute(text("SELECT version_num FROM alembic_version")).scalar() == ScriptDirectory.from_config(config).get_current_head()
             assert db.execute(text(
                 "SELECT email,marketing_consent_at,marketing_consent_source FROM users WHERE id='mail'"
             )).one() == ("owner@example.test", 123, "email-registration")
