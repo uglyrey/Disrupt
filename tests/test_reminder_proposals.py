@@ -69,7 +69,7 @@ CASES = [
 
 NOTHING = [
     None, "", "   ", "скоро", "потом", "когда-нибудь", "в ближайшее время", "срочно",
-    "на следующей неделе", "ночью", "сегодня в 8", "сегодня", "вчера", "9 октября", "10.10 в 9:00",
+    "на следующей неделе", "ночью", "сегодня", "вчера", "9 октября", "10.10 в 09:00", "сегодня в 8 утра",
     "в 25", "завтра в 25:00", "31.02", "30 февраля", "15.13", "29 февраля 2027", "через 0 минут",
     "через 9999 дней", "2020-01-01", "1 января 2020", "через", "в", "\x00завтра",
 ]
@@ -77,7 +77,10 @@ NOTHING = [
 
 @pytest.mark.parametrize(("text", "local_time", "label"), CASES)
 def test_proposal_for_phrase(text, local_time, label):
-    assert propose_reminder(text, NOW, ZONE) == {"local_time": local_time, "timezone": ZONE, "label": label}
+    proposal = propose_reminder(text, NOW, ZONE)
+    assert {key: proposal[key] for key in ("local_time", "timezone", "label")} == {
+        "local_time": local_time, "timezone": ZONE, "label": label}
+    assert isinstance(proposal["certain"], bool) and isinstance(proposal["alternatives"], list)
 
 
 @pytest.mark.parametrize("text", NOTHING)
@@ -98,7 +101,9 @@ def test_time_zone_changes_local_day():
 
 def test_bare_time_that_passed_rolls_to_tomorrow_but_explicit_day_does_not():
     assert propose_reminder("в 9", NOW, ZONE)["local_time"] == "2026-10-11T09:00:00"
-    assert propose_reminder("сегодня в 9", NOW, ZONE) is None
+    assert propose_reminder("сегодня в 09:00", NOW, ZONE) is None
+    # Without a daypart the hour has two readings, and today the nearest future one is taken: 21:00.
+    assert propose_reminder("сегодня в 9", NOW, ZONE)["local_time"] == "2026-10-10T21:00:00"
 
 
 def test_weekday_is_never_today():
@@ -109,8 +114,8 @@ def test_weekday_is_never_today():
 def test_wall_time_inside_dst_gap_is_not_proposed():
     # New York skips 02:00-03:00 on 2027-03-14.
     now = datetime(2027, 3, 10, 15, 0, tzinfo=UTC)
-    assert propose_reminder("14.03 в 2:30", now, "America/New_York") is None
-    assert propose_reminder("14.03 в 3:30", now, "America/New_York")["local_time"] == "2027-03-14T03:30:00"
+    assert propose_reminder("14.03 в 02:30", now, "America/New_York") is None
+    assert propose_reminder("14.03 в 03:30", now, "America/New_York")["local_time"] == "2027-03-14T03:30:00"
 
 
 def test_naive_now_is_treated_as_utc_and_parser_is_pure():
