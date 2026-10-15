@@ -263,8 +263,6 @@ def build_router(database, settings):
             throttle(db, "register-day:" + ip, limit=settings.registrations_per_ip_per_day, window=86400)
             user = User(username=available_name(db, row.email), email=row.email, email_verified_at=now,
                         password_hash=UNUSABLE_PASSWORD, policy_version=POLICY_VERSION, policy_accepted_at=now)
-            if body.marketing_opt_in:
-                set_marketing_consent(user, True, "email-code", now)
             db.add(user)
             try:
                 db.flush()
@@ -272,6 +270,8 @@ def build_router(database, settings):
                 db.rollback()
                 raise HTTPException(409, "Не удалось создать аккаунт. Попробуйте ещё раз") from None
             record_event(db, user.id, "registered", user.id, outcome="email_code")
+        if body.marketing_opt_in:
+            set_marketing_consent(user, True, "email-code", now)
         retire(row, now)
         result = create_session(db, response, user, request, settings, method="email_code")
         response.delete_cookie(CODE_COOKIE, path=CODE_PATH)

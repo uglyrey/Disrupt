@@ -127,6 +127,18 @@ def test_new_email_code_can_opt_in_to_messages(stack):
         assert user.marketing_consent_source == "email-code"
 
 
+def test_existing_email_code_can_opt_in_to_messages(stack):
+    app, client, mail = stack
+    user_id = make_account(app)
+    ask(client)
+    answer = enter(client, last_code(mail), marketing_opt_in=True)
+    assert answer.status_code == 200 and answer.json()["id"] == user_id
+    with app.state.sessions() as db:
+        user = db.get(User, user_id)
+        assert user.marketing_consent_at is not None
+        assert user.marketing_consent_source == "email-code"
+
+
 def test_new_address_rejects_stale_policy(stack):
     app, client, mail = stack
     ask(client)
