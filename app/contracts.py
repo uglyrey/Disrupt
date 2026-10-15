@@ -37,6 +37,16 @@ class ClaimRequest(StrictModel):
     limit: int = Field(ge=1, le=100)
 
 
+class ConfirmButtons(StrictModel):
+    """Under a message that asks «Верно?» about the time of a reminder: one pair of buttons per reminder."""
+    reminder_id: str
+    generation: int = Field(ge=1)
+    # Text of the third button, the other reading of the time («В 04:00»). Empty if there is none.
+    alt_label: str | None = None
+    # True: only «Изменить время» is drawn (the person must start the correction again).
+    edit_only: bool = False
+
+
 class Delivery(StrictModel):
     delivery_id: str
     lease_token: str
@@ -45,6 +55,8 @@ class Delivery(StrictModel):
     text: str
     note_url: str
     callback_token: str | None
+    # Reminders whose time the text asks about, at most three. Empty for ordinary messages.
+    confirm: list[ConfirmButtons] = Field(default_factory=list, max_length=3)
 
 
 class ClaimResponse(StrictModel):

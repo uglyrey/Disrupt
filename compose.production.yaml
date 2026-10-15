@@ -154,6 +154,8 @@ services:
       NOTES_STT_ENABLED: ${NOTES_STT_ENABLED:-false}
       NOTES_STT_PROTOCOL_CONFIRMED: ${NOTES_STT_PROTOCOL_CONFIRMED:-false}
       NOTES_STT_MODEL: ${NOTES_STT_MODEL:-}
+      # Keep the verified STT request format until the gateway accepts an owner-tested prompt.
+      NOTES_STT_PROMPT: ${NOTES_STT_PROMPT-}
     secrets:
       - postgres_password
       - data_key
