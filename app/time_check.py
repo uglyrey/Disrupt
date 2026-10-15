@@ -62,15 +62,16 @@ def other_reading(chosen, *candidates):
 def decide(words, model_value, local_now):
     """Combine the parser's reading of `words` with the model's `due_at` (either may be missing).
 
-    Both agree to the minute and the parser is sure: confirmed. The model is present and the parser disagrees,
-    doubts or finds nothing: the model's time stands and the person is asked. No model time: a sure parser
-    needs no question, a doubtful one is asked about. Nothing usable: `Reading(None)`.
+    Both agree to the minute: confirmed, even if the parser alone would have doubted (two independent readings
+    met). The model is present and the parser disagrees or finds nothing: the model's time stands and the person
+    is asked. No model time: a sure parser needs no question, a doubtful one is asked about. Nothing usable:
+    `Reading(None)`.
     """
     local_now = local_now.replace(second=0, microsecond=0)
     model = read_model_time(model_value, local_now)
     guess, certain, others = parse_words(words, local_now)
     if model is not None:
-        if guess == model and certain:
+        if guess == model:
             return Reading(model, CONFIRMED)
         return Reading(model, ASK, other_reading(model, guess, *others))
     if guess is None:

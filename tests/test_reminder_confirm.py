@@ -1,7 +1,8 @@
 """Reminder times that are right: the model's `due_at` against the parser, «Верно?», the written correction.
 
 Mock provider, fake provider answers and httpx.MockTransport only. No live model, no Telegram.
-The parser contract is faked per test (tests/reminder_shim.py) so the cases do not depend on parser version.
+The real parser is used unless a case needs a pinned answer (`patch_parser`, for example an unsure parser with a chosen
+alternative). Cases marked `real parser` run `parse_due_text_detailed` as shipped.
 """
 
 import json
@@ -31,7 +32,6 @@ from app.providers import (
 from app.reminders import AUTO_KEY_PREFIX, auto_reminders, request_reminders
 from app.time_ai import TimeResolver
 from app.time_check import ASK, CONFIRMED, decide, read_model_time
-from tests.reminder_shim import fake_parser
 from tests.test_internal import BASE, HEADERS, SERVICE_TOKEN, linked, message
 from tests.test_reminders import claim
 
@@ -45,8 +45,21 @@ def at(hour, minute=0, day=15):
     return datetime(2026, 10, day, hour, minute)
 
 
+def pinned_parser(table):
+    """A `parse_due_text_detailed` that answers from {phrase: dict or datetime}. Other phrases give nothing."""
+
+    def parse(text, now):
+        value = table.get(text)
+        if isinstance(value, datetime):
+            value = {"result": value, "certain": True, "time_spoken": True, "alternatives": []}
+        base = {"result": None, "certain": False, "time_spoken": False, "alternatives": []}
+        return base if value is None else {**base, **value}
+
+    return parse
+
+
 def patch_parser(monkeypatch, table):
-    monkeypatch.setattr(reminder_proposals, "parse_due_text_detailed", fake_parser(table))
+    monkeypatch.setattr(reminder_proposals, "parse_due_text_detailed", pinned_parser(table))
 
 
 # The matrix: model due_at against the parser
@@ -63,10 +76,32 @@ def test_the_parser_disagrees_so_the_model_time_stands_and_the_person_is_asked(m
     assert (reading.when, reading.check, reading.alt) == (at(16), ASK, at(9))
 
 
-def test_the_parser_is_unsure_even_when_it_picks_the_same_minute(monkeypatch):
+def test_an_unsure_parser_that_picks_the_same_minute_as_the_model_is_confirmed(monkeypatch):
     patch_parser(monkeypatch, {"в четыре": {"result": at(16), "certain": False, "alternatives": [at(4, day=16)]}})
     reading = decide("в четыре", "2026-10-15T16:00", NOW)
-    assert (reading.when, reading.check, reading.alt) == (at(16), ASK, at(4, day=16))
+    assert (reading.when, reading.check, reading.alt) == (at(16), CONFIRMED, None)
+
+
+def test_an_unsure_parser_that_picks_another_minute_than_the_model_is_asked_with_both_readings(monkeypatch):
+    patch_parser(monkeypatch, {"в четыре": {"result": at(16), "certain": False, "alternatives": [at(4, day=16)]}})
+    reading = decide("в четыре", "2026-10-16T04:00", NOW)
+    assert (reading.when, reading.check, reading.alt) == (at(4, day=16), ASK, at(16))
+
+
+def test_real_parser_tomorrow_at_ten_with_the_same_model_time_is_not_asked():
+    reading = decide("завтра в 10", "2026-10-16T10:00", NOW)
+    assert (reading.when, reading.check, reading.alt) == (at(10, day=16), CONFIRMED, None)
+
+
+def test_real_parser_tomorrow_at_ten_against_a_model_evening_time_is_asked_with_the_parser_reading():
+    reading = decide("завтра в 10", "2026-10-16T22:00", NOW)
+    assert (reading.when, reading.check, reading.alt) == (at(22, day=16), ASK, at(10, day=16))
+
+
+def test_real_parser_the_owner_case_with_and_without_a_model_time():
+    assert decide(QUOTE, "2026-10-15T16:00", NOW) == decide(QUOTE, None, NOW).__class__(at(16), CONFIRMED, None)
+    reading = decide(QUOTE, None, NOW)
+    assert (reading.when, reading.check, reading.alt) == (at(16), None, None)
 
 
 def test_the_parser_finds_nothing_so_the_model_time_is_set_and_asked(monkeypatch):
@@ -243,6 +278,36 @@ def test_the_owners_case_is_set_to_sixteen_and_confirmed_without_a_question(note
     assert claim(client).json() == {"items": []}  # Nothing is due and no text is sent for a confirmed time.
 
 
+def test_real_parser_the_owners_case_with_the_model_time_is_confirmed_without_a_question(notes):
+    app, client, ids = notes
+    item_id = make_task(app, ids)
+    assert run_request(app, ids, item_id, "2026-10-15T16:00", MORNING) == [(at(16), CONFIRMED, None)]
+    assert claim(client).json() == {"items": []}
+
+
+def test_real_parser_the_owners_case_without_a_model_time_is_sixteen_and_no_question(notes):
+    app, client, ids = notes
+    item_id = make_task(app, ids)
+    assert run_request(app, ids, item_id, None, MORNING) == [(at(16), None, None)]
+    assert claim(client).json() == {"items": []}
+
+
+def test_real_parser_tomorrow_at_ten_with_the_model_ten_is_not_asked(notes):
+    app, client, ids = notes
+    sentence = "Напомни завтра в 10 позвонить маме"
+    item_id = make_task(app, ids, sentence, "завтра в 10")
+    assert run_request(app, ids, item_id, "2026-10-16T10:00", MORNING, sentence) == [(at(10, day=16), CONFIRMED, None)]
+
+
+def test_real_parser_tomorrow_at_ten_against_the_model_twenty_two_asks_with_the_ten_button(notes):
+    app, client, ids = notes
+    sentence = "Напомни завтра в 10 позвонить маме"
+    item_id = make_task(app, ids, sentence, "завтра в 10")
+    ((when, check, alt),) = run_request(app, ids, item_id, "2026-10-16T22:00", MORNING, sentence)
+    assert (when, check) == (at(22, day=16), ASK)
+    assert datetime.fromtimestamp(alt, MOSCOW).replace(tzinfo=None) == at(10, day=16)
+
+
 def test_when_the_parser_drops_the_hour_the_model_time_is_set_and_asked(notes, monkeypatch):
     app, client, ids = notes
     patch_parser(monkeypatch, {QUOTE: at(9)})
@@ -348,12 +413,21 @@ def test_worker_disagreement_sets_the_model_time_and_asks(notes):
     assert delivery["confirm"] == [{"reminder_id": row.id, "generation": 1, "alt_label": "В 10:00"}]
 
 
-def test_a_voice_style_note_with_no_time_from_the_model_keeps_the_parser_time(notes):
+def test_a_voice_style_note_with_no_time_from_the_model_keeps_the_parser_time_and_asks(notes):
     app, client, ids = notes
     assert message(client, update_id=42, text="Напомни завтра в 10 позвонить маме").status_code == 200
     run_worker(app, Dating("завтра в 10", None))
     (row,) = auto_rows(app)
     assert datetime.fromtimestamp(row.scheduled_at, MOSCOW).replace(tzinfo=None) == tomorrow(10)
+    assert row.time_check == "ask"  # No daypart: the real parser is unsure and the model gave nothing.
+
+
+def test_a_sure_phrase_with_no_time_from_the_model_needs_no_question(notes):
+    app, client, ids = notes
+    assert message(client, update_id=43, text="Напомни завтра в 10 вечера позвонить маме").status_code == 200
+    run_worker(app, Dating("завтра в 10 вечера", None))
+    (row,) = auto_rows(app)
+    assert datetime.fromtimestamp(row.scheduled_at, MOSCOW).replace(tzinfo=None) == tomorrow(22)
     assert row.time_check is None
 
 

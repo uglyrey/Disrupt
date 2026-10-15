@@ -131,9 +131,10 @@ def test_telegram_reply_names_the_reminder_with_the_change_link(reminders):
     run_worker(app, Silent())
     (row,) = auto_rows(app)
     delivery = claim(client).json()["items"][0]
-    assert delivery["text"].split("\n")[-1] == (
-        "Напоминание поставлено: завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». "
-        f"Изменить: {delivery['note_url']}&reminder={row.id}"
+    # «Завтра в 10» has no daypart, the parser is unsure and the model gave no time, so the person is asked.
+    lines = delivery["text"].split("\n")
+    assert lines[-1] == (
+        "Напоминание поставлено: завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно?"
     )
 
 
@@ -146,7 +147,7 @@ def test_two_requests_give_two_reminders_and_a_short_list(reminders):
     text = claim(client).json()["items"][0]["text"]
     tail = text.split("\n\n")[-1].split("\n")
     assert tail[0] == "Напоминания поставлены:"
-    assert tail[1] == "• завтра в 10:00 по Москве, «Завтра в 10 позвонить маме»"
+    assert tail[1] == "• завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно?"
     assert tail[2] == "• послезавтра в 12:00 по Москве, «Послезавтра в 12 оплатить счёт»"
     assert tail[3].startswith("Изменить: ")
 

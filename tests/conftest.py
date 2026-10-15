@@ -56,16 +56,6 @@ def no_network(monkeypatch):
     monkeypatch.setattr(httpx.HTTPTransport, "handle_request", forbidden)
 
 
-@pytest.fixture(autouse=True)
-def parser_contract(monkeypatch):
-    """Until agent P2's `parse_due_text_detailed` is merged, the plain parser answers through the shim."""
-    from app import reminder_proposals
-    from tests.reminder_shim import detailed_from_plain
-
-    if not hasattr(reminder_proposals, "parse_due_text_detailed"):
-        monkeypatch.setattr(reminder_proposals, "parse_due_text_detailed", detailed_from_plain, raising=False)
-
-
 @pytest.fixture
 def data_key_file(tmp_path):
     """Файл тестового ключа шифрования. Настоящих секретов в тестах нет."""
