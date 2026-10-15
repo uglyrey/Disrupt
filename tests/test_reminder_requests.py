@@ -55,7 +55,7 @@ def test_prompt_asks_for_a_task_and_no_longer_forbids_reminders():
     assert "не создавай напоминания" not in lowered
     assert "напомни" in lowered and "remind me" in lowered and "будильник" in lowered
     assert "due_text" in SYSTEM_PROMPT and "Не придумывай даты" in SYSTEM_PROMPT
-    assert len(SYSTEM_PROMPT) <= 3500  # 3200 plus the short merge rule (notes-manage-v1)
+    assert len(SYSTEM_PROMPT) <= 3779  # 3436 before the model counted deadlines itself (reminder-confirm-v1), plus 10%
 
 
 # Grounding
@@ -197,13 +197,25 @@ def test_manual_capture_without_a_request_makes_nothing(reminders):
     assert claim(client).json() == {"items": []}
 
 
-def test_request_with_an_unusable_time_keeps_the_note_and_says_so(reminders):
+def test_request_with_an_unusable_time_gets_the_default_time_and_a_question(reminders):
     app, client, ids = reminders
     assert message(client, update_id=308, text="Напомни вчера в 10 позвонить маме", mode="manual").status_code == 200
-    assert auto_rows(app) == []
-    assert claim(client).json()["items"][0]["text"] == NOT_UNDERSTOOD
+    (row,) = auto_rows(app)
+    assert row.time_check == "unclear" and row.status == "confirmed"
+    (item,) = claim(client).json()["items"]
+    assert item["text"].startswith("Не понял, когда напомнить. Поставил на ") and item["text"].endswith("Верно?")
+    assert [(c["reminder_id"], c["generation"]) for c in item["confirm"]] == [(row.id, 1)]
     with app.state.sessions() as db:
         assert [n.markdown for n in db.scalars(select(Note))].count("Напомни вчера в 10 позвонить маме") == 1
+
+
+def test_request_with_an_unusable_time_and_no_default_stays_without_a_reminder(reminders):
+    app, client, ids = reminders
+    off = replace(app.state.settings, reminder_default_delay_seconds=0)
+    with app.state.sessions.begin() as db:
+        note = db.get(Note, ids["note"])
+        assert request_reminders(db, note, "Напомни вчера в 10 позвонить маме", off) == []
+        assert NOT_UNDERSTOOD  # the old line still exists for requests that got nothing
 
 
 def test_cancelled_reminder_is_not_made_again_by_the_net(reminders):

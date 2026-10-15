@@ -293,6 +293,11 @@ class Reminder(Base):
     creation_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Made with the service zone because the account had none. Moved when the person sets a zone.
     zone_guessed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # Was the time checked with the person: ask and unclear wait for «Верно», confirmed and corrected are settled.
+    # Empty for reminders whose time was certain (docs/reminder-confirm-v1.md).
+    time_check: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # The other reading of an unclear time (UTC timestamp), offered as a button. Empty when there is none.
+    time_alt: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class Inbox(Base):
@@ -339,6 +344,8 @@ class Outbox(Base):
     # Account messages (for example a password reset link). The text is erased once the attempt is final.
     message_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     message_text: Mapped[str | None] = mapped_column(EncryptedText("outbox.message_text"), nullable=True)
+    # Reminders whose time the message asks about (ids only). The buttons are built from them when it is claimed.
+    message_reminders: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class TelegramLogin(Base):
