@@ -13,10 +13,12 @@ from sqlalchemy import and_, or_, select
 
 from app.analytics import record_event
 from app.models import Capture, Item, Job, Note, Outbox, Reminder, TelegramIdentity, User
+from app.reminder_confirm import MAX_BUTTON_REMINDERS, button_entries
 from app.reminder_proposals import label_for
 from app.reminders import AUTO_KEY_PREFIX, NOT_UNDERSTOOD, unscheduled_requests
 from app.security import hash_token
 from app.services import item_view, lock_account, reminder_proposals
+from app.time_check import ASK, NEEDS_CHECK, UNCLEAR
 from app.timezones import by_zone, zone_guessed
 
 
@@ -134,13 +136,17 @@ def short_task(text):
 
 
 def auto_reminder_hint(db, note, settings, now):
-    """The line for reminders the AI has set for this note, or an empty string. They are still ahead and can be changed."""
+    """The line for reminders the AI has set for this note, or an empty string. They are still ahead and can be changed.
+
+    Returns (text, ids): ids are the reminders (at most three) that the line asks «Верно?» about. The bot draws
+    «Верно» and «Изменить время» under the message for them.
+    """
     rows = db.scalars(select(Reminder).where(
         Reminder.note_id == note.id, Reminder.user_id == note.user_id, Reminder.status == "confirmed",
         Reminder.scheduled_at > now, Reminder.idempotency_key.like(AUTO_KEY_PREFIX + "%"),
     ).order_by(Reminder.scheduled_at, Reminder.id)).all()
     if not rows:
-        return ""
+        return "", []
     first = rows[0]
     link = settings.public_origin + "/?capture=" + note.capture_id + "&reminder=" + first.id
 
@@ -151,25 +157,39 @@ def auto_reminder_hint(db, note, settings, now):
         # The account has no zone yet, so the time was read in the service zone. Say which one.
         return text + " " + by_zone(row.timezone) if row.zone_guessed else text
 
+    asks = [row for row in rows if row.time_check in NEEDS_CHECK]
+    with_buttons = asks[:MAX_BUTTON_REMINDERS]
+    ids = [row.id for row in with_buttons]
     if len(rows) == 1:
-        return f"Напоминание поставлено: {when(first)}, «{short_task(first.text)}». Изменить: {link}"
-    lines = [f"• {when(row)}, «{short_task(row.text)}»" for row in rows[:HINT_LIST]]
+        task = f"{when(first)}, «{short_task(first.text)}»"
+        if first.time_check == UNCLEAR:
+            return f"Не понял, когда напомнить. Поставил на {task}. Верно?", ids
+        if first.time_check == ASK:
+            return f"Напоминание поставлено: {task}. Верно?", ids
+        return f"Напоминание поставлено: {task}. Изменить: {link}", ids
+    numbered = len(with_buttons) > 1
+    lines = []
+    for row in rows[:HINT_LIST]:
+        line = f"{when(row)}, «{short_task(row.text)}»"
+        if row in with_buttons:
+            mark = f"{with_buttons.index(row) + 1}." if numbered else "•"
+            line = f"{mark} {line}. Верно?"
+        elif row.time_check in NEEDS_CHECK:
+            line = f"• {line}. Проверьте время на сайте."
+        else:
+            line = f"• {line}"
+        lines.append(line)
     if len(rows) > HINT_LIST:
         lines.append(f"и ещё {len(rows) - HINT_LIST}")
-    return "Напоминания поставлены:\n" + "\n".join(lines) + f"\nИзменить: {link}"
+    return "Напоминания поставлены:\n" + "\n".join(lines) + f"\nИзменить: {link}", ids
 
 
-def reminder_hint(db, note, settings, now=None):
-    """One line about reminders for a processed note, or an empty string.
-
-    Reminders the AI has set are named first. Otherwise the line offers a reminder for the first open
-    task whose deadline can be read, and nothing is stored: the link opens the note, where the user
-    confirms or changes the time.
-    """
+def reminder_line(db, note, settings, now=None):
+    """(text, ids) of the one line about reminders for a processed note. `ids` are the reminders it asks about."""
     missed = NOT_UNDERSTOOD if unscheduled_requests(db, note) else ""
-    done = auto_reminder_hint(db, note, settings, time.time() if now is None else now.timestamp())
+    done, ids = auto_reminder_hint(db, note, settings, time.time() if now is None else now.timestamp())
     if done:
-        return done + ("\n" + missed if missed else "")
+        return done + ("\n" + missed if missed else ""), ids
     items = [item_view(item) for item in db.scalars(
         select(Item).where(Item.note_id == note.id, Item.user_id == note.user_id, Item.deleted_at.is_(None))
         .order_by(Item.position, Item.id)
@@ -186,17 +206,27 @@ def reminder_hint(db, note, settings, now=None):
                 f"Предлагаю напоминание: {when}, «{short_task(item['text'])}». "
                 f"Подтвердить или изменить время: {link}"
             )
-            return line + ("\n" + missed if missed else "")
-    return missed
+            return line + ("\n" + missed if missed else ""), []
+    return missed, []
+
+
+def reminder_hint(db, note, settings, now=None):
+    """One line about reminders for a processed note, or an empty string.
+
+    Reminders the AI has set are named first. Otherwise the line offers a reminder for the first open
+    task whose deadline can be read, and nothing is stored: the link opens the note, where the user
+    confirms or changes the time.
+    """
+    return reminder_line(db, note, settings, now)[0]
 
 
 def add_reminder_set_message(db, note, identity, settings):
     """A note saved without AI has no processing reply, so a reminder it got is confirmed in a short message."""
-    text = reminder_hint(db, note, settings)
+    text, ids = reminder_line(db, note, settings)
     if text:
         db.add(Outbox(
             user_id=identity.user_id, bot_id=identity.bot_id, chat_id=identity.chat_id, generation=1,
-            status="pending", message_kind="reminder_set", message_text=text,
+            status="pending", message_kind="reminder_set", message_text=text, message_reminders=ids or None,
         ))
 
 
@@ -304,11 +334,17 @@ def claim_deliveries(db, body, settings):
                 row.status, row.error_code, row.message_text = "cancelled", "delivery_invalid", None
                 continue
             reminder = note = None
+            confirm = button_entries(db, row.user_id, row.message_reminders or [], now)
         else:
             target = current_target(db, row, now)
             if target is None:
                 continue
             reminder, note = target
+            confirm = []
+            reply = None
+            if reminder is None:
+                reply, ids = reminder_line(db, note, settings)
+                confirm = button_entries(db, row.user_id, ids, now)
         lease = secrets.token_urlsafe(32)
         callback = secrets.token_urlsafe(32) if reminder is not None else None
         row.status, row.lease_token_hash = "leased", hash_token(lease)
@@ -319,10 +355,11 @@ def claim_deliveries(db, body, settings):
             "delivery_id": row.id, "lease_token": lease, "generation": row.generation,
             "chat_id": row.chat_id,
             "text": row.message_text if message else reminder_message_text(reminder, note) if reminder is not None
-            else processing_reply_text(note, reminder_hint(db, note, settings)),
+            else processing_reply_text(note, reply),
             "note_url": settings.public_origin + "/" if message else settings.public_origin
                         + "/?capture=" + note.capture_id
                         + ("&reminder=" + reminder.id if reminder is not None else ""), "callback_token": callback,
+            "confirm": confirm,
         })
     db.flush()
     return {"items": results}

@@ -207,9 +207,34 @@ class ProposedConclusion(StrictModel):
 ItemKind = Literal["note", "idea", "task", "goal", "plan"]
 
 
+LOCAL_MINUTE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
+
+
+def well_formed_local_minute(value):
+    """A local `YYYY-MM-DDTHH:MM` string, or None for anything else (never an error)."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not LOCAL_MINUTE.fullmatch(value):
+        return None
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+    return value
+
+
 class ProposedItem(ProposedConclusion):
     kind: ItemKind
     due_text: str | None = Field(default=None, max_length=300)
+    # Local wall time of the deadline, YYYY-MM-DDTHH:MM, as the model worked it out. Optional and never trusted:
+    # a malformed value becomes None here, the reminder code cross-checks the rest (docs/reminder-confirm-v1.md).
+    due_at: str | None = None
+
+    @field_validator("due_at", mode="before")
+    @classmethod
+    def well_formed_due_at(cls, value):
+        return well_formed_local_minute(value)
 
 
 class StructuredNote(StrictModel):
@@ -317,6 +342,8 @@ class ReminderResponse(StrictModel):
     confirmed_at: str
     delivery_status: str | None
     previous_attempt_unknown: bool
+    # ask or unclear: the time was a guess and the person has not said «Верно» yet. Empty otherwise.
+    time_check: Literal["ask", "unclear", "confirmed", "corrected"] | None = None
 
 
 class ReminderTimeRequest(StrictModel):
@@ -477,6 +504,27 @@ class TelegramZoneSet(TelegramOperation):
 
 class TelegramZoneAsked(TelegramOperation):
     pass
+
+
+class TelegramReminderConfirm(TelegramOperation):
+    """A button under a message that asks «Верно?» about the time of a reminder."""
+    reminder_id: str = Field(min_length=1, max_length=36, pattern=r"^[A-Za-z0-9-]+$")
+    generation: Counter
+    action: Literal["ok", "edit", "alt"]
+
+
+class TelegramReminderTime(TelegramOperation):
+    """The written answer to «Изменить время»."""
+    reminder_id: str = Field(min_length=1, max_length=36, pattern=r"^[A-Za-z0-9-]+$")
+    generation: Counter
+    text: str = Field(min_length=1, max_length=200)
+
+    @field_validator("text")
+    @classmethod
+    def not_blank(cls, value):
+        if not value.strip() or "\x00" in value:
+            raise ValueError("Empty text or null bytes")
+        return value.strip()
 
 
 class TelegramZoneFind(StrictModel):

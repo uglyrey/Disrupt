@@ -40,6 +40,9 @@ from app.models import (
     User,
     new_id,
 )
+from app.providers import WEEKDAYS
+from app.reminder_confirm import answer_time, confirm_action, local_now_of, waiting_reminder
+from app.reminder_proposals import mentions_time
 from app.reminders import local_clock, reschedule, snooze_time
 from app.schemas import (
     IntegrationError,
@@ -47,6 +50,8 @@ from app.schemas import (
     TelegramCaptureResponse,
     TelegramLink,
     TelegramLoginConfirm,
+    TelegramReminderConfirm,
+    TelegramReminderTime,
     TelegramText,
     TelegramZoneAsked,
     TelegramZoneFind,
@@ -54,6 +59,7 @@ from app.schemas import (
 )
 from app.security import hash_token, require_internal_service
 from app.services import cancel_item_reminders, capture_text, lock_account, save_revision
+from app.time_check import parse_words
 from app.timezones import find_zone, label_for_zone, nearest_city, offset_minutes, utc_text, valid_zone
 
 
@@ -192,7 +198,7 @@ def handle_telegram_action(db, body):
     return {"status": "completed"}
 
 
-def build_router(database, settings):
+def build_router(database, settings, time_resolver=None):
     router = APIRouter(
         prefix="/internal/v1",
         tags=["internal-v1"],
@@ -384,6 +390,50 @@ def build_router(database, settings):
     @router.post("/telegram/actions", response_model=ActionResponse, response_model_exclude_none=True)
     def telegram_action(body: ActionRequest, db=Depends(database)):
         return process_update(db, body, "action", lambda _: handle_telegram_action(db, body))
+
+    # «Верно?» under a reminder with a guessed time. Not in the published contract (docs/reminder-confirm-v1.md).
+    @router.post("/telegram/reminder-confirm", include_in_schema=False)
+    def reminder_confirm(body: TelegramReminderConfirm, db=Depends(database)):
+        def handle(operation_id):
+            identity = telegram_identity(db, body)
+            lock_account(db, identity.user_id)
+            return confirm_action(db, identity.user_id, body.reminder_id, body.generation, body.action)
+
+        return process_update(db, body, "reminder_confirm", handle)
+
+    @router.post("/telegram/reminder-time", include_in_schema=False)
+    def reminder_time(body: TelegramReminderTime, db=Depends(database)):
+        """The written answer to «Изменить время». Our parser first. Only when it finds nothing and the text names
+        some time, one small AI call, made before the transaction so no lock is held while the model thinks.
+        A text that names no time at all is answered `not_time` and stored nowhere, so the bot can save it as a note."""
+        identity = telegram_identity(db, body)
+        ai_value = None
+        replayed = db.scalar(select(Inbox.id).where(Inbox.bot_id == body.bot_id, Inbox.update_id == body.update_id))
+        row = None if replayed else waiting_reminder(db, identity.user_id, body.reminder_id, time.time())
+        if row is not None and row.generation == body.generation:
+            now = time.time()
+            local_now = local_now_of(row, now)
+            if parse_words(body.text, local_now)[0] is None:
+                if not mentions_time(body.text):
+                    return {"status": "not_time"}
+                item = db.get(Item, row.item_id) if row.item_id else None
+                data = {
+                    "answer": body.text, "sentence": item.source_quote if item is not None else row.text,
+                    "reminder_text": row.text, "today": local_now.date().isoformat(),
+                    "weekday": WEEKDAYS[local_now.weekday()], "now": local_now.strftime("%H:%M"),
+                    "timezone": row.timezone,
+                }
+                user_id = identity.user_id
+                db.rollback()  # Nothing is held open while the model answers.
+                if time_resolver is not None:
+                    ai_value = time_resolver.resolve(user_id, "rt:" + new_id(), data)
+
+        def handle(operation_id):
+            found = telegram_identity(db, body)
+            lock_account(db, found.user_id)
+            return answer_time(db, found.user_id, body.reminder_id, body.generation, body.text, ai_value)
+
+        return process_update(db, body, "reminder_time", handle)
 
     @router.post("/deliveries/claim", response_model=ClaimResponse)
     def claim(body: ClaimRequest, db=Depends(database)):
