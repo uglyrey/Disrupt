@@ -1,7 +1,8 @@
 'use strict';
-// «Знакомство», «Что beresta знает обо мне» and the calendar button of a reminder.
+// «Знакомство», «Что beresta знает обо мне», the switch of the calendar offer, the suggested categories
+// and the calendar icon of a reminder.
 // There is no layout in jsdom. The checks look at attributes, text, focus and calls, not at pixels.
-// The API of the profile does not exist in this branch. The test mocks it after the contract.
+// The API of the profile is mocked after docs/profile-v1.md.
 const assert = require('node:assert/strict'), fs = require('fs'), path = require('path'), {JSDOM} = require('jsdom');
 const root = path.join(__dirname, '../app/static');
 const read = name => fs.readFileSync(path.join(root, name), 'utf8');
@@ -23,7 +24,8 @@ const QUESTIONS = [
   'Что ещё beresta стоит знать о вас, чтобы помогать лучше?',
 ].map((text, index) => ({id: `q${index + 1}`, text}));
 const FACTS = [{id: 'f1', text: 'Учится в ГУАП, 3 курс'}, {id: 'f2', text: 'Вечером значит после 18:00'}];
-const CHANNEL_LABELS = ['Только Telegram', 'Telegram и Google Календарь', 'Только Google Календарь'];
+const SUGGESTED = ['Учёба', 'Работа', 'Дом'];
+const GENERAL = {id: 'g1', name: 'Общее', is_general: true};
 const CALENDAR = 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=%D0%97%D0%B2%D0%BE%D0%BD%D0%BE%D0%BA&dates=20901008T070000Z%2F20901008T073000Z';
 const DRAFT_KEY = 'beresta.profile.draft.v1';
 
@@ -48,8 +50,9 @@ function boot({phone = false, profile = {}, me = {}, gate = null, guides, cookie
   w.document.addEventListener('click', event => { if (event.target.closest && event.target.closest('a[href]')) event.preventDefault(); });
   const state = {
     calls: [], gets: 0, failures: {}, onGet: null, guides: guides || seen(), reminders,
-    profile: {state: 'new', questions: QUESTIONS, answers: null, facts: [], updated_at: null, reminder_channel: 'telegram',
-      intro: '', privacy: PRIVACY, ...profile},
+    categories: [{...GENERAL}],
+    profile: {state: 'new', questions: QUESTIONS, answers: null, facts: [], updated_at: null, calendar_offer: true,
+      suggested_categories: [], categories_confirmed: true, intro: '', privacy: PRIVACY, error: null, ...profile},
     note: {id: 'n1', capture_id: 'k1', channel: 'web', input_kind: 'text', title: 'Заметка', markdown: 'Текст',
       original_text: 'Исходник', conclusions: [], version: 3, provider: 'manual', category_id: null,
       category_name: null, structure_confirmed_at: null, created_at: 1791220000, updated_at: 1791220000, items: []},
@@ -64,12 +67,13 @@ function boot({phone = false, profile = {}, me = {}, gate = null, guides, cookie
     if (p === '/api/v1/auth/me') {
       if (gate) await gate.promise;
       const user = {username: 'tester', csrf_token: 'csrf', policy_current: true,
-        profile_state: state.profile.state, reminder_channel: state.profile.reminder_channel, ...me};
-      if (oldServer) { delete user.profile_state; delete user.reminder_channel; }
+        profile_state: state.profile.state, calendar_offer: state.profile.calendar_offer, ...me};
+      if (oldServer) { delete user.profile_state; delete user.calendar_offer; }
       return reply(user);
     }
     if (p === '/api/v1/account/guides') return reply({guides: state.guides});
-    if (p === '/api/v1/categories' || p === '/api/v1/jobs') return reply([]);
+    if (p === '/api/v1/categories') return reply(state.categories);
+    if (p === '/api/v1/jobs') return reply([]);
     if (p === '/api/v1/notes') return reply(summaries);
     if (p === '/api/v1/notes/n1/revisions') return reply([]);
     if (p === '/api/v1/notes/n1' && method === 'GET') return reply(state.note);
@@ -87,7 +91,7 @@ function boot({phone = false, profile = {}, me = {}, gate = null, guides, cookie
     }
     if (p === '/api/v1/profile/answers' && method === 'POST') {
       if (state.failures.answers) return reply({detail: 'Лимит ИИ на сегодня исчерпан.'}, 429);
-      Object.assign(record, {state: 'pending', answers: body.answers, reminder_channel: body.reminder_channel || record.reminder_channel});
+      Object.assign(record, {state: 'pending', answers: body.answers});
       return reply({state: 'pending'}, 202);
     }
     if (p === '/api/v1/profile/decline' && method === 'POST') {
@@ -95,15 +99,27 @@ function boot({phone = false, profile = {}, me = {}, gate = null, guides, cookie
       record.state = 'declined'; return reply({state: 'declined'});
     }
     if (p === '/api/v1/profile/retry' && method === 'POST') { record.state = 'pending'; return reply({state: 'pending'}, 202); }
-    if (p === '/api/v1/profile/reminder-channel' && method === 'PATCH') {
-      if (state.failures.channel) return reply({detail: 'Не удалось выполнить запрос'}, 500);
-      record.reminder_channel = body.reminder_channel; return reply({reminder_channel: body.reminder_channel});
+    if (p === '/api/v1/profile/calendar-offer' && method === 'PATCH') {
+      if (state.failures.offer) return reply({detail: 'Не удалось выполнить запрос'}, 500);
+      record.calendar_offer = body.calendar_offer; return reply({calendar_offer: body.calendar_offer});
+    }
+    if (p === '/api/v1/profile/categories' && method === 'POST') {
+      if (state.failures.categories) return reply({detail: 'Не удалось выполнить запрос'}, 500);
+      if (record.state !== 'ready') return reply({detail: 'Профиль ещё не готов'}, 409);
+      const created = body.names.map((name, index) => ({id: `c${state.categories.length + index}`, name, is_general: false}));
+      state.categories.push(...created);
+      Object.assign(record, {categories_confirmed: true, suggested_categories: []});
+      return reply({...record, created: body.names});
+    }
+    if (p === '/api/v1/profile/categories/skip' && method === 'POST') {
+      if (state.failures.skip) return reply({detail: 'Не удалось выполнить запрос'}, 500);
+      Object.assign(record, {categories_confirmed: true, suggested_categories: []}); return reply(record);
     }
     const fact = /^\/api\/v1\/profile\/facts\/([^/]+)$/.exec(p);
     if (fact && method === 'PATCH') {
-      const row = record.facts.find(item => item.id === fact[1]); row.text = body.text; return reply(row);
+      const row = record.facts.find(item => item.id === fact[1]); row.text = body.text; return reply(record);
     }
-    if (fact && method === 'DELETE') { record.facts = record.facts.filter(item => item.id !== fact[1]); return reply(null, 204); }
+    if (fact && method === 'DELETE') { record.facts = record.facts.filter(item => item.id !== fact[1]); return reply(record); }
     throw new Error(`Unexpected ${method} ${p}`);
   };
   const $ = id => w.document.getElementById(id);
@@ -134,12 +150,12 @@ const escape = (t) => {
   popup(t).dispatchEvent(cancel);
   assert.equal(cancel.defaultPrevented, true, 'Esc is handled by the popup, the browser does not close it');
 };
-async function toChannelStep(t) {
+async function toLastQuestion(t) {
   press(t, 'start');
-  for (let i = 0; i < QUESTIONS.length; i++) press(t, 'next');
-  assert.equal(progressText(t), 'Последний шаг');
+  for (let i = 1; i < QUESTIONS.length; i++) press(t, 'next');
+  assert.equal(progressText(t), `${QUESTIONS.length} из ${QUESTIONS.length}`);
 }
-const meNew = {username: 'tester', csrf_token: 'csrf', policy_current: true, profile_state: 'new', reminder_channel: 'telegram'};
+const meNew = {username: 'tester', csrf_token: 'csrf', policy_current: true, profile_state: 'new', calendar_offer: true};
 
 /* ---------- When the popup shows ---------- */
 async function onlyForNew() {
@@ -148,7 +164,8 @@ async function onlyForNew() {
     try {
       await settled(); await t.wait(40);
       assert.equal(popup(t), null, profile_state);
-      assert.equal(t.profileCalls('GET').length, 0, `${profile_state}: no request for the questions`);
+      // A ready profile is read once, to know whether the categories wait for an answer.
+      assert.equal(t.profileCalls('GET').length, profile_state === 'ready' ? 1 : 0, `${profile_state}: requests`);
       assert.equal(t.w.BerestaProfile.state(), profile_state);
       assert.equal(t.w.BerestaProfile.pending(), false);
     } finally { await closeWindow(t); }
@@ -385,36 +402,23 @@ async function fullFlow() {
     assert.match(counter().textContent, /\b0\b/);
     press(t, 'next'); press(t, 'next'); press(t, 'next');
     assert.equal(progressText(t), '7 из 7');
-    press(t, 'next');
-    assert.equal(progressText(t), 'Последний шаг');
     assert.equal(popup(t).querySelector('.profile-progress progress').value, 7);
-    // Channel
-    const radios = [...popup(t).querySelectorAll('input[type="radio"]')];
-    assert.deepEqual(radios.map(r => r.value), ['telegram', 'telegram_calendar', 'calendar']);
-    assert.deepEqual(radios.map(r => r.parentElement.textContent), CHANNEL_LABELS);
-    assert.deepEqual(radios.map(r => r.checked), [true, false, false], 'only Telegram by default');
-    assert.equal(new Set(radios.map(r => r.name)).size, 1);
-    assert.match(popup(t).textContent, /открывает Google Календарь с готовым событием/);
-    assert.match(popup(t).textContent, /не получает доступ к вашему аккаунту Google/);
-    assert.deepEqual([...popup(t).querySelectorAll('.profile-foot button')].map(b => b.textContent), ['Назад', 'Готово']);
-    radios[2].click();
-    assert.deepEqual(radios.map(r => r.checked), [false, false, true]);
-    press(t, 'back'); assert.equal(progressText(t), '7 из 7'); press(t, 'next');
-    assert.equal([...popup(t).querySelectorAll('input[type="radio"]')][2].checked, true, 'the choice survives a step back');
+    // The last question has «Готово» and no other step after it: no channel, no radio.
+    assert.equal(popup(t).querySelectorAll('input[type="radio"]').length, 0);
+    assert.deepEqual([...popup(t).querySelectorAll('.profile-foot button')].map(b => b.textContent), ['Назад', 'Пропустить', 'Готово']);
+    assert.ok(!/Telegram|Календар/.test(popup(t).textContent), 'no channel text in the popup');
+    press(t, 'back'); assert.equal(progressText(t), '6 из 7'); press(t, 'next');
     press(t, 'done');
     await t.until(() => /Спасибо/.test(popup(t).textContent), 'final screen');
     const posts = t.profileCalls('POST', '/answers');
     assert.equal(posts.length, 1);
     assert.equal(posts[0].headers['X-CSRF-Token'], 'csrf');
-    assert.deepEqual(posts[0].body, {
-      answers: {q1: 'Учусь в ГУАП', q2: 'Диплом, кастдев', q4: 'ж'.repeat(1000)}, reminder_channel: 'calendar',
-    });
+    assert.deepEqual(posts[0].body, {answers: {q1: 'Учусь в ГУАП', q2: 'Диплом, кастдев', q4: 'ж'.repeat(1000)}});
     // A calm last screen.
     assert.ok(popup(t).textContent.includes('Спасибо! beresta разбирает ответы, это займёт до минуты.'));
     assert.equal(popup(t).querySelector('.profile-progress').hidden, true);
     assert.deepEqual([...popup(t).querySelectorAll('.profile-foot button')].map(b => b.textContent), ['Закрыть']);
     assert.equal(t.w.BerestaProfile.state(), 'pending');
-    assert.equal(t.w.BerestaProfile.channel(), 'calendar');
     assert.equal(t.w.sessionStorage.getItem(DRAFT_KEY) || '', '', 'the draft is cleared after sending');
     press(t, 'close');
     assert.equal(popup(t), null);
@@ -426,7 +430,7 @@ async function emptySubmit() {
   const t = boot();
   try {
     await readyPopup(t);
-    await toChannelStep(t);
+    await toLastQuestion(t);
     press(t, 'done');
     assert.equal(t.profileCalls('POST', '/answers').length, 0);
     const warning = popup(t).querySelector('.profile-warning');
@@ -436,7 +440,7 @@ async function emptySubmit() {
     // Spaces are not an answer either.
     press(t, 'to-questions'); assert.equal(progressText(t), '1 из 7');
     typeInto(t, answerBox(t), '   \n  ');
-    for (let i = 0; i < 7; i++) press(t, 'next');
+    for (let i = 1; i < 7; i++) press(t, 'next');
     press(t, 'done');
     assert.ok(popup(t).querySelector('.profile-warning'));
     assert.equal(t.profileCalls('POST', '/answers').length, 0);
@@ -452,11 +456,11 @@ async function errorsAndText() {
   try {
     await readyPopup(t);
     press(t, 'start'); typeInto(t, answerBox(t), 'Учусь');
-    for (let i = 0; i < 7; i++) press(t, 'next');
+    for (let i = 1; i < 7; i++) press(t, 'next');
     t.state.failures.answers = true;
     press(t, 'done');
     await t.until(() => popup(t).querySelector('.profile-status').textContent === 'Лимит ИИ на сегодня исчерпан.', 'limit message');
-    assert.equal(progressText(t), 'Последний шаг', 'still on the last step');
+    assert.equal(progressText(t), '7 из 7', 'still on the last question');
     assert.deepEqual(JSON.parse(t.w.sessionStorage.getItem(DRAFT_KEY)).answers, {q1: 'Учусь'}, 'the answers are kept');
     for (const node of popup(t).querySelectorAll('.profile-foot button')) assert.equal(node.disabled, false);
     t.state.failures.answers = false;
@@ -482,18 +486,10 @@ async function errorsAndText() {
     assert.equal(progressText(q), '1 из 2');
     assert.equal(popup(q).querySelector('label[for="profile-answer"]').textContent, 'Первый <i>вопрос</i>');
     assert.equal(popup(q).querySelector('i'), null);
-    typeInto(q, answerBox(q), 'ответ'); press(q, 'next'); press(q, 'next'); press(q, 'done');
+    typeInto(q, answerBox(q), 'ответ'); press(q, 'next'); press(q, 'done');
     await q.until(() => q.profileCalls('POST', '/answers').length === 1, 'sent');
-    assert.deepEqual(q.profileCalls('POST', '/answers')[0].body, {answers: {a1: 'ответ'}, reminder_channel: 'telegram'});
+    assert.deepEqual(q.profileCalls('POST', '/answers')[0].body, {answers: {a1: 'ответ'}});
   } finally { await closeWindow(q); }
-
-  // The channel of the account is the default.
-  const c = boot({profile: {reminder_channel: 'telegram_calendar'}});
-  try {
-    await readyPopup(c);
-    await toChannelStep(c);
-    assert.deepEqual([...popup(c).querySelectorAll('input[type="radio"]')].map(r => r.checked), [false, true, false]);
-  } finally { await closeWindow(c); }
 
   // Tab stays inside the popup.
   const f = boot();
@@ -515,11 +511,10 @@ async function draftRestore() {
     press(t, 'start'); typeInto(t, answerBox(t), 'Первое');
     press(t, 'next'); typeInto(t, answerBox(t), 'Второе');
     let saved = JSON.parse(t.w.sessionStorage.getItem(DRAFT_KEY));
-    assert.deepEqual(saved, {answers: {q1: 'Первое', q2: 'Второе'}, channel: null});
-    for (let i = 0; i < 6; i++) press(t, 'next');
-    [...popup(t).querySelectorAll('input[type="radio"]')][1].click();
+    assert.deepEqual(saved, {answers: {q1: 'Первое', q2: 'Второе'}});
+    for (let i = 2; i < 7; i++) press(t, 'next');
     saved = JSON.parse(t.w.sessionStorage.getItem(DRAFT_KEY));
-    assert.deepEqual(saved, {answers: {q1: 'Первое', q2: 'Второе'}, channel: 'telegram_calendar'});
+    assert.deepEqual(saved, {answers: {q1: 'Первое', q2: 'Второе'}}, 'no channel in the draft');
     dialogClose(t);
     assert.equal(popup(t), null);
     assert.equal(t.profileCalls('POST').length, 0, 'closing sends nothing');
@@ -529,11 +524,10 @@ async function draftRestore() {
     press(t, 'start');
     assert.equal(answerBox(t).value, 'Первое');
     press(t, 'next'); assert.equal(answerBox(t).value, 'Второе');
-    for (let i = 0; i < 6; i++) press(t, 'next');
-    assert.deepEqual([...popup(t).querySelectorAll('input[type="radio"]')].map(r => r.checked), [false, true, false]);
+    for (let i = 2; i < 7; i++) press(t, 'next');
     press(t, 'done');
     await t.until(() => t.profileCalls('POST', '/answers').length === 1, 'sent');
-    assert.deepEqual(t.profileCalls('POST', '/answers')[0].body, {answers: {q1: 'Первое', q2: 'Второе'}, reminder_channel: 'telegram_calendar'});
+    assert.deepEqual(t.profileCalls('POST', '/answers')[0].body, {answers: {q1: 'Первое', q2: 'Второе'}});
     await t.until(() => /Спасибо/.test(popup(t).textContent), 'final');
     assert.equal(t.w.sessionStorage.getItem(DRAFT_KEY) || '', '');
   } finally { await closeWindow(t); }
@@ -560,7 +554,8 @@ async function draftRestore() {
 /* ---------- «Что beresta знает обо мне» ---------- */
 const knowledge = t => t.$('knowledge-dialog');
 const facts = t => [...knowledge(t).querySelectorAll('.profile-fact')];
-const openKnowledge = async (t, ready = '.profile-know-channel input[type="radio"]') => {
+const offerSwitch = t => knowledge(t).querySelector('#profile-calendar-offer');
+const openKnowledge = async (t, ready = '#profile-calendar-offer') => {
   const entry = t.$('open-profile'); assert.ok(entry, 'menu entry');
   entry.click();
   await t.until(() => knowledge(t) && knowledge(t).querySelector(ready), 'knowledge dialog');
@@ -607,7 +602,8 @@ async function knowledgeStates() {
     for (const li of facts(r)) assert.deepEqual([...li.querySelectorAll('button')].map(b => b.textContent), ['Изменить', 'Удалить']);
     assert.ok(action(r, 'delete-all', knowledge(r)) && action(r, 'retake', knowledge(r)));
     assert.equal(knowledge(r).querySelector('.profile-privacy').textContent, PRIVACY);
-    assert.deepEqual([...knowledge(r).querySelectorAll('input[type="radio"]')].map(x => x.checked), [true, false, false]);
+    assert.equal(knowledge(r).querySelectorAll('input[type="radio"]').length, 0, 'no channel choice');
+    assert.equal(offerSwitch(r).checked, true);
     // Edit
     facts(r)[0].querySelector('[data-action="edit"]').click();
     let area = facts(r)[0].querySelector('textarea');
@@ -759,57 +755,313 @@ async function knowledgePending() {
   } finally { await closeWindow(failed); }
 }
 
-async function channelChoice() {
-  const t = boot({profile: {state: 'ready', facts: FACTS, reminder_channel: 'telegram'}});
+async function calendarOfferSwitch() {
+  const t = boot({profile: {state: 'ready', facts: FACTS, calendar_offer: true}});
   try {
     await openKnowledge(t, '.profile-fact');
-    const radios = () => [...knowledge(t).querySelectorAll('input[type="radio"]')];
-    assert.deepEqual(radios().map(r => r.parentElement.textContent), CHANNEL_LABELS);
-    radios()[1].click();
-    await t.until(() => t.profileCalls('PATCH', '/reminder-channel').length === 1, 'patch');
-    const patch = t.profileCalls('PATCH', '/reminder-channel')[0];
-    assert.deepEqual(patch.body, {reminder_channel: 'telegram_calendar'}); assert.equal(patch.headers['X-CSRF-Token'], 'csrf');
+    const box = offerSwitch(t);
+    assert.equal(box.type, 'checkbox'); assert.equal(box.getAttribute('role'), 'switch');
+    assert.equal(box.closest('label').textContent.trim(), 'Предлагать Google Календарь');
+    assert.ok(box.closest('label').classList.contains('switch'));
+    assert.equal(knowledge(t).querySelectorAll('#profile-calendar-offer').length, 1, 'a single switch');
+    assert.equal(box.checked, true);
+    assert.equal(t.w.BerestaProfile.calendarOffer(), true);
+    box.click();
+    await t.until(() => t.profileCalls('PATCH', '/calendar-offer').length === 1, 'patch');
+    const patch = t.profileCalls('PATCH', '/calendar-offer')[0];
+    assert.deepEqual(patch.body, {calendar_offer: false}); assert.equal(patch.headers['X-CSRF-Token'], 'csrf');
     await t.until(() => knowledge(t).querySelector('.profile-status').textContent === 'Сохранено.', 'saved');
-    assert.equal(t.w.BerestaProfile.channel(), 'telegram_calendar');
-    // A failure puts the old choice back and says so.
-    t.state.failures.channel = true;
-    radios()[2].click();
-    await t.until(() => radios()[1].checked && !radios()[2].checked, 'reverted');
-    assert.notEqual(knowledge(t).querySelector('.profile-status').textContent, 'Сохранено.');
-    assert.equal(t.w.BerestaProfile.channel(), 'telegram_calendar');
-    // The same choice is not sent twice.
-    t.state.failures.channel = false;
-    const sent = t.profileCalls('PATCH', '/reminder-channel').length;
-    radios()[1].click(); await t.wait(20);
-    assert.equal(t.profileCalls('PATCH', '/reminder-channel').length, sent);
+    assert.equal(t.w.BerestaProfile.calendarOffer(), false);
+    assert.equal(t.state.profile.calendar_offer, false);
+    // A failure puts the old value back and says so.
+    t.state.failures.offer = true;
+    box.click();
+    await t.until(() => knowledge(t).querySelector('.profile-status').textContent !== 'Сохранено.' && knowledge(t).querySelector('.profile-status').textContent !== 'Сохраняем…', 'error');
+    assert.equal(box.checked, false, 'reverted');
+    assert.equal(t.w.BerestaProfile.calendarOffer(), false);
+    // And it works again afterwards.
+    t.state.failures.offer = false;
+    box.click();
+    await t.until(() => t.profileCalls('PATCH', '/calendar-offer').length === 3, 'third patch');
+    assert.deepEqual(t.profileCalls('PATCH', '/calendar-offer')[2].body, {calendar_offer: true});
   } finally { await closeWindow(t); }
+
+  // The start value comes from the account.
+  const off = boot({profile: {state: 'ready', facts: FACTS, calendar_offer: false}});
+  try {
+    await openKnowledge(off, '.profile-fact');
+    assert.equal(offerSwitch(off).checked, false);
+    assert.equal(off.w.BerestaProfile.calendarOffer(), false);
+  } finally { await closeWindow(off); }
+
+  // The switch is there in every state, also for a person who has not answered.
+  for (const profile_state of ['declined', 'pending', 'failed']) {
+    const n = boot({profile: {state: profile_state}});
+    try { await openKnowledge(n); assert.ok(offerSwitch(n), profile_state); } finally { await closeWindow(n); }
+  }
 }
 
-/* ---------- Calendar button ---------- */
-async function calendarButton() {
+/* ---------- Suggested categories ---------- */
+const SUGGEST = {state: 'ready', facts: FACTS, suggested_categories: SUGGESTED, categories_confirmed: false};
+const categoriesBox = t => t.w.document.querySelector('.profile-categories');
+const categoryRows = t => [...categoriesBox(t).querySelectorAll('.profile-category-row')];
+const bar = t => t.w.document.querySelector('.profile-bar');
+
+async function quietBar() {
+  const t = boot({profile: SUGGEST});
+  try {
+    await t.until(() => bar(t), 'the quiet bar');
+    assert.equal(popup(t), null, 'no second big popup');
+    assert.equal(knowledge(t), null);
+    assert.equal(bar(t).querySelector('p').textContent, 'beresta предлагает категории под вас');
+    assert.deepEqual([...bar(t).querySelectorAll('button')].map(b => b.textContent), ['Посмотреть', 'Позже']);
+    assert.equal(t.profileCalls('GET').length, 1);
+    // «Позже» only hides it.
+    action(t, 'bar-later', bar(t)).click();
+    assert.equal(bar(t), null);
+    assert.equal(t.profileCalls('POST').length, 0, 'nothing is sent');
+    // The dialog still has the categories.
+    await openKnowledge(t, '.profile-fact');
+    assert.ok(categoriesBox(t), 'the categories wait in the dialog');
+  } finally { await closeWindow(t); }
+
+  // «Посмотреть» opens the dialog, and the bar goes away.
+  const o = boot({profile: SUGGEST});
+  try {
+    await o.until(() => bar(o), 'bar');
+    action(o, 'bar-open', bar(o)).click();
+    assert.equal(bar(o), null);
+    await o.until(() => knowledge(o) && categoriesBox(o), 'dialog with categories');
+  } finally { await closeWindow(o); }
+
+  // Nothing to show: no bar.
+  const cases = {
+    'confirmed': {state: 'ready', facts: FACTS, suggested_categories: SUGGESTED, categories_confirmed: true},
+    'no suggestions': {state: 'ready', facts: FACTS, suggested_categories: [], categories_confirmed: false},
+    'declined': {state: 'declined', suggested_categories: SUGGESTED, categories_confirmed: false},
+    'pending': {state: 'pending', suggested_categories: SUGGESTED, categories_confirmed: false},
+  };
+  for (const [name, profile] of Object.entries(cases)) {
+    const n = boot({profile});
+    try { await settled(); await n.wait(40); assert.equal(bar(n), null, name); } finally { await closeWindow(n); }
+  }
+  // An old server without the fields: nothing.
+  const old = boot({oldServer: true, profile: {state: 'ready', facts: FACTS}});
+  try { await settled(); await old.wait(40); assert.equal(bar(old), null); assert.equal(popup(old), null); } finally { await closeWindow(old); }
+  // Signing out removes it.
+  const out = boot({profile: SUGGEST});
+  try { await out.until(() => bar(out), 'bar'); out.$('workspace').hidden = true; await settled(); assert.equal(bar(out), null); } finally { await closeWindow(out); }
+}
+
+async function categoriesInKnowledge() {
+  // Create: checkboxes, a renamed row, an own row, one unchecked.
+  const t = boot({profile: SUGGEST});
+  try {
+    await openKnowledge(t, '.profile-categories');
+    const body = knowledge(t).querySelector('.profile-know-body');
+    assert.equal(body.firstElementChild, categoriesBox(t), 'on top of the facts');
+    assert.equal(categoriesBox(t).querySelector('h3').textContent, 'Создадим категории');
+    assert.equal(categoryRows(t).length, 3);
+    assert.deepEqual(categoryRows(t).map(r => r.querySelector('input[type="text"]').value), SUGGESTED);
+    assert.deepEqual(categoryRows(t).map(r => r.querySelector('input[type="checkbox"]').checked), [true, true, true]);
+    for (const r of categoryRows(t)) {
+      assert.equal(r.querySelector('input[type="text"]').maxLength, 100);
+      assert.ok(r.querySelector('input[type="text"]').getAttribute('aria-label') && r.querySelector('input[type="checkbox"]').getAttribute('aria-label'));
+    }
+    assert.equal(facts(t).length, 2, 'facts stay below');
+    assert.deepEqual([...categoriesBox(t).querySelectorAll('.profile-category-actions button')].map(b => b.textContent), ['Создать', 'Не нужно']);
+    typeInto(t, categoryRows(t)[1].querySelector('input[type="text"]'), '  Работа  и проекты ');
+    categoryRows(t)[2].querySelector('input[type="checkbox"]').click();
+    action(t, 'categories-add', categoriesBox(t)).click();
+    assert.equal(categoryRows(t).length, 4);
+    typeInto(t, categoryRows(t)[3].querySelector('input[type="text"]'), 'Спорт');
+    const before = t.state.calls.filter(c => c.url.pathname === '/api/v1/categories' && c.method === 'GET').length;
+    action(t, 'categories-create', categoriesBox(t)).click();
+    await t.until(() => t.profileCalls('POST', '/categories').length === 1, 'create sent');
+    const post = t.profileCalls('POST', '/categories')[0];
+    assert.deepEqual(post.body, {names: ['Учёба', 'Работа и проекты', 'Спорт']}); assert.equal(post.headers['X-CSRF-Token'], 'csrf');
+    await t.until(() => !categoriesBox(t), 'box gone');
+    assert.equal(knowledge(t).querySelector('.profile-categories-result').textContent, 'Готово. Категории созданы: Учёба, Работа и проекты, Спорт.');
+    assert.equal(facts(t).length, 2);
+    await t.until(() => t.state.calls.filter(c => c.url.pathname === '/api/v1/categories' && c.method === 'GET').length > before, 'category list reloaded');
+    assert.equal(t.profileCalls('POST', '/categories/skip').length, 0);
+    assert.equal(t.w.BerestaProfile.state(), 'ready');
+    // Confirmed: the next opening has no box.
+    knowledge(t).querySelector('.profile-close').click();
+    await openKnowledge(t, '.profile-fact');
+    assert.equal(categoriesBox(t), null);
+  } finally { await closeWindow(t); }
+
+  // An empty selection cannot be sent, a duplicate is sent once, the list is limited.
+  const e = boot({profile: SUGGEST});
+  try {
+    await openKnowledge(e, '.profile-categories');
+    const create = action(e, 'categories-create', categoriesBox(e));
+    for (const r of categoryRows(e)) r.querySelector('input[type="checkbox"]').click();
+    assert.equal(create.disabled, true);
+    categoryRows(e)[0].querySelector('input[type="checkbox"]').click();
+    assert.equal(create.disabled, false);
+    typeInto(e, categoryRows(e)[1].querySelector('input[type="text"]'), 'учеба');
+    typeInto(e, categoryRows(e)[0].querySelector('input[type="text"]'), 'Учёба');
+    create.click();
+    await e.until(() => e.profileCalls('POST', '/categories').length === 1, 'sent');
+    assert.deepEqual(e.profileCalls('POST', '/categories')[0].body, {names: ['Учёба']}, 'ё and е are one name; unchecked rows stay out');
+  } finally { await closeWindow(e); }
+  const many = boot({profile: {...SUGGEST, suggested_categories: ['а1', 'а2', 'а3', 'а4', 'а5', 'а6']}});
+  try {
+    await openKnowledge(many, '.profile-categories');
+    const add = action(many, 'categories-add', categoriesBox(many));
+    for (let i = 0; i < 10; i++) add.click();
+    assert.equal(categoryRows(many).length, 10);
+    assert.equal(add.disabled, true);
+  } finally { await closeWindow(many); }
+
+  // «Не нужно»
+  const k = boot({profile: SUGGEST});
+  try {
+    await openKnowledge(k, '.profile-categories');
+    action(k, 'categories-skip', categoriesBox(k)).click();
+    await k.until(() => !categoriesBox(k), 'box gone');
+    assert.equal(k.profileCalls('POST', '/categories/skip').length, 1);
+    assert.equal(k.profileCalls('POST', '/categories/skip')[0].headers['X-CSRF-Token'], 'csrf');
+    assert.equal(k.profileCalls('POST', '/categories').length, 0);
+    assert.equal(knowledge(k).querySelector('.profile-categories-result').textContent, 'Хорошо, категории не создаём.');
+    assert.equal(k.state.categories.length, 1, 'no category was made');
+  } finally { await closeWindow(k); }
+
+  // Failures keep the box and say so.
+  const f = boot({profile: SUGGEST});
+  try {
+    await openKnowledge(f, '.profile-categories');
+    f.state.failures.categories = true;
+    action(f, 'categories-create', categoriesBox(f)).click();
+    await f.until(() => categoriesBox(f).querySelector('.profile-status').textContent !== 'Создаём…' && categoriesBox(f).querySelector('.profile-status').textContent, 'error');
+    assert.ok(categoriesBox(f), 'still there');
+    for (const node of categoriesBox(f).querySelectorAll('button, input')) assert.equal(node.disabled, false);
+    f.state.failures.categories = false; f.state.failures.skip = true;
+    action(f, 'categories-skip', categoriesBox(f)).click();
+    await f.until(() => f.profileCalls('POST', '/categories/skip').length === 1 && categoriesBox(f).querySelector('.profile-status').textContent !== 'Сохраняем…', 'skip error');
+    assert.ok(categoriesBox(f));
+    f.state.failures.skip = false;
+    action(f, 'categories-create', categoriesBox(f)).click();
+    await f.until(() => !categoriesBox(f), 'created on the next try');
+  } finally { await closeWindow(f); }
+
+  // Names are text, not markup.
+  const x = boot({profile: {...SUGGEST, suggested_categories: ['<b>Учёба</b>']}});
+  try {
+    await openKnowledge(x, '.profile-categories');
+    assert.equal(categoryRows(x)[0].querySelector('input[type="text"]').value, '<b>Учёба</b>');
+    assert.equal(categoriesBox(x).querySelector('b'), null);
+  } finally { await closeWindow(x); }
+}
+
+async function categoriesOnFinalScreen() {
+  // The result arrives while the popup is open: the same box shows there.
+  const t = boot();
+  try {
+    await readyPopup(t);
+    await toLastQuestion(t);
+    typeInto(t, answerBox(t), 'Учусь в ГУАП');
+    t.state.onGet = (count, record) => {
+      if (record.state === 'pending' && count >= 3) Object.assign(record, {state: 'ready', facts: FACTS, suggested_categories: SUGGESTED, categories_confirmed: false});
+    };
+    press(t, 'done');
+    await t.until(() => /Спасибо/.test(popup(t).textContent), 'final screen');
+    assert.deepEqual(t.profileCalls('POST', '/answers')[0].body, {answers: {q7: 'Учусь в ГУАП'}});
+    assert.equal(popup(t).querySelector('.profile-categories'), null, 'not before the result');
+    await t.until(() => popup(t).querySelector('.profile-categories'), 'categories in the popup');
+    assert.match(popup(t).textContent, /Спасибо! Профиль готов\./);
+    assert.deepEqual([...popup(t).querySelectorAll('.profile-category-row input[type="text"]')].map(n => n.value), SUGGESTED);
+    assert.equal(t.w.document.activeElement, popup(t).querySelector('.profile-category-name'));
+    const count = t.state.gets;
+    await t.wait(60);
+    assert.equal(t.state.gets, count, 'polling stopped');
+    assert.equal(bar(t), null, 'no second prompt next to the popup');
+    action(t, 'categories-create', popup(t)).click();
+    await t.until(() => t.profileCalls('POST', '/categories').length === 1, 'sent');
+    assert.deepEqual(t.profileCalls('POST', '/categories')[0].body, {names: SUGGESTED});
+    await t.until(() => !popup(t).querySelector('.profile-categories'), 'box gone');
+    assert.match(popup(t).querySelector('.profile-categories-result').textContent, /Категории созданы: Учёба, Работа, Дом/);
+    assert.deepEqual([...popup(t).querySelectorAll('.profile-foot button')].map(b => b.textContent), ['Закрыть']);
+    press(t, 'close');
+    assert.equal(popup(t), null);
+    await settled(); assert.equal(bar(t), null);
+  } finally { await closeWindow(t); }
+
+  // «Не нужно» in the popup.
+  const s = boot();
+  try {
+    await readyPopup(s);
+    await toLastQuestion(s); typeInto(s, answerBox(s), 'Учусь');
+    s.state.onGet = (count, record) => {
+      if (record.state === 'pending' && count >= 2) Object.assign(record, {state: 'ready', facts: FACTS, suggested_categories: SUGGESTED, categories_confirmed: false});
+    };
+    press(s, 'done');
+    await s.until(() => popup(s).querySelector('.profile-categories'), 'categories');
+    action(s, 'categories-skip', popup(s)).click();
+    await s.until(() => popup(s).querySelector('.profile-categories-result'), 'result');
+    assert.equal(popup(s).querySelector('.profile-categories-result').textContent, 'Хорошо, категории не создаём.');
+    assert.equal(s.profileCalls('POST', '/categories').length, 0);
+  } finally { await closeWindow(s); }
+
+  // Ready without suggestions: no box, only the thanks.
+  const n = boot();
+  try {
+    await readyPopup(n);
+    await toLastQuestion(n); typeInto(n, answerBox(n), 'Учусь');
+    n.state.onGet = (count, record) => { if (record.state === 'pending') Object.assign(record, {state: 'ready', facts: FACTS}); };
+    press(n, 'done');
+    await n.until(() => /Профиль готов/.test(popup(n).textContent), 'ready text');
+    assert.equal(popup(n).querySelector('.profile-categories'), null);
+  } finally { await closeWindow(n); }
+
+  // The popup is closed before the result: the categories wait in the dialog.
+  const c = boot();
+  try {
+    await readyPopup(c);
+    await toLastQuestion(c); typeInto(c, answerBox(c), 'Учусь');
+    press(c, 'done');
+    await c.until(() => /Спасибо/.test(popup(c).textContent), 'final');
+    press(c, 'close');
+    Object.assign(c.state.profile, {state: 'ready', facts: FACTS, suggested_categories: SUGGESTED, categories_confirmed: false});
+    await openKnowledge(c, '.profile-categories');
+    assert.equal(knowledge(c).querySelector('.profile-know-body').firstElementChild, categoriesBox(c));
+  } finally { await closeWindow(c); }
+}
+
+/* ---------- Calendar icon and link ---------- */
+async function calendarIcon() {
   const row = (id, extra = {}) => ({id, note_id: 'n1', item_id: null, text: `Напоминание ${id}`, status: 'confirmed', delivery_status: null,
     scheduled_at: '2090-10-08T07:00:00+00:00', timezone: 'Europe/Moscow', generation: 1, time_check: null, ...extra});
   const t = boot({profile: {state: 'declined'}, reminders: [
     row('r1', {calendar_url: CALENDAR}), row('r2'), row('r3', {calendar_url: null}),
     row('r4', {calendar_url: 'javascript:alert(1)'}), row('r5', {calendar_url: 'https://evil.example/calendar/render?action=TEMPLATE'}),
     row('r6', {calendar_url: 'http://calendar.google.com/calendar/render?action=TEMPLATE'}),
+    row('r7', {calendar_url: 'https://calendar.google.com.evil.example/calendar/render'}),
   ]});
   try {
     await settled(); t.$('notes').querySelector('button').click(); await settled();
-    await t.until(() => t.$('reminders-list').querySelectorAll('.reminder-row').length === 6, 'reminders');
+    await t.until(() => t.$('reminders-list').querySelectorAll('.reminder-row').length === 7, 'reminders');
     const rows = [...t.$('reminders-list').querySelectorAll('.reminder-row')];
-    const links = [...t.$('reminders-list').querySelectorAll('.calendar-link')];
-    assert.equal(links.length, 1, 'only a Google link with https is drawn');
-    assert.equal(rows[0].querySelector('.calendar-link'), links[0]);
-    assert.equal(links[0].tagName, 'A');
-    assert.match(links[0].textContent, /^В Google Календарь/);
-    assert.equal(links[0].getAttribute('href'), new URL(CALENDAR).href);
-    assert.equal(links[0].target, '_blank');
-    assert.match(links[0].rel, /noopener/); assert.match(links[0].rel, /noreferrer/);
-    assert.ok(links[0].classList.contains('button-link'));
-    assert.ok(links[0].closest('.reminder-actions'));
-    for (const other of rows.slice(1)) assert.equal(other.querySelector('.calendar-link'), null);
-    assert.ok(read('profile.css').includes('.calendar-link'));
+    const icons = [...t.$('reminders-list').querySelectorAll('a.calendar-icon')];
+    assert.equal(icons.length, 1, 'only a Google link with https is drawn');
+    assert.equal(rows[0].querySelector('a.calendar-icon'), icons[0]);
+    assert.equal(icons[0].getAttribute('href'), new URL(CALENDAR).href);
+    assert.equal(icons[0].getAttribute('aria-label'), 'Добавить в Google Календарь');
+    assert.equal(icons[0].title, 'Добавить в Google Календарь');
+    assert.equal(icons[0].target, '_blank');
+    assert.match(icons[0].rel, /noopener/); assert.match(icons[0].rel, /noreferrer/);
+    // The icon sits next to the time, not among the buttons; there is no text button any more.
+    assert.ok(icons[0].closest('.reminder-time'));
+    assert.ok(icons[0].closest('.reminder-time').querySelector('.reminder-when'));
+    assert.equal(icons[0].closest('.reminder-actions'), null);
+    const svg = icons[0].querySelector('svg');
+    assert.ok(svg && svg.getAttribute('aria-hidden') === 'true');
+    assert.equal(icons[0].textContent, '', 'an icon, not a word');
+    assert.equal(t.$('reminders-list').querySelectorAll('.calendar-link').length, 0, 'the old text button is gone');
+    assert.ok(![...t.$('reminders-list').querySelectorAll('.reminder-actions button')].some(b => /Календар/.test(b.textContent)));
+    for (const other of rows.slice(1)) assert.equal(other.querySelector('a.calendar-icon'), null);
   } finally { await closeWindow(t); }
 
   // Without the field nothing changes in the list.
@@ -817,9 +1069,15 @@ async function calendarButton() {
   try {
     await settled(); plain.$('notes').querySelector('button').click(); await settled();
     await plain.until(() => plain.$('reminders-list').querySelectorAll('.reminder-row').length === 1, 'reminder');
-    assert.equal(plain.$('reminders-list').querySelectorAll('.calendar-link').length, 0);
+    assert.equal(plain.$('reminders-list').querySelectorAll('a.calendar-icon').length, 0);
     assert.deepEqual([...plain.$('reminders-list').querySelectorAll('.reminder-actions button')].map(b => b.textContent), ['Изменить', 'Отменить']);
   } finally { await closeWindow(plain); }
+
+  // The text link at the end of the confirmation line, and the styles for both.
+  const code = read('reminders.js'), css = read('profile.css');
+  assert.match(code, /function sayWithCalendar/); assert.match(code, /else sayWithCalendar\(text,row\.calendar_url\)/);
+  assert.match(code, /noopener noreferrer/);
+  assert.ok(css.includes('a.calendar-icon') && css.includes('a.calendar-text') && css.includes('.reminder-time'));
 }
 
 /* ---------- Files ---------- */
@@ -850,8 +1108,11 @@ module.exports = async function profileWeb() {
   await menuEntries();
   await knowledgeStates();
   await knowledgePending();
-  await channelChoice();
-  await calendarButton();
+  await calendarOfferSwitch();
+  await quietBar();
+  await categoriesInKnowledge();
+  await categoriesOnFinalScreen();
+  await calendarIcon();
 };
 
 if (require.main === module) {

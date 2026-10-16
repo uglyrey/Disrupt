@@ -12,7 +12,7 @@ module.exports = async () => {
   w.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new w.Event('close')); };
   const reply = (data, status = 200) => ({ok: status < 400, status, headers: new Headers(), json: async () => structuredClone(data)});
   const state = {
-    categories: [{id: 'c1', name: 'Research', version: 1}, {id: 'c2', name: 'Дом', version: 1}],
+    categories: [{id: 'g1', name: 'Общее', version: 1, is_general: true}, {id: 'c1', name: 'Research', version: 1, is_general: false}, {id: 'c2', name: 'Дом', version: 1, is_general: false}],
     calls: [], nextId: 3,
   };
   w.fetch = async (input, options = {}) => {
@@ -25,7 +25,7 @@ module.exports = async () => {
     if (url.pathname === '/api/v1/search/events') return reply(null, 204);
     if (url.pathname === '/api/v1/categories' && method === 'GET') return reply(state.categories);
     if (url.pathname === '/api/v1/categories' && method === 'POST') {
-      const created = {id: `c${state.nextId++}`, name: body.name, version: 1};
+      const created = {id: `c${state.nextId++}`, name: body.name, version: 1, is_general: false};
       state.categories.push(created);
       return reply(created, 201);
     }
@@ -74,10 +74,20 @@ module.exports = async () => {
     assert.equal($('category-add').title, 'Новая категория');
     assert.equal($('manage-categories'), null);
     assert.equal($('category-dialog'), null);
-    assert.deepEqual(names(), ['Все заметки', 'Без категории', 'Research', 'Дом']);
+    assert.deepEqual(names(), ['Все заметки', 'Общее', 'Research', 'Дом']);
     assert.equal(item('c1').querySelectorAll('.category-more').length, 1);
     assert.equal(items()[0].querySelector('.category-more'), null, 'virtual items have no menu');
-    assert.equal(items()[1].querySelector('.category-more'), null, 'virtual items have no menu');
+    assert.equal(items()[1].querySelector('.category-more'), null, 'the general category cannot be renamed or deleted');
+    assert.equal(items()[1].dataset.categoryId, undefined);
+    // There is no virtual «Без категории» any more: not in the list, the filter or the note select.
+    assert.ok(!names().includes('Без категории'));
+    assert.deepEqual([...$('category-filter').options].map(o => o.textContent), ['Все категории', 'Общее', 'Research', 'Дом']);
+    assert.equal($('category-filter').querySelector('option[value="none"]'), null);
+    assert.equal($('note-category').querySelector('option[value=""]'), null);
+    assert.ok(!/Без категории/.test(fs.readFileSync(path.join(root, 'index.html'), 'utf8')));
+    // The context menu does not open for it, by mouse or by long press.
+    contextmenu(items()[1].querySelector('.category-button'));
+    assert.equal(menu().hidden, true);
 
     // Inline create. A duplicate is refused in place, a new name is created and selected.
     $('category-add').click();
@@ -93,7 +103,7 @@ module.exports = async () => {
     assert.equal(calls('POST', '/api/v1/categories')[0].body.name, 'Покупки');
     assert.equal(calls('POST', '/api/v1/categories')[0].options.headers['X-CSRF-Token'], 'csrf');
     assert.equal($('category-navigation').querySelector('.category-edit'), null);
-    assert.deepEqual(names(), ['Все заметки', 'Без категории', 'Research', 'Дом', 'Покупки']);
+    assert.deepEqual(names(), ['Все заметки', 'Общее', 'Research', 'Дом', 'Покупки']);
     assert.equal(button('c3').getAttribute('aria-pressed'), 'true');
     assert.equal($('library-title').textContent, 'Покупки');
     assert.equal(calls('GET', '/api/v1/notes').at(-1).url.searchParams.get('category_id'), 'c3');
@@ -174,7 +184,7 @@ module.exports = async () => {
     contextmenu(button('c2')); menuItems()[1].click();
     assert.equal($('category-delete-dialog').open, true);
     assert.equal($('category-delete-name').textContent, 'Дом');
-    assert.match($('category-delete-dialog').textContent, /Заметки из категории останутся и попадут в «Без категории»/);
+    assert.match($('category-delete-dialog').textContent, /Заметки из категории останутся и попадут в «Общее»/);
     $('category-delete-dialog').querySelector('.actions [data-close-dialog]').click();
     assert.equal($('category-delete-dialog').open, false);
     $('category-delete-confirm').click(); await settled();
@@ -188,7 +198,7 @@ module.exports = async () => {
     assert.equal(sent[0].options.headers['X-CSRF-Token'], 'csrf');
     assert.equal($('category-delete-dialog').open, false);
     assert.equal(item('c2'), undefined);
-    assert.deepEqual(names(), ['Все заметки', 'Без категории', 'Исследования', 'Покупки']);
+    assert.deepEqual(names(), ['Все заметки', 'Общее', 'Исследования', 'Покупки']);
     assert.equal($('library-title').textContent, 'Все заметки', 'a deleted selected category resets the list');
     assert.equal(calls('GET', '/api/v1/notes').at(-1).url.searchParams.has('category_id'), false);
     assert.equal($('message').textContent, 'Категория удалена.');
