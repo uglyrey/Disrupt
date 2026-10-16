@@ -207,9 +207,34 @@ class ProposedConclusion(StrictModel):
 ItemKind = Literal["note", "idea", "task", "goal", "plan"]
 
 
+LOCAL_MINUTE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
+
+
+def well_formed_local_minute(value):
+    """A local `YYYY-MM-DDTHH:MM` string, or None for anything else (never an error)."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not LOCAL_MINUTE.fullmatch(value):
+        return None
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M")
+    except ValueError:
+        return None
+    return value
+
+
 class ProposedItem(ProposedConclusion):
     kind: ItemKind
     due_text: str | None = Field(default=None, max_length=300)
+    # Local wall time of the deadline, YYYY-MM-DDTHH:MM, as the model worked it out. Optional and never trusted:
+    # a malformed value becomes None here, the reminder code cross-checks the rest (docs/reminder-confirm-v1.md).
+    due_at: str | None = None
+
+    @field_validator("due_at", mode="before")
+    @classmethod
+    def well_formed_due_at(cls, value):
+        return well_formed_local_minute(value)
 
 
 class StructuredNote(StrictModel):
@@ -317,6 +342,13 @@ class ReminderResponse(StrictModel):
     confirmed_at: str
     delivery_status: str | None
     previous_attempt_unknown: bool
+    # ask or unclear: the time was a guess and the person has not said «Верно» yet. Empty otherwise.
+    time_check: Literal["ask", "unclear", "confirmed", "corrected"] | None = None
+    # Google Calendar page with the event filled in. Set only for a coming reminder when the account offers the calendar
+    # (`calendar_offer`) and the reminder is not an advance one (docs/profile-v1.md).
+    calendar_url: str | None = None
+    # The advance reminder «Через час: ...» carries the id of the main reminder it belongs to.
+    advance_of: str | None = None
 
 
 class ReminderTimeRequest(StrictModel):
@@ -394,6 +426,9 @@ class ProposedReminder(StrictModel):
     local_time: str
     timezone: str
     label: str
+    # False when the spoken time had two readings: the form asks the person to confirm. Other readings are local ISO times.
+    certain: bool = True
+    alternatives: list[str] = Field(default_factory=list, max_length=4)
 
 
 class ItemResponse(StrictModel):
@@ -413,6 +448,8 @@ class CategoryResponse(StrictModel):
     id: str
     name: str
     version: int
+    # «Общее»: it cannot be renamed or deleted.
+    is_general: bool = False
 
 
 class ConclusionResponse(ProposedConclusion):
@@ -476,6 +513,27 @@ class TelegramZoneAsked(TelegramOperation):
     pass
 
 
+class TelegramReminderConfirm(TelegramOperation):
+    """A button under a message that asks «Верно?» about the time of a reminder."""
+    reminder_id: str = Field(min_length=1, max_length=36, pattern=r"^[A-Za-z0-9-]+$")
+    generation: Counter
+    action: Literal["ok", "edit", "alt"]
+
+
+class TelegramReminderTime(TelegramOperation):
+    """The written answer to «Изменить время»."""
+    reminder_id: str = Field(min_length=1, max_length=36, pattern=r"^[A-Za-z0-9-]+$")
+    generation: Counter
+    text: str = Field(min_length=1, max_length=200)
+
+    @field_validator("text")
+    @classmethod
+    def not_blank(cls, value):
+        if not value.strip() or "\x00" in value:
+            raise ValueError("Empty text or null bytes")
+        return value.strip()
+
+
 class TelegramZoneFind(StrictModel):
     """A stateless question: which zone does this text or this place mean. Nothing is stored."""
     bot_id: TelegramID
@@ -511,6 +569,8 @@ class TelegramCaptureResponse(StrictModel):
     ai_limit_resets_at: str | None = None
     # True once: the account has no time zone and was never asked. The bot then asks with city buttons.
     ask_timezone: bool = False
+    # A note saved without AI is already in a category («Общее»); the bot names it in its reply.
+    category_name: str | None = None
 
 
 class IntegrationErrorDetail(StrictModel):

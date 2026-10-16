@@ -222,7 +222,8 @@ EXPECTED_COLUMNS = {
     "notes.conclusions", "revisions.snapshot", "items.text", "items.source_quote", "items.due_text",
     "reminders.text", "inbox.response", "outbox.message_text", "assistant_requests.question",
     "assistant_requests.result", "admin_accounts.totp_secret", "feedback.subject", "feedback.description",
-    "feedback.steps", "feedback.expected", "feedback.contact",
+    "feedback.steps", "feedback.expected", "feedback.contact", "time_requests.answer",
+    "user_profiles.answers", "user_profiles.facts", "user_profiles.prefs",
 }
 
 

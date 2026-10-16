@@ -5,7 +5,7 @@
   const KEY = 'beresta.cookie-consent.v1', VERSION = 1;
   // Conveniences that are written to localStorage only after "Принять все".
   const OPTIONAL_KEYS = ['beresta.onboarding.dismissed.v1', 'beresta.reminderZone',
-    'beresta.timezoneDismissed'];
+    'beresta.timezoneDismissed', 'beresta.profile.draft.v1'];
   let memoryChoice = null;
   const memoryValues = {};
 

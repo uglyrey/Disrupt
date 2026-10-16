@@ -10,7 +10,7 @@ import wave
 import httpx
 
 from app.audio_contracts import MAX_AUDIO_BYTES, MAX_AUDIO_SECONDS
-from app.config import ALLOWED_MODEL_BASE_URLS, Settings, read_secret_file
+from app.config import ALLOWED_MODEL_BASE_URLS, STT_PROMPT_MAX, Settings, read_secret_file
 from app.providers import ProviderError
 
 
@@ -36,7 +36,7 @@ class CloudRuSpeechProvider:
 
     def __init__(
         self, api_key, model, *, base_url, transport=None, normalize_audio=False, ffmpeg_path="ffmpeg",
-        allowed_base_urls=ALLOWED_MODEL_BASE_URLS, label="cloudru",
+        allowed_base_urls=ALLOWED_MODEL_BASE_URLS, label="cloudru", prompt="",
     ):
         if base_url.rstrip("/") not in allowed_base_urls or not model:
             raise ValueError("STT requires an approved HTTPS endpoint and model")
@@ -45,6 +45,8 @@ class CloudRuSpeechProvider:
         self.endpoint = base_url.rstrip("/") + "/audio/transcriptions"
         self._transport = transport
         self.normalize_audio, self.ffmpeg_path = normalize_audio, ffmpeg_path
+        # Подсказка для Whisper, чтобы время и даты писались цифрами. Пусто значит поле не отправляется.
+        self.prompt = (prompt or "").strip()[:STT_PROMPT_MAX]
 
     def transcribe(self, source, *, media_type):
         extension = {"audio/ogg": "ogg", "audio/wav": "wav", "audio/webm": "webm"}.get(media_type)
@@ -66,7 +68,7 @@ class CloudRuSpeechProvider:
                               trust_env=False, transport=self._transport) as client:
                 with client.stream(
                     "POST", self.endpoint, headers={"Authorization": f"Bearer {self._api_key}"},
-                    data={"model": self.model_name, "language": "ru"},
+                    data={"model": self.model_name, "language": "ru", **({"prompt": self.prompt} if self.prompt else {})},
                     files={"file": ("recording." + extension, bytes(audio), media_type)},
                 ) as response:
                     if response.status_code != 200:
@@ -117,7 +119,8 @@ def make_speech_provider(settings: Settings):
     if not key:
         raise ValueError("STT requires a worker credential")
     return CloudRuSpeechProvider(key, model, base_url=settings.cloudru_base_url,
-                                 normalize_audio=True, ffmpeg_path=settings.audio_ffmpeg_path)
+                                 normalize_audio=True, ffmpeg_path=settings.audio_ffmpeg_path,
+                                 prompt=settings.stt_prompt)
 
 
 def normalized_wav(audio, ffmpeg_path):

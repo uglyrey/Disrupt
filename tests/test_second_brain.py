@@ -200,10 +200,12 @@ def test_dashboard_counts_on_a_synthetic_dataset(app, client):
     assert [row["notes"] for row in series] == [0, 0, 0, 1, 0, 1, 2]
     assert data["tasks"] == {"open": 3, "completed": 2, "completed_in_period": 1, "completion_rate": 0.4}
     assert data["ideas"] == 1
+    general = data["categories"][0]["category_id"]  # Notes without a category are in «Общее»
     assert data["categories"] == [
+        {"category_id": general, "name": "Общее", "notes": 2, "tasks_total": 1, "tasks_done": 0},
         {"category_id": work, "name": "Работа", "notes": 2, "tasks_total": 3, "tasks_done": 1},
         {"category_id": home, "name": "Дом", "notes": 1, "tasks_total": 1, "tasks_done": 1},
-        {"category_id": data["categories"][2]["category_id"], "name": "Пусто", "notes": 0,
+        {"category_id": data["categories"][3]["category_id"], "name": "Пусто", "notes": 0,
          "tasks_total": 0, "tasks_done": 0},
     ]
     assert data["streak_days"] == 2
@@ -223,7 +225,8 @@ def test_dashboard_counts_on_a_synthetic_dataset(app, client):
 
     theirs = other.get("/api/v1/dashboard").json()
     assert theirs["totals"]["notes"] == 1 and theirs["tasks"]["open"] == 1 and theirs["ideas"] == 1
-    assert theirs["categories"] == [] and theirs["reminders"]["upcoming_7d"] == 0
+    assert [(c["name"], c["notes"]) for c in theirs["categories"]] == [("Общее", 1)]
+    assert theirs["reminders"]["upcoming_7d"] == 0
     assert theirs["reminders"]["next_at"] is None and theirs["streak_days"] == 1
 
 
@@ -232,7 +235,8 @@ def test_dashboard_for_a_new_account_is_empty_and_validates_days(app, client):
     data = client.get("/api/v1/dashboard", params={"days": 7}).json()
     assert data["totals"] == {"notes": 0, "notes_in_period": 0} and data["streak_days"] == 0
     assert data["tasks"] == {"open": 0, "completed": 0, "completed_in_period": 0, "completion_rate": None}
-    assert data["captures"]["total"] == 0 and data["categories"] == []
+    assert data["captures"]["total"] == 0
+    assert [(c["name"], c["notes"]) for c in data["categories"]] == [("Общее", 0)]
     assert data["reminders"] == {"upcoming_7d": 0, "next_at": None, "next_timezone": None}
     assert data["ai"]["units_used"] == 0 and data["ai"]["units_remaining"] == 100
     assert client.get("/api/v1/dashboard", params={"days": 0}).status_code == 422
@@ -294,6 +298,7 @@ def test_note_detail_proposes_a_reminder_for_an_open_task_with_a_deadline(app, c
     assert task["due_text"] == "завтра"
     assert task["proposed_reminder"] == {
         "local_time": f"{tomorrow:%Y-%m-%d}T09:00:00", "timezone": "Europe/Moscow", "label": "завтра в 09:00",
+        "certain": True, "alternatives": [],
     }
     assert [i["proposed_reminder"] for i in note["items"] if i["kind"] != "task"] == [None]
     stored = client.get(f"/api/v1/notes/{note['id']}/revisions").json()[0]["items"]
@@ -358,10 +363,11 @@ def test_processing_reply_offers_a_reminder_for_a_task_with_a_deadline(reminders
     delivery = claim(client).json()["items"][0]
     text = delivery["text"]
     assert text.startswith("Заметка готова.")
-    assert text.split("\n")[-1] == (
+    assert text.split("\n\n")[-2] == (
         "Предлагаю напоминание: завтра в 09:00 по Москве, «Андрей завтра уточнит ситуацию.». "
         "Подтвердить или изменить время: " + delivery["note_url"] + "#remind"
     )
+    assert text.split("\n")[-1].startswith("Категория: ")  # The category line closes the reply
     assert "\n\nПредлагаю напоминание" in text
     assert len(text.encode("utf-16-le")) <= 4096 * 2
 
@@ -393,8 +399,8 @@ def test_hint_keeps_the_telegram_length_limit(reminders):
     text = claim(client).json()["items"][0]["text"]
     assert len(text.encode("utf-16-le")) <= 4096 * 2
     assert text.startswith("Заметка готова.") and "Полный результат в Beresta." in text
-    assert text.split("\n")[-1].startswith("Предлагаю напоминание: завтра в 09:00")
-    assert text.endswith("#remind")
+    assert text.split("\n\n")[-2].startswith("Предлагаю напоминание: завтра в 09:00")
+    assert text.split("\n\n")[-2].endswith("#remind") and text.split("\n")[-1].startswith("Категория: ")
 
 
 # AI categories
@@ -419,7 +425,8 @@ def test_ai_category_is_a_normal_category_created_at_once_and_renamable(app, cli
     register(client)
     note = process(app, client, Named())
     categories = client.get("/api/v1/categories").json()
-    assert [c["name"] for c in categories] == ["Идеи для отпуска"]
+    assert [c["name"] for c in categories] == ["Общее", "Идеи для отпуска"]
+    categories = categories[1:]  # «Общее» is first and cannot be renamed
     assert note["category_id"] == categories[0]["id"] and note["category_name"] == "Идеи для отпуска"
     path = "/api/v1/categories/" + categories[0]["id"]
     renamed = client.patch(path, json={"version": categories[0]["version"], "name": "Отпуск"})
@@ -436,17 +443,17 @@ def test_ai_category_reuses_an_existing_name_regardless_of_case(app, client):
     register(client)
     existing = client.post("/api/v1/categories", json={"name": "идеи для отпуска"}).json()
     note = process(app, client, Named())
-    assert [c["id"] for c in client.get("/api/v1/categories").json()] == [existing["id"]]
+    assert [c["name"] for c in client.get("/api/v1/categories").json()] == ["Общее", "идеи для отпуска"]
     assert note["category_id"] == existing["id"]
 
 
-def test_ai_category_at_the_limit_leaves_the_note_uncategorized_without_failing(app, client):
+def test_ai_category_at_the_limit_leaves_the_note_in_general_without_failing(app, client):
     owner = register(client)["id"]
     with app.state.sessions.begin() as db:
         db.add_all([Category(user_id=owner, name=f"Категория {i}") for i in range(100)])
     note = process(app, client, Named())
-    assert note["category_id"] is None and note["category_name"] is None
-    assert len(client.get("/api/v1/categories").json()) == 100
+    assert note["category_name"] == "Общее"
+    assert len(client.get("/api/v1/categories").json()) == 101  # 100 of their own and «Общее"
 
 
 # Tasks across notes and the done counter

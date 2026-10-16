@@ -13,6 +13,8 @@
 - `outbox.message_text` (разовые сообщения, например ссылка для сброса пароля)
 - `inbox.response` (ответы на запросы бота, в них бывает текст заметки)
 - `assistant_requests.question`, `assistant_requests.result`
+- `time_requests.answer`
+- `user_profiles.answers`, `user_profiles.facts`, `user_profiles.prefs` (анкета «Знакомство», см. `docs/profile-v1.md`)
 - `feedback.subject`, `feedback.description`, `feedback.steps`, `feedback.expected`, `feedback.contact`
 - `admin_accounts.totp_secret`
 

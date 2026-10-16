@@ -53,7 +53,7 @@ def test_model_items_category_and_unconfirmed_time(app, client):
     stored = client.get(f"/api/v1/notes/{note['id']}/revisions").json()[0]["items"]
     # The proposal is computed on read and never stored in a revision.
     assert stored == [{k: v for k, v in i.items() if k != "proposed_reminder"} for i in note["items"]]
-    assert len(client.get("/api/v1/categories").json()) == 1
+    assert len(client.get("/api/v1/categories").json()) == 2  # «Общее» and the one the AI made
     with app.state.sessions() as db:
         # The AI sets the reminder itself (it is on by default). The time still never lands on the task.
         assert [r.item_id for r in db.scalars(select(Reminder))] == [task["id"]]
@@ -81,8 +81,9 @@ def test_invalid_model_items_do_not_save_partial_structure(app, client, change):
     after = client.get("/api/v1/jobs/" + job["id"]).json()
     assert after["status"] == "failed" and after["original_text"] == DEMO_TEXT
     with app.state.sessions() as db:
-        for model in (Note, Item, Category):
+        for model in (Note, Item):
             assert db.scalar(select(func.count()).select_from(model)) == 0
+        assert db.scalar(select(func.count()).select_from(Category).where(Category.is_general.is_(False))) == 0
 
 
 def test_worker_keeps_category_id_after_rename_during_model_call(app, client):
@@ -104,7 +105,7 @@ def test_worker_keeps_category_id_after_rename_during_model_call(app, client):
     note_id = client.get("/api/v1/jobs/" + job["id"]).json()["note_id"]
     note = client.get("/api/v1/notes/" + note_id).json()
     assert note["category_id"] == category["id"] and note["category_name"] == "Проект"
-    assert len(client.get("/api/v1/categories").json()) == 1
+    assert len(client.get("/api/v1/categories").json()) == 2
 
 
 def test_item_edit_history_conflicts_and_structure_confirmation(app, client):
@@ -255,7 +256,7 @@ def test_owned_structure_search_actions_and_csrf(app, client):
     path = "/api/v1/notes/" + owner_note["id"]
     with TestClient(app) as other:
         register(other, "other")
-        assert other.get("/api/v1/categories").json() == []
+        assert [c["name"] for c in other.get("/api/v1/categories").json()] == ["Общее"]
         assert other.get("/api/v1/notes", params={"q": "Точная"}).json() == []
         assert other.get("/api/v1/notes", params={"category_id": owner_category["id"]}).status_code == 404
         assert (
@@ -404,14 +405,14 @@ def test_delete_category_moves_notes_to_none_and_checks_version(app, client):
         assert done.status_code == 200
     path = "/api/v1/categories/" + category["id"]
     assert client.delete(path, params={"version": 5}).status_code == 409
-    assert len(client.get("/api/v1/categories").json()) == 2
+    assert len(client.get("/api/v1/categories").json()) == 3
     assert client.delete(path).status_code == 422
     assert client.delete(path, params={"version": category["version"]}).status_code == 204
-    assert [c["id"] for c in client.get("/api/v1/categories").json()] == [other["id"]]
+    assert [c["name"] for c in client.get("/api/v1/categories").json()] == ["Общее", "Дом"]
     none_ids = {n["id"] for n in client.get("/api/v1/notes", params={"category_id": "none"}).json()}
     assert none_ids == {first["id"], second["id"]}
     moved = client.get("/api/v1/notes/" + first["id"]).json()
-    assert moved["category_id"] is None and moved["category_name"] is None and moved["version"] == 3
+    assert moved["category_name"] == "Общее" and moved["version"] == 3  # The notes moved to «Общее"
     assert client.get("/api/v1/notes/" + kept["id"]).json()["category_id"] == other["id"]
     with app.state.sessions() as db:
         versions = set(db.scalars(select(Revision.version).where(Revision.note_id == first["id"])))
@@ -432,5 +433,5 @@ def test_delete_category_is_private_and_needs_csrf(app, client):
     token = client.headers.pop("X-CSRF-Token")
     assert client.delete(path, params={"version": 1}).status_code == 403
     client.headers["X-CSRF-Token"] = token
-    assert len(client.get("/api/v1/categories").json()) == 1
+    assert len(client.get("/api/v1/categories").json()) == 2
     assert client.get("/api/v1/notes/" + note["id"]).json()["category_id"] == category["id"]

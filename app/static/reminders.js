@@ -181,6 +181,43 @@
       return whenShort(local,row.timezone) + (row.timezone === defaultZone() ? '' : ` (${zoneShort(row.timezone)})`);
     } catch (_) { return `${row.scheduled_at} · ${row.timezone}`; }
   }
+  // A ready Google Calendar event. Only a link to Google is drawn; anything else is dropped.
+  const CALENDAR_TEXT = 'Добавить в Google Календарь';
+  function calendarUrl(value) {
+    if (typeof value !== 'string' || !value) return null;
+    let url;
+    try { url = new URL(value); } catch (_) { return null; }
+    if (url.protocol !== 'https:' || !['calendar.google.com','www.google.com'].includes(url.hostname)) return null;
+    return url.href;
+  }
+  function calendarAnchor(href, className) {
+    const link = node('a','',className);
+    link.href = href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+    return link;
+  }
+  // A small calendar icon next to the time of a reminder.
+  function calendarIcon(value) {
+    const href = calendarUrl(value); if (!href) return null;
+    const link = calendarAnchor(href,'calendar-icon');
+    link.setAttribute('aria-label',CALENDAR_TEXT); link.title = CALENDAR_TEXT; link.dataset.action = 'calendar';
+    const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns,'svg'), path = document.createElementNS(ns,'path');
+    for (const [key,val] of Object.entries({viewBox:'0 0 24 24',width:'18',height:'18','aria-hidden':'true',focusable:'false'})) svg.setAttribute(key,val);
+    for (const [key,val] of Object.entries({d:'M7 3v3M17 3v3M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1ZM4 9.5h16M12 12.5v5M9.5 15h5',fill:'none',stroke:'currentColor','stroke-width':'1.7','stroke-linecap':'round','stroke-linejoin':'round'})) path.setAttribute(key,val);
+    svg.append(path); link.append(svg);
+    return link;
+  }
+  // The same link as text, at the end of the confirmation line.
+  function calendarText(value) {
+    const href = calendarUrl(value); if (!href) return null;
+    const link = calendarAnchor(href,'calendar-text'); link.textContent = CALENDAR_TEXT; link.dataset.action = 'calendar-text';
+    link.append(node('span',' (откроется в новой вкладке)','sr-only'));
+    return link;
+  }
+  function sayWithCalendar(text, value) {
+    const line = $('reminders-message'), link = calendarText(value);
+    line.textContent = text;
+    if (link) line.append(' ',link);
+  }
   function drawRows() {
     $('reminders-list').replaceChildren();
     if (!rows.length) $('reminders-list').append(node('p','Напоминаний нет','muted reminders-empty'));
@@ -190,7 +227,9 @@
       if (row.id === highlighted) card.classList.add('is-linked');
       const task = note.items.find(item => item.id === row.item_id);
       const head = node('div','','reminder-line');
-      head.append(node('strong',rowTime(row),'reminder-when'),node('span',
+      const timeBox = node('span','','reminder-time'); timeBox.append(node('strong',rowTime(row),'reminder-when'));
+      const calendar = calendarIcon(row.calendar_url); if (calendar) timeBox.append(calendar);
+      head.append(timeBox,node('span',
         `${labels[row.status] || 'Статус недоступен'}${row.delivery_status ? ' · ' + (deliveryLabels[row.delivery_status] || 'Статус доставки недоступен') : ''}`,'reminder-status'));
       card.append(head,node('p',row.text,'reminder-what'));
       if (row.item_id) card.append(node('p',`К задаче «${task?.text || 'Задача больше недоступна'}»`,'muted'));
@@ -203,7 +242,11 @@
       edit.onclick = () => startForm(row);
       const cancel = node('button','Отменить','quiet reminder-small'); cancel.type = 'button'; cancel.dataset.action = 'cancel';
       cancel.disabled = row.status === 'cancelled' || row.status === 'completed'; cancel.onclick = () => cancelReminder(row);
-      actions.append(edit,cancel); card.append(actions); $('reminders-list').append(card);
+      // A time that was a guess waits for the person: a small note next to «Изменить», no new dialog.
+      const guess = row.status === 'confirmed' && ['ask','unclear'].includes(row.time_check) && Date.parse(row.scheduled_at) > Date.now();
+      if (guess) actions.append(node('span','Проверьте время','reminder-check'));
+      actions.append(edit,cancel);
+      card.append(actions); $('reminders-list').append(card);
     }
     drawTelegram(); controls();
   }
@@ -332,7 +375,8 @@
       if (view !== generation) return;
       clearForm(); await refresh(); await linkStatus();
       const text = row.previous_attempt_unknown ? 'Сохранено. Предыдущая отправка могла состояться.' : 'Напоминание подтверждено.';
-      say(text); bridge.notify(text);
+      if (edit) say(text); else sayWithCalendar(text,row.calendar_url);
+      bridge.notify(text);
     } catch (error) {
       if (view !== generation) return;
       if (edit && error.status === 409) {

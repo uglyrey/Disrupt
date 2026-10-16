@@ -9,6 +9,7 @@ requests (`app/assistant.py`) stay at-most-once.
 """
 
 import inspect
+import json
 import signal
 import threading
 import time
@@ -46,6 +47,8 @@ from app.models import (
     new_id,
 )
 from app.notes_manage import MergeSourcesChanged, complete_merge, merge_sources_alive
+from app.profile import prompt_profile
+from app.profile_jobs import run_profile_once
 from app.provider_router import FALLBACK, PRIMARY, Attempt, ProviderRouter
 from app.providers import (
     STRUCTURE_MAX_TOKENS,
@@ -57,8 +60,9 @@ from app.providers import (
 )
 from app.reminders import auto_reminders, request_reminders
 from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide, routing_code
-from app.services import lock_account, resolve_ai_category, save_revision
+from app.services import general_category_id, lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_fallback_speech_provider, make_speech_provider
+from app.time_requests import run_time_request_once
 from app.timezones import effective_zone
 from app.usage import UsageRecorder
 
@@ -68,12 +72,17 @@ PROCESSING_FAILED_TEXT = (
 )
 
 
-def takes_timezone(call):
-    """True when a provider method accepts the account zone. Simple providers of tests and old adapters may not."""
+def takes_parameter(call, name):
+    """True when a provider method accepts the keyword `name`. Simple providers of tests and old adapters may not."""
     try:
-        return "timezone" in inspect.signature(call).parameters
+        return name in inspect.signature(call).parameters
     except (TypeError, ValueError):
         return False
+
+
+def takes_timezone(call):
+    """True when a provider method accepts the account zone."""
+    return takes_parameter(call, "timezone")
 
 
 def cancel_processing_reply(db, job_id):
@@ -119,7 +128,7 @@ class Worker:
             chars = len(capture.original_text or "")
         chars += PROMPT_OVERHEAD_CHARS + len(SYSTEM_PROMPT) + sum(
             len(name) for name in db.scalars(select(Category.name).where(Category.user_id == job.user_id).limit(100))
-        )
+        ) + len(json.dumps(prompt_profile(db, job.user_id) or "", ensure_ascii=False))
         estimates = {"llm": llm_max_cost(self.settings, chars, STRUCTURE_MAX_TOKENS)}
         if needs_stt:
             estimates["stt"] = stt_max_cost(self.settings, capture.audio_seconds, MAX_AUDIO_SECONDS)
@@ -361,7 +370,8 @@ class Worker:
     def run_once(self):
         job_id = self.claim()
         if job_id is None:
-            return run_assistant_once(self)  # Capture jobs always go first.
+            # Capture jobs always go first, then the tiny reminder time requests, then the assistant, then profiles.
+            return run_time_request_once(self) or run_assistant_once(self) or run_profile_once(self)
         attempt = None
         try:
             if self.merge_sources_gone(job_id):
@@ -374,11 +384,14 @@ class Worker:
                 category_context = {
                     category.name: category.id
                     for category in db.scalars(
-                        select(Category).where(Category.user_id == user_id).order_by(Category.id).limit(100)
+                        select(Category).where(Category.user_id == user_id, Category.is_general.is_(False))
+                        .order_by(Category.id).limit(100)
                     )
                 }
                 # The model reads «завтра» and «в пятницу» in the zone of the person. Quotas stay on the service zone.
                 user_zone = effective_zone(db.get(User, user_id), self.settings)
+                # What the questionnaire «Знакомство» turned into. The raw answers never leave the database.
+                profile = prompt_profile(db, user_id)
                 if self.settings.provider == "cloudru" and not attempt.fallback:
                     self.reserve_budget(db, user_id)
             provider = self.fallback_provider if attempt.fallback else self.provider
@@ -387,6 +400,8 @@ class Worker:
                 measured = getattr(provider, "structure_with_usage", None)
                 call = measured or provider.structure
                 extra = {"timezone": user_zone} if takes_timezone(call) else {}
+                if profile and takes_parameter(call, "profile"):
+                    extra["profile"] = profile
                 result = (
                     measured(original, categories=tuple(category_context), on_usage=on_usage, **extra)
                     if measured else provider.structure(original, categories=tuple(category_context), **extra)
@@ -430,12 +445,16 @@ class Worker:
                         {"id": new_id(), **c.model_dump(), "status": "proposed"} for c in result.conclusions
                     ],
                 )
-                if result.category_name:
-                    category = resolve_ai_category(db, user_id, result.category_name, category_context)
-                    note.category_id = category.id if category else None
+                category = (
+                    resolve_ai_category(db, user_id, result.category_name, category_context)
+                    if result.category_name else None
+                )
+                # No category, or one that cannot be used: the note goes to «Общее».
+                note.category_id = category.id if category else general_category_id(db, user_id)
                 db.add(note)
                 db.flush()
                 created = []
+                model_times = {}  # item id to the local deadline the model worked out, for the reminder cross-check
                 for position, item in enumerate(result.items):
                     row = Item(
                         user_id=user_id,
@@ -452,6 +471,9 @@ class Worker:
                     db.add(row)
                     created.append(row)
                 db.flush()
+                for row, item in zip(created, result.items, strict=True):
+                    if item.due_at:
+                        model_times[row.id] = item.due_at
                 if job_kind == "merge":
                     # Open tasks, reminders and links of the originals move over, the originals go to the trash.
                     # The reminders of the originals are already settled, so the note gets no new automatic ones.
@@ -463,8 +485,8 @@ class Worker:
                     try:
                         # The note matters more than its reminders: a failure here leaves the note as it is.
                         with db.begin_nested():
-                            auto_reminders(db, note, self.settings)
-                            request_reminders(db, note, original, self.settings)
+                            auto_reminders(db, note, self.settings, model_times=model_times)
+                            request_reminders(db, note, original, self.settings, model_times=model_times)
                     except Exception as exc:
                         log_error("auto_reminder_failed", "internal_error", log_file=self.settings.error_log_file,
                                   job_id=job_id, exception=exc)

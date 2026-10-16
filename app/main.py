@@ -39,6 +39,7 @@ from app.routes.brain import build_router as brain_router
 from app.routes.feedback import build_router as feedback_router
 from app.routes.internal import build_router as internal_router
 from app.routes.notes_manage import build_router as notes_manage_router
+from app.routes.profile import build_router as profile_router
 from app.routes.reminders import build_router as reminders_router
 from app.routes.review import build_router as review_router
 from app.routes.structure import build_router as structure_router
@@ -303,7 +304,8 @@ def create_app(
     app.include_router(review_router(database, STATIC, settings))
     app.include_router(internal_router(database, settings))
     app.include_router(structure_router(database))
-    app.include_router(reminders_router(database))
+    app.include_router(reminders_router(database, settings))
+    app.include_router(profile_router(database))
     app.include_router(timezone_router(database))
     app.include_router(audio_router(database, settings, audio_storage, create_audio_capture))
     app.include_router(transcripts_router(database))
@@ -368,7 +370,7 @@ def create_app(
     def me(request: Request, db=Depends(database)):
         session = get_login_session(request, db)
         user = db.get(User, session.user_id)
-        return user_payload(user, session.csrf_token)
+        return user_payload(user, session.csrf_token, db)
 
     @app.get("/api/v1/provider/usage")
     def provider_usage(request: Request, db=Depends(database)):

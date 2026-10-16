@@ -165,7 +165,8 @@ def test_a_loaded_secret_in_any_field_saves_the_original_as_a_plain_note(app, cl
     assert job["status"] == "succeeded" and job["error_code"] == "ai_output_blocked"
     note, items = stored_note(app, job)
     assert note.title == "Купить хлеб" and note.markdown == original
-    assert note.conclusions == [] and items == [] and note.category_id is None
+    assert note.conclusions == [] and items == []
+    assert note.category_id == client.get("/api/v1/categories").json()[0]["id"]  # «Общее"
     assert FAKE_SECRET not in caplog.text and original not in caplog.text
     assert "ai_output_blocked" in caplog.text and "secret_value" in caplog.text
     with app.state.sessions() as db:

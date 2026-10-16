@@ -29,6 +29,7 @@ from app.deliveries import (
 from app.integration import IntegrationRejection
 from app.limits import telegram_state
 from app.models import (
+    Category,
     Inbox,
     Item,
     LinkRequest,
@@ -40,13 +41,18 @@ from app.models import (
     User,
     new_id,
 )
-from app.reminders import local_clock, reschedule, snooze_time
+from app.profile import time_dayparts
+from app.reminder_confirm import answer_time, confirm_action, local_now_of, waiting_reminder
+from app.reminder_proposals import mentions_time
+from app.reminders import complete_reminder, local_clock, reschedule, snooze_time
 from app.schemas import (
     IntegrationError,
     LinkResponse,
     TelegramCaptureResponse,
     TelegramLink,
     TelegramLoginConfirm,
+    TelegramReminderConfirm,
+    TelegramReminderTime,
     TelegramText,
     TelegramZoneAsked,
     TelegramZoneFind,
@@ -54,6 +60,8 @@ from app.schemas import (
 )
 from app.security import hash_token, require_internal_service
 from app.services import cancel_item_reminders, capture_text, lock_account, save_revision
+from app.time_check import parse_words
+from app.time_requests import enqueue as enqueue_time_request
 from app.timezones import find_zone, label_for_zone, nearest_city, offset_minutes, utc_text, valid_zone
 
 
@@ -181,7 +189,7 @@ def handle_telegram_action(db, body):
         reschedule(db, reminder, when, reminder.timezone, reminder.text, "telegram")
         return {"status": "snoozed", "local_time": local_clock(reminder)}
     if item is None:
-        reminder.status = "completed"
+        complete_reminder(db, reminder)
         return {"status": "completed"}
     note = db.scalar(select(Note).where(
         Note.id == item.note_id, Note.user_id == identity.user_id, Note.deleted_at.is_(None),
@@ -326,6 +334,8 @@ def build_router(database, settings):
             }
             if isinstance(result, Note) and body.processing_mode == "ai":
                 saved["ai_limit_exceeded"] = True  # Daily AI limit spent, saved without AI.
+            if isinstance(result, Note):
+                saved["category_name"] = db.scalar(select(Category.name).where(Category.id == result.category_id))
             db.flush()  # The stored capture counts in the remaining units.
             saved["ask_timezone"] = zone_question_due(db, identity.user_id)
             return {**saved, **telegram_state(db, settings, identity.user_id)}
@@ -384,6 +394,44 @@ def build_router(database, settings):
     @router.post("/telegram/actions", response_model=ActionResponse, response_model_exclude_none=True)
     def telegram_action(body: ActionRequest, db=Depends(database)):
         return process_update(db, body, "action", lambda _: handle_telegram_action(db, body))
+
+    # «Верно?» under a reminder with a guessed time. Not in the published contract (docs/reminder-confirm-v1.md).
+    @router.post("/telegram/reminder-confirm", include_in_schema=False)
+    def reminder_confirm(body: TelegramReminderConfirm, db=Depends(database)):
+        def handle(operation_id):
+            identity = telegram_identity(db, body)
+            lock_account(db, identity.user_id)
+            return confirm_action(db, identity.user_id, body.reminder_id, body.generation, body.action)
+
+        return process_update(db, body, "reminder_confirm", handle)
+
+    @router.post("/telegram/reminder-time", include_in_schema=False)
+    def reminder_time(body: TelegramReminderTime, db=Depends(database)):
+        """The written answer to «Изменить время». Our parser first. When it finds nothing but the text names some
+        time, the answer is queued for the worker and `pending` is returned: this process never calls a model and
+        has no key for it. A text that names no time at all is answered `not_time` and stored nowhere, so the bot
+        can save it as a note."""
+        identity = telegram_identity(db, body)
+        replayed = db.scalar(select(Inbox.id).where(Inbox.bot_id == body.bot_id, Inbox.update_id == body.update_id))
+        row = None if replayed else waiting_reminder(db, identity.user_id, body.reminder_id, time.time())
+        dayparts = time_dayparts(db, identity.user_id)
+        if (
+            row is not None and row.generation == body.generation
+            and parse_words(body.text, local_now_of(row, time.time()), dayparts)[0] is None
+            and not mentions_time(body.text, dayparts)
+        ):
+            return {"status": "not_time"}
+
+        def handle(operation_id):
+            found = telegram_identity(db, body)
+            lock_account(db, found.user_id)
+
+            def defer(_row):
+                return enqueue_time_request(db, body, found.user_id, body.reminder_id, body.generation, body.text)
+
+            return answer_time(db, found.user_id, body.reminder_id, body.generation, body.text, defer=defer)
+
+        return process_update(db, body, "reminder_time", handle)
 
     @router.post("/deliveries/claim", response_model=ClaimResponse)
     def claim(body: ClaimRequest, db=Depends(database)):

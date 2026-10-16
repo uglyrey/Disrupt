@@ -3121,6 +3121,314 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/profile": {
+      "get": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Read Profile",
+        "operationId": "read_profile_api_v1_profile_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      },
+      "delete": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Remove Profile",
+        "operationId": "remove_profile_api_v1_profile_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/profile/answers": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Send Answers",
+        "operationId": "send_answers_api_v1_profile_answers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswersBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/profile/decline": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Decline Profile",
+        "operationId": "decline_profile_api_v1_profile_decline_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/profile/retry": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Retry Profile",
+        "operationId": "retry_profile_api_v1_profile_retry_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/profile/calendar-offer": {
+      "patch": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Change Calendar Offer",
+        "operationId": "change_calendar_offer_api_v1_profile_calendar_offer_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarOfferBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/profile/categories": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Confirm Categories",
+        "operationId": "confirm_categories_api_v1_profile_categories_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoriesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/profile/categories/skip": {
+      "post": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Skip Categories",
+        "operationId": "skip_categories_api_v1_profile_categories_skip_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
+    "/api/v1/profile/facts/{fact_id}": {
+      "patch": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Change Fact",
+        "operationId": "change_fact_api_v1_profile_facts__fact_id__patch",
+        "parameters": [
+          {
+            "name": "fact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fact Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      },
+      "delete": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Remove Fact",
+        "operationId": "remove_fact_api_v1_profile_facts__fact_id__delete",
+        "parameters": [
+          {
+            "name": "fact_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Fact Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/api/v1/timezones": {
       "get": {
         "tags": [
@@ -6656,6 +6964,23 @@
         "title": "AiProviders",
         "description": "Состояние основного ИИ-шлюза и расход резерва. Подробности в docs/ai-failover-v1.md."
       },
+      "AnswersBody": {
+        "properties": {
+          "answers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Answers"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "title": "AnswersBody"
+      },
       "AssistantAsk": {
         "properties": {
           "question": {
@@ -6890,6 +7215,20 @@
         ],
         "title": "AuthorizeResponse"
       },
+      "CalendarOfferBody": {
+        "properties": {
+          "calendar_offer": {
+            "type": "boolean",
+            "title": "Calendar Offer"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "calendar_offer"
+        ],
+        "title": "CalendarOfferBody"
+      },
       "CaptureResponse": {
         "properties": {
           "input_kind": {
@@ -7069,6 +7408,25 @@
         ],
         "title": "Cards"
       },
+      "CategoriesBody": {
+        "properties": {
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "minItems": 1,
+            "title": "Names"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "names"
+        ],
+        "title": "CategoriesBody"
+      },
       "CategoryCreate": {
         "properties": {
           "name": {
@@ -7120,6 +7478,11 @@
           "version": {
             "type": "integer",
             "title": "Version"
+          },
+          "is_general": {
+            "type": "boolean",
+            "title": "Is General",
+            "default": false
           }
         },
         "additionalProperties": false,
@@ -7232,6 +7595,43 @@
           "status"
         ],
         "title": "ConclusionResponse"
+      },
+      "ConfirmButtons": {
+        "properties": {
+          "reminder_id": {
+            "type": "string",
+            "title": "Reminder Id"
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Generation"
+          },
+          "alt_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alt Label"
+          },
+          "edit_only": {
+            "type": "boolean",
+            "title": "Edit Only",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reminder_id",
+          "generation"
+        ],
+        "title": "ConfirmButtons",
+        "description": "Under a message that asks «Верно?» about the time of a reminder: one pair of buttons per reminder."
       },
       "Costs": {
         "properties": {
@@ -7728,6 +8128,22 @@
               }
             ],
             "title": "Callback Token"
+          },
+          "confirm": {
+            "items": {
+              "$ref": "#/components/schemas/ConfirmButtons"
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Confirm"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/TextLink"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Links"
           }
         },
         "additionalProperties": false,
@@ -7889,6 +8305,20 @@
           "password"
         ],
         "title": "EmailRegistrationStart"
+      },
+      "FactBody": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "FactBody"
       },
       "FeedbackCreate": {
         "properties": {
@@ -9147,6 +9577,19 @@
           "label": {
             "type": "string",
             "title": "Label"
+          },
+          "certain": {
+            "type": "boolean",
+            "title": "Certain",
+            "default": true
+          },
+          "alternatives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Alternatives"
           }
         },
         "additionalProperties": false,
@@ -9481,6 +9924,45 @@
           "previous_attempt_unknown": {
             "type": "boolean",
             "title": "Previous Attempt Unknown"
+          },
+          "time_check": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ask",
+                  "unclear",
+                  "confirmed",
+                  "corrected"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Check"
+          },
+          "calendar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calendar Url"
+          },
+          "advance_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advance Of"
           }
         },
         "additionalProperties": false,
@@ -9785,6 +10267,17 @@
             "type": "boolean",
             "title": "Ask Timezone",
             "default": false
+          },
+          "category_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Name"
           }
         },
         "additionalProperties": false,
@@ -9948,6 +10441,38 @@
           "text"
         ],
         "title": "TextCapture"
+      },
+      "TextLink": {
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "maximum": 8192.0,
+            "minimum": 0.0,
+            "title": "Offset"
+          },
+          "length": {
+            "type": "integer",
+            "maximum": 256.0,
+            "minimum": 1.0,
+            "title": "Length"
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 40,
+            "pattern": "^https://calendar\\.google\\.com/calendar/render\\?action=TEMPLATE&",
+            "title": "Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "offset",
+          "length",
+          "url"
+        ],
+        "title": "TextLink",
+        "description": "A clickable part of the message text: «Добавить в Google Календарь». Offset and length are UTF-16 units."
       },
       "TokenBody": {
         "properties": {

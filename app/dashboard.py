@@ -103,9 +103,10 @@ def build_dashboard(db, settings, user_id, days, now=None):
     ).all())
     categories = []
     for category in db.scalars(select(Category).where(Category.user_id == user_id)):
-        tasks = [(status, n) for cid, kind, status, n in kinds if cid == category.id and kind == "task"]
+        mine = {category.id, None} if category.is_general else {category.id}  # A note without a category is in «Общее»
+        tasks = [(status, n) for cid, kind, status, n in kinds if cid in mine and kind == "task"]
         categories.append({
-            "category_id": category.id, "name": category.name, "notes": note_counts.get(category.id, 0),
+            "category_id": category.id, "name": category.name, "notes": sum(note_counts.get(cid, 0) for cid in mine),
             "tasks_total": sum(n for _, n in tasks),
             "tasks_done": sum(n for status, n in tasks if status == "completed"),
         })
@@ -114,7 +115,7 @@ def build_dashboard(db, settings, user_id, days, now=None):
     horizon = now + UPCOMING_DAYS * 86400
     pending = (
         Reminder.user_id == user_id, Reminder.status == "confirmed", Reminder.scheduled_at > now,
-        Reminder.note_id.in_(alive_notes),
+        Reminder.note_id.in_(alive_notes), Reminder.advance_of.is_(None),
     )
     upcoming = db.scalar(
         select(func.count()).select_from(Reminder).where(*pending, Reminder.scheduled_at <= horizon)

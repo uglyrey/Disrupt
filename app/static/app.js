@@ -128,6 +128,7 @@ function showUser(user) {
   if (policy) policy.hidden = user.policy_current !== false;
   if (deletion) deletion.hidden = user.deletion_requested !== true;
   window.BerestaTimezone?.start(user,api);
+  window.BerestaProfile?.start(user,api);
 }
 // Everything the app loads right after a person gets in, by password, by Telegram or from a saved session.
 async function enterApp(user) {
@@ -777,11 +778,13 @@ $('load-history').onclick = async () => {
 window.addEventListener('beforeunload',event=>{if(dirty()){event.preventDefault();event.returnValue='';}});
 function fillCategoryOptions(select, all, value = select.value) {
   select.replaceChildren();
+  categories.sort((a,b) => Number(Boolean(b.is_general)) - Number(Boolean(a.is_general)));
   if (all) select.append(new Option('Все категории',''));
-  select.append(new Option('Без категории',all ? 'none' : ''));
   for (const category of categories) select.append(new Option(category.name,category.id));
-  select.value = value;
+  // Every note has a category. An old answer without one counts as «Общее».
+  select.value = value || (all ? '' : generalId());
 }
+function generalId() { return categories.find(category => category.is_general)?.id || ''; }
 async function loadCategories() {
   categories = await api('/api/v1/categories');
   fillCategoryOptions($('category-filter'),true);
@@ -866,7 +869,7 @@ for (const button of $('source-filter').querySelectorAll('button')) {
 }
 $('note-category').onchange = async () => {
   await mutateNote('/category','PATCH',{category_id:$('note-category').value || null},'Категория записи сохранена.');
-  $('note-category').value = currentNote.category_id || '';
+  $('note-category').value = currentNote.category_id || generalId();
 };
 $('confirm-structure').onclick = () => mutateNote('/confirm-structure','POST',{},'Структура подтверждена.');
 // Tasks and ideas are a checklist. A row is plain text until it is clicked, then it edits in place.

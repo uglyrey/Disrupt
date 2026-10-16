@@ -163,6 +163,11 @@ Scheduler и сетевая отправка добавлены в `feature/remi
 
 Элемент claim содержит delivery_id, lease_token, generation, chat_id, text,
 note_url и callback_token/null.
+Ещё в нём есть confirm, список до трёх записей reminder_id, generation, alt_label/null и edit_only (по умолчанию false). Он
+непустой, когда текст спрашивает «Верно?» о времени напоминания, и тогда бот рисует под текстом кнопки. При edit_only рисуется одна «Изменить время».
+Подробности в [reminder-confirm-v1.md](reminder-confirm-v1.md).
+Ещё есть links, список до пяти записей offset, length и url (по умолчанию пустой). Это кликабельные части text («Добавить в Google Календарь»),
+offset и length в единицах UTF-16. Бот отправляет простой текст с entities типа text_link, кнопок это не добавляет. Подробности в [profile-v1.md](profile-v1.md).
 
 Обычные запросы ограничены 128 КиБ. Только POST multipart на `/telegram/voice`
 допускает тело до 10 МиБ + 64 КиБ служебных полей. Проверяется фактический размер,
