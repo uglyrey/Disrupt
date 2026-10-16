@@ -556,6 +556,8 @@ const knowledge = t => t.$('knowledge-dialog');
 const facts = t => [...knowledge(t).querySelectorAll('.profile-fact')];
 const offerSwitch = t => knowledge(t).querySelector('#profile-calendar-offer');
 const openKnowledge = async (t, ready = '#profile-calendar-offer') => {
+  // The menu entry does nothing until the sign-in has handed the profile code its api().
+  await t.until(() => t.w.BerestaProfile.state() !== null, 'profile started');
   const entry = t.$('open-profile'); assert.ok(entry, 'menu entry');
   entry.click();
   await t.until(() => knowledge(t) && knowledge(t).querySelector(ready), 'knowledge dialog');

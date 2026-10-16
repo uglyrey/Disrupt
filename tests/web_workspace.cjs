@@ -11,7 +11,7 @@ module.exports=async()=>{
   const url=new URL(input,w.location.href);
   if(url.pathname==='/health'||url.pathname==='/api/v1/provider/usage')return reply({simulation:true});
   if(url.pathname==='/api/v1/auth/me')return reply({username:'tester',csrf_token:'csrf'});
-  if(url.pathname==='/api/v1/categories')return reply([{id:'c1',name:'Research',version:1}]);
+  if(url.pathname==='/api/v1/categories')return reply([{id:'g1',name:'Общее',version:1,is_general:true},{id:'c1',name:'Research',version:1,is_general:false}]);
   if(url.pathname==='/api/v1/jobs')return reply([]);
   if(url.pathname==='/api/v1/notes')return reply([note]);
   if(url.pathname==='/api/v1/notes/n1')return reply(note);
