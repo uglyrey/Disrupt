@@ -28,7 +28,15 @@ def wait_until(resets_at, now=None):
 
 
 def saved_reply(result, now=None):
-    """Reply text for a saved capture, from the core response."""
+    """Reply text for a saved capture, from the core response. A note saved without AI names its category."""
+    text = saved_text(result, now)
+    category = result.get("category_name")
+    if isinstance(category, str) and category.strip():
+        text += "\nКатегория: " + category.strip()
+    return text
+
+
+def saved_text(result, now=None):
     if result.get("ai_limit_exceeded") is True:
         seconds = wait_until(result.get("ai_limit_resets_at"), now)
         if seconds is None:

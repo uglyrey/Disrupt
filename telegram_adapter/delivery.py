@@ -12,6 +12,8 @@ from .clients import RemoteFailure
 
 # Telegram accepts up to 4096 UTF-16 units; the core already trims processing replies to fit.
 TELEGRAM_TEXT_UNITS = 4096
+# The only address a «В Google Календарь» button may open: Google's own page for a new event.
+CALENDAR_PREFIX = "https://calendar.google.com/calendar/render?action=TEMPLATE&"
 
 
 def validate_result(delivery_id, body):
@@ -125,6 +127,24 @@ class DeliverySender:
                     raise ValueError()
                 label = entry.get("alt_label")
                 if label is not None and (not isinstance(label, str) or not 1 <= len(label) <= 40 or not label.isprintable()):
+                    raise ValueError()
+            links = item.get("links", [])
+            if not isinstance(links, list) or len(links) > 5:
+                raise ValueError()
+            units = len(item["text"].encode("utf-16-le")) // 2
+            for entry in links:
+                if not isinstance(entry, dict) or set(entry) != {"offset", "length", "url"}:
+                    raise ValueError()
+                offset, length, link = entry["offset"], entry["length"], entry["url"]
+                if (
+                    type(offset) is not int or type(length) is not int or offset < 0 or length < 1
+                    or offset + length > units
+                ):
+                    raise ValueError()
+                if (
+                    not isinstance(link, str) or not link.startswith(CALENDAR_PREFIX) or len(link) > 2000
+                    or not link.isascii() or not link.isprintable() or " " in link
+                ):
                     raise ValueError()
         except (ValueError, KeyError, TypeError, AttributeError):
             raise RemoteFailure("core_invalid_delivery", fatal=True) from None

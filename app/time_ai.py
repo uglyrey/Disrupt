@@ -35,8 +35,16 @@ def model_name(provider):
 class TimeResolver:
     """Works inside the worker process, which alone holds the model key (docs/model-budget-v1.md)."""
 
+    CHANNEL, STAGE = "telegram", "time"  # How the receipt of a call is labelled. The profile analyzer changes both.
+
     def __init__(self, worker):
         self.worker, self.settings = worker, worker.settings
+
+    @staticmethod
+    def prompt():
+        from app.providers import TIME_PROMPT
+
+        return TIME_PROMPT, TIME_MAX_TOKENS
 
     def resolve(self, user_id, operation_id, data):
         """The local time `YYYY-MM-DDTHH:MM` the answer in `data` means, or None. Never raises."""
@@ -50,10 +58,9 @@ class TimeResolver:
         return None
 
     def _resolve(self, worker, user_id, operation_id, data):
-        from app.providers import TIME_PROMPT
-
-        chars = len(TIME_PROMPT) + len(json.dumps(data, ensure_ascii=False)) + PROMPT_OVERHEAD_CHARS
-        estimate = llm_max_cost(self.settings, chars, TIME_MAX_TOKENS) if worker.router is not None else None
+        prompt, max_tokens = self.prompt()
+        chars = len(prompt) + len(json.dumps(data, ensure_ascii=False)) + PROMPT_OVERHEAD_CHARS
+        estimate = llm_max_cost(self.settings, chars, max_tokens) if worker.router is not None else None
         attempt = worker.begin_assistant_attempt(estimate)
         step, repeated, failed_over = 0, False, False
         while True:
@@ -131,8 +138,7 @@ class TimeResolver:
         if attempt.spend is not None:
             worker.usage.settle_stage(receipt_id, "llm", attempt.spend, error)
 
-    @staticmethod
-    def _start_receipt(db, operation_id, user_id, provider, attempt, suffix):
+    def _start_receipt(self, db, operation_id, user_id, provider, attempt, suffix):
         """The receipt is saved before the call, so from here the live call slot counts as spent."""
         from app.provider_router import FALLBACK as FALLBACK_LABEL
 
@@ -141,8 +147,8 @@ class TimeResolver:
         fallback = attempt.spend is not None
         label = FALLBACK_LABEL if fallback else "mock" if mock else getattr(provider, "provider_label", None) or "injected"
         row = ProviderUsage(
-            id=new_id(), user_id=user_id, operation_id=operation_id, request_id=f"{operation_id}:time{suffix}",
-            channel="telegram", kind="llm", model=model_name(provider), provider=label,
+            id=new_id(), user_id=user_id, operation_id=operation_id, request_id=f"{operation_id}:{self.STAGE}{suffix}",
+            channel=self.CHANNEL, kind="llm", model=model_name(provider), provider=label,
             is_test=db.get(User, user_id).is_test,
             tariff_version=ESTIMATE_VERSION if fallback else "mock-no-billing-v1" if mock else None, status="unknown",
             estimated_cost=attempt.spend.estimates.get("llm") if fallback else None,

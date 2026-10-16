@@ -35,6 +35,7 @@ from app.services import (
     cancel_item_reminders,
     cancel_reminder_deliveries,
     edit_note,
+    general_category_id,
     lock_account,
     owned_note,
     save_revision,
@@ -446,8 +447,9 @@ def complete_merge(db, job, note, new_items, now=None):
         raise MergeSourcesChanged()
     sources = [by_id[note_id] for note_id in ids]
 
-    if note.category_id is None:
-        votes = Counter(source.category_id for source in sources if source.category_id)
+    general_id = general_category_id(db, job.user_id)
+    if note.category_id in (None, general_id):  # The merge result takes the category most sources share.
+        votes = Counter(source.category_id for source in sources if source.category_id and source.category_id != general_id)
         if votes:
             top = max(votes.values())
             note.category_id = next(s.category_id for s in sources if s.category_id and votes[s.category_id] == top)

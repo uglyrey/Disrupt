@@ -47,6 +47,13 @@ class ConfirmButtons(StrictModel):
     edit_only: bool = False
 
 
+class TextLink(StrictModel):
+    """A clickable part of the message text: «Добавить в Google Календарь». Offset and length are UTF-16 units."""
+    offset: int = Field(ge=0, le=8192)
+    length: int = Field(ge=1, le=256)
+    url: str = Field(min_length=40, max_length=2000, pattern=r"^https://calendar\.google\.com/calendar/render\?action=TEMPLATE&")
+
+
 class Delivery(StrictModel):
     delivery_id: str
     lease_token: str
@@ -57,6 +64,8 @@ class Delivery(StrictModel):
     callback_token: str | None
     # Reminders whose time the text asks about, at most three. Empty for ordinary messages.
     confirm: list[ConfirmButtons] = Field(default_factory=list, max_length=3)
+    # Text links inside `text` (at most five, one per reminder line) when the account offers Google Calendar.
+    links: list[TextLink] = Field(default_factory=list, max_length=5)
 
 
 class ClaimResponse(StrictModel):

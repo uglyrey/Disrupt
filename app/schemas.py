@@ -344,6 +344,11 @@ class ReminderResponse(StrictModel):
     previous_attempt_unknown: bool
     # ask or unclear: the time was a guess and the person has not said «Верно» yet. Empty otherwise.
     time_check: Literal["ask", "unclear", "confirmed", "corrected"] | None = None
+    # Google Calendar page with the event filled in. Set only for a coming reminder when the account offers the calendar
+    # (`calendar_offer`) and the reminder is not an advance one (docs/profile-v1.md).
+    calendar_url: str | None = None
+    # The advance reminder «Через час: ...» carries the id of the main reminder it belongs to.
+    advance_of: str | None = None
 
 
 class ReminderTimeRequest(StrictModel):
@@ -443,6 +448,8 @@ class CategoryResponse(StrictModel):
     id: str
     name: str
     version: int
+    # «Общее»: it cannot be renamed or deleted.
+    is_general: bool = False
 
 
 class ConclusionResponse(ProposedConclusion):
@@ -562,6 +569,8 @@ class TelegramCaptureResponse(StrictModel):
     ai_limit_resets_at: str | None = None
     # True once: the account has no time zone and was never asked. The bot then asks with city buttons.
     ask_timezone: bool = False
+    # A note saved without AI is already in a category («Общее»); the bot names it in its reply.
+    category_name: str | None = None
 
 
 class IntegrationErrorDetail(StrictModel):

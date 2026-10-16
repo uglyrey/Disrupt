@@ -29,6 +29,7 @@ from app.deliveries import (
 from app.integration import IntegrationRejection
 from app.limits import telegram_state
 from app.models import (
+    Category,
     Inbox,
     Item,
     LinkRequest,
@@ -40,9 +41,10 @@ from app.models import (
     User,
     new_id,
 )
+from app.profile import time_dayparts
 from app.reminder_confirm import answer_time, confirm_action, local_now_of, waiting_reminder
 from app.reminder_proposals import mentions_time
-from app.reminders import local_clock, reschedule, snooze_time
+from app.reminders import complete_reminder, local_clock, reschedule, snooze_time
 from app.schemas import (
     IntegrationError,
     LinkResponse,
@@ -187,7 +189,7 @@ def handle_telegram_action(db, body):
         reschedule(db, reminder, when, reminder.timezone, reminder.text, "telegram")
         return {"status": "snoozed", "local_time": local_clock(reminder)}
     if item is None:
-        reminder.status = "completed"
+        complete_reminder(db, reminder)
         return {"status": "completed"}
     note = db.scalar(select(Note).where(
         Note.id == item.note_id, Note.user_id == identity.user_id, Note.deleted_at.is_(None),
@@ -332,6 +334,8 @@ def build_router(database, settings):
             }
             if isinstance(result, Note) and body.processing_mode == "ai":
                 saved["ai_limit_exceeded"] = True  # Daily AI limit spent, saved without AI.
+            if isinstance(result, Note):
+                saved["category_name"] = db.scalar(select(Category.name).where(Category.id == result.category_id))
             db.flush()  # The stored capture counts in the remaining units.
             saved["ask_timezone"] = zone_question_due(db, identity.user_id)
             return {**saved, **telegram_state(db, settings, identity.user_id)}
@@ -410,9 +414,11 @@ def build_router(database, settings):
         identity = telegram_identity(db, body)
         replayed = db.scalar(select(Inbox.id).where(Inbox.bot_id == body.bot_id, Inbox.update_id == body.update_id))
         row = None if replayed else waiting_reminder(db, identity.user_id, body.reminder_id, time.time())
+        dayparts = time_dayparts(db, identity.user_id)
         if (
             row is not None and row.generation == body.generation
-            and parse_words(body.text, local_now_of(row, time.time()))[0] is None and not mentions_time(body.text)
+            and parse_words(body.text, local_now_of(row, time.time()), dayparts)[0] is None
+            and not mentions_time(body.text, dayparts)
         ):
             return {"status": "not_time"}
 

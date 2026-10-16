@@ -10,11 +10,12 @@ from app.analytics import record_event
 from app.config import Settings
 from app.models import LoginSession, User
 from app.policy import POLICY_VERSION
+from app.profile import profile_state
 from app.security import COOKIE_NAME, has_usable_password, hash_token
 from app.timezones import valid_zone
 
 
-def user_payload(user: User, csrf: str) -> dict:
+def user_payload(user: User, csrf: str, db=None) -> dict:
     return {
         "id": user.id,
         "username": user.username,
@@ -24,6 +25,9 @@ def user_payload(user: User, csrf: str) -> dict:
         "has_password": has_usable_password(user.password_hash),
         "deletion_requested": user.deletion_requested_at is not None,
         "timezone": user.timezone if valid_zone(user.timezone) else None,
+        # Whether the web shows the questionnaire «Знакомство» (new), and whether the calendar link is offered (docs/profile-v1.md).
+        "profile_state": profile_state(db, user.id) if db is not None else "new",
+        "calendar_offer": user.calendar_offer,
     }
 
 
@@ -55,4 +59,4 @@ def create_session(db, response: Response, user: User, request, settings: Settin
         max_age=settings.session_seconds,
         path="/",
     )
-    return user_payload(user, csrf)
+    return user_payload(user, csrf, db)

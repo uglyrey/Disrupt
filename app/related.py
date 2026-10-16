@@ -79,7 +79,9 @@ class NoteDoc:
 
 
 class Index:
-    def __init__(self, docs):
+    def __init__(self, docs, neutral_category=None):
+        # Sharing «Общее» says nothing about two notes, so that category earns no bonus.
+        self.neutral_category = neutral_category
         self.docs = {doc.id: doc for doc in docs}
         counts, self.surface = {}, {}
         for doc in self.docs.values():
@@ -116,7 +118,7 @@ class Index:
             for other_id, theirs in self.postings.get(root, ()):
                 if other_id != note_id and (allowed is None or other_id in allowed):
                     found[other_id] = found.get(other_id, 0.0) + mine * theirs
-        if base.category_id is not None:
+        if base.category_id is not None and base.category_id != self.neutral_category:
             for other_id in found:
                 if self.docs[other_id].category_id == base.category_id:
                     found[other_id] += CATEGORY_BONUS
@@ -137,8 +139,8 @@ class Index:
         return sorted(found, key=lambda other: (-found[other], -docs[other].updated_at, other))
 
 
-def build_index(docs):
-    return Index(docs)
+def build_index(docs, neutral_category=None):
+    return Index(docs, neutral_category)
 
 
 def related_notes(index, note_id, limit=5, min_score=MIN_SCORE):
