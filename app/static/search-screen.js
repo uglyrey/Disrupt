@@ -16,7 +16,7 @@
       const rows = await api('/api/v1/categories');
       if (ticket !== run || account !== epoch || !visible()) return;
       const value = get('find-category').value;
-      get('find-category').replaceChildren(new Option('Все категории',''),new Option('Без категории','none'));
+      get('find-category').replaceChildren(new Option('Все категории',''));
       for (const row of rows) get('find-category').append(new Option(row.name,row.id));
       get('find-category').value = value;
       get('find-query').focus();
