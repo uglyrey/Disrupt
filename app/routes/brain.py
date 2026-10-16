@@ -10,7 +10,7 @@ from app.models import Item, Note, User
 from app.notes_manage import manual_edges
 from app.related import MIN_SCORE, NoteDoc, build_index, graph_edges, related_notes
 from app.security import get_login_session
-from app.services import owned_note
+from app.services import general_category_id, owned_note
 from app.task_due import resolve_due
 from app.timezones import effective_zone
 
@@ -62,7 +62,7 @@ def build_router(database, settings):
         session = get_login_session(request, db)
         owned_note(db, note_id, session.user_id)
         docs = load_docs(db, session.user_id, must_include=note_id)
-        index = build_index(docs)
+        index = build_index(docs, general_category_id(db, session.user_id))
         by_id = {doc.id: doc for doc in docs}
         return {"note_id": note_id, "related": [
             {
@@ -78,7 +78,7 @@ def build_router(database, settings):
     def graph(request: Request, limit: int = Query(200, ge=1, le=CORPUS_LIMIT), db=Depends(database)):
         session = get_login_session(request, db)
         docs = load_docs(db, session.user_id)
-        index = build_index(docs)
+        index = build_index(docs, general_category_id(db, session.user_id))
         nodes = docs[:limit]  # Newest first, the same order the query used.
         return {
             "nodes": [

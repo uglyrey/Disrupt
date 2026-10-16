@@ -55,7 +55,7 @@ def test_prompt_asks_for_a_task_and_no_longer_forbids_reminders():
     assert "не создавай напоминания" not in lowered
     assert "напомни" in lowered and "remind me" in lowered and "будильник" in lowered
     assert "due_text" in SYSTEM_PROMPT and "Не придумывай даты" in SYSTEM_PROMPT
-    assert len(SYSTEM_PROMPT) <= 3779  # 3436 before the model counted deadlines itself (reminder-confirm-v1), plus 10%
+    assert len(SYSTEM_PROMPT) <= 4155  # 3778 before the profile rule (profile-v1), plus 10%
 
 
 # Grounding
@@ -133,9 +133,10 @@ def test_telegram_reply_names_the_reminder_with_the_change_link(reminders):
     delivery = claim(client).json()["items"][0]
     # «Завтра в 10» has no daypart, the parser is unsure and the model gave no time, so the person is asked.
     lines = delivery["text"].split("\n")
-    assert lines[-1] == (
-        "Напоминание поставлено: завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно?"
+    assert lines[-3] == (
+        "Напоминание поставлено: завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно? Добавить в Google Календарь"
     )
+    assert lines[-1].startswith("Категория: ")
 
 
 def test_two_requests_give_two_reminders_and_a_short_list(reminders):
@@ -145,10 +146,10 @@ def test_two_requests_give_two_reminders_and_a_short_list(reminders):
     rows = auto_rows(app)
     assert [r.text for r in rows] == ["Завтра в 10 позвонить маме", "Послезавтра в 12 оплатить счёт"]
     text = claim(client).json()["items"][0]["text"]
-    tail = text.split("\n\n")[-1].split("\n")
+    tail = text.split("\n\n")[-2].split("\n")
     assert tail[0] == "Напоминания поставлены:"
-    assert tail[1] == "• завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно?"
-    assert tail[2] == "• послезавтра в 12:00 по Москве, «Послезавтра в 12 оплатить счёт»"
+    assert tail[1] == "• завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно? Добавить в Google Календарь"
+    assert tail[2] == "• послезавтра в 12:00 по Москве, «Послезавтра в 12 оплатить счёт» Добавить в Google Календарь"
     assert tail[3].startswith("Изменить: ")
 
 
@@ -204,7 +205,8 @@ def test_request_with_an_unusable_time_gets_the_default_time_and_a_question(remi
     (row,) = auto_rows(app)
     assert row.time_check == "unclear" and row.status == "confirmed"
     (item,) = claim(client).json()["items"]
-    assert item["text"].startswith("Не понял, когда напомнить. Поставил на ") and item["text"].endswith("Верно?")
+    assert item["text"].startswith("Не понял, когда напомнить. Поставил на ") and item["text"].endswith(
+        "Верно? Добавить в Google Календарь")
     assert [(c["reminder_id"], c["generation"]) for c in item["confirm"]] == [(row.id, 1)]
     with app.state.sessions() as db:
         assert [n.markdown for n in db.scalars(select(Note))].count("Напомни вчера в 10 позвонить маме") == 1

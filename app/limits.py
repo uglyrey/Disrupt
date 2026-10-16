@@ -8,11 +8,12 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, select
 
-from app.models import AssistantRequest, Capture, User
+from app.models import AssistantRequest, Capture, User, UserProfile
 
 # Stored in the capture_saved event, so a replay of the same request knows it was saved without AI.
 LIMIT_OUTCOME = "ai_limit"
 ASSISTANT_UNIT_COST = 1
+PROFILE_UNIT_COST = 1  # One run of the questionnaire «Знакомство» (docs/profile-v1.md)
 
 
 def capture_cost(settings, input_kind, audio_seconds=None):
@@ -45,6 +46,15 @@ def assistant_units_used(db, settings, user_id, now=None):
     )
 
 
+def profile_units_used(db, settings, user_id, now=None):
+    """Units spent today on turning questionnaire answers into a profile. Only paid runs are recorded."""
+    moments = db.scalar(select(UserProfile.unit_times).where(UserProfile.user_id == user_id))
+    if not moments:
+        return 0
+    start, end = day_window(settings, now)
+    return sum(1 for moment in moments if start.timestamp() <= moment < end.timestamp()) * PROFILE_UNIT_COST
+
+
 def units_used(db, settings, user_id, now=None):
     """Units of today's AI captures and assistant requests. Manual captures are free."""
     start, end = day_window(settings, now)
@@ -56,7 +66,7 @@ def units_used(db, settings, user_id, now=None):
     audio = db.scalars(select(Capture.audio_seconds).where(*today, Capture.input_kind == "audio")).all()
     return (
         texts * capture_cost(settings, "text") + sum(capture_cost(settings, "audio", s) for s in audio)
-        + assistant_units_used(db, settings, user_id, now)
+        + assistant_units_used(db, settings, user_id, now) + profile_units_used(db, settings, user_id, now)
     )
 
 

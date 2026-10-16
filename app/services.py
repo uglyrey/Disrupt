@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
@@ -14,6 +14,7 @@ from app.audio_contracts import AUDIO_MEDIA_TYPES, MAX_AUDIO_BYTES, MAX_AUDIO_SE
 from app.integration import IntegrationRejection
 from app.limits import LIMIT_OUTCOME, capture_cost, within_daily_limit
 from app.models import (
+    GENERAL_CATEGORY,
     Capture,
     Category,
     Item,
@@ -27,10 +28,12 @@ from app.models import (
     User,
     new_id,
 )
+from app.profile import time_dayparts
 from app.reminder_proposals import propose_reminder
 from app.timezones import effective_zone
 
 MAX_CATEGORIES = 100
+GENERAL_LOCKED_TEXT = "Категорию «Общее» нельзя удалить или переименовать"
 MAX_ITEMS = 30
 
 # Paging never needs to go further. A larger offset is cut to this, and the page is empty.
@@ -112,6 +115,7 @@ def capture_text(db, user_id, text, key, settings, *, processing_mode="ai", chan
             markdown=text,
             conclusions=[],
             version=1,
+            category_id=general_category_id(db, user_id),
         )
     else:
         result = Job(id=new_id(), capture_id=capture.id, user_id=user_id, provider=settings.provider)
@@ -210,6 +214,7 @@ def create_audio_capture(
         note = Note(
             id=new_id(), capture_id=capture_id, user_id=user_id, provider="manual", conclusions=[], version=1,
             title="Голосовая запись без ИИ", markdown="Запись сохранена без ИИ. Расшифровку можно добавить вручную.",
+            category_id=general_category_id(db, user_id),
         )
         db.add(note)
         db.flush()
@@ -454,9 +459,10 @@ def reminder_proposals(db, user_id, items, settings=None, now=None):
     )))
     zone = effective_zone(db.get(User, user_id), settings)
     now = now or datetime.now(UTC)
+    dayparts = time_dayparts(db, user_id)  # The person's own «утром», «после пар» and so on, if they gave them.
     proposals = {}
     for item in tasks:
-        proposal = None if item["id"] in taken else propose_reminder(item["due_text"], now, zone)
+        proposal = None if item["id"] in taken else propose_reminder(item["due_text"], now, zone, dayparts)
         if proposal:
             proposals[item["id"]] = proposal
     return proposals
@@ -552,7 +558,25 @@ def owned_category(db, category_id, user_id):
 
 
 def category_view(category):
-    return {"id": category.id, "name": category.name, "version": category.version}
+    return {"id": category.id, "name": category.name, "version": category.version, "is_general": category.is_general}
+
+
+def general_category(db, user_id):
+    """The «Общее» category of the account. It exists from the account's first moment; this makes up for a gap."""
+    category = db.scalar(select(Category).where(Category.user_id == user_id, Category.is_general.is_(True)))
+    if category is not None:
+        return category
+    category = db.scalar(select(Category).where(Category.user_id == user_id, Category.name == GENERAL_CATEGORY))
+    if category is None:
+        category = Category(user_id=user_id, name=GENERAL_CATEGORY, version=1)
+        db.add(category)
+    category.is_general = True
+    db.flush()
+    return category
+
+
+def general_category_id(db, user_id):
+    return general_category(db, user_id).id
 
 
 def ensure_category(db, user_id, name, *, best_effort=False):
@@ -566,7 +590,7 @@ def ensure_category(db, user_id, name, *, best_effort=False):
     for category in categories:
         if category.name.casefold() == name.casefold():
             return category
-    if len(categories) >= MAX_CATEGORIES:
+    if sum(1 for c in categories if not c.is_general) >= MAX_CATEGORIES:  # «Общее» does not count
         if best_effort:
             return None
         raise HTTPException(429, "Можно создать не больше 100 категорий")
@@ -618,13 +642,15 @@ def resolve_ai_category(db, user_id, proposed, known):
     for category in rows:
         if category_key(category.name) == key:
             return category
-    if len(rows) >= MAX_AI_CATEGORIES:
+    if sum(1 for c in rows if not c.is_general) >= MAX_AI_CATEGORIES:
         return None
     return ensure_category(db, user_id, name, best_effort=True)
 
 
 def rename_category(db, category, name, version):
     lock_account(db, category.user_id)
+    if category.is_general:
+        raise HTTPException(409, GENERAL_LOCKED_TEXT)
     conflict = next(
         (
             c
@@ -650,12 +676,14 @@ def rename_category(db, category, name, version):
 
 
 def delete_category(db, category, version):
-    """Delete a category. Its notes and items stay and move to "no category".
+    """Delete a category. Its notes and items stay and move to «Общее».
 
     Each note goes through advance_note, so its version and revision history stay consistent.
     """
     user_id = category.user_id
     lock_account(db, user_id)
+    if category.is_general:
+        raise HTTPException(409, GENERAL_LOCKED_TEXT)
     current = db.scalar(select(Category.version).where(Category.id == category.id, Category.user_id == user_id))
     if current is None:
         db.rollback()
@@ -666,13 +694,14 @@ def delete_category(db, category, version):
     notes = db.scalars(
         select(Note).where(Note.user_id == user_id, Note.category_id == category.id).order_by(Note.id)
     ).all()
+    general_id = general_category_id(db, user_id)
     for note in notes:
-        advance_note(db, note, note.version, category_id=None)
+        advance_note(db, note, note.version, category_id=general_id)
         record_event(db, user_id, "category_changed", f"{note.id}:{note.version}")
         db.flush()
         save_revision(db, note)
     db.execute(
-        update(Item).where(Item.user_id == user_id, Item.category_id == category.id).values(category_id=None),
+        update(Item).where(Item.user_id == user_id, Item.category_id == category.id).values(category_id=general_id),
         execution_options={"synchronize_session": False},
     )
     record_event(db, user_id, "category_deleted", f"{category.id}:{current}")
@@ -681,7 +710,9 @@ def delete_category(db, category, version):
 
 
 def change_note_category(db, note, category_id, version):
-    if category_id is not None:
+    if category_id is None:
+        category_id = general_category_id(db, note.user_id)  # Every note has a category: «Общее» when none is chosen.
+    else:
         owned_category(db, category_id, note.user_id)
     advance_note(db, note, version, category_id=category_id)
     confirm_structure(db, note)
@@ -794,8 +825,8 @@ def search_notes(db, user_id, *, q=None, category_id=None, channel=None, input_k
     if q and "\x00" in q:
         raise HTTPException(422, "Уберите нулевой символ из поиска")
     statement = select(Note).where(Note.user_id == user_id, Note.deleted_at.is_(None))
-    if category_id == "none":
-        statement = statement.where(Note.category_id.is_(None))
+    if category_id == "none":  # Old clients: the former filter «Без категории» is now «Общее».
+        statement = statement.where(or_(Note.category_id.is_(None), Note.category_id == general_category_id(db, user_id)))
     elif category_id is not None:
         owned_category(db, category_id, user_id)
         statement = statement.where(Note.category_id == category_id)
