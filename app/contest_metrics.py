@@ -99,7 +99,7 @@ def report(db, start, end, *, source="all", channel="all", counted_components=("
     if first > last or (last - first).days >= 366:
         raise ValueError("Invalid contest period")
     low, high = midnight(first), min(midnight(last + timedelta(days=1)), math.nextafter(now, math.inf))
-    qualified = first_targets(db, high, source=source, channel=channel)
+    qualified = first_targets(db, high, source=source)
     active = defaultdict(set)
     events = (
         select(ProductEvent.user_id, ProductEvent.name, ProductEvent.occurred_at)

@@ -220,7 +220,7 @@ def aggregate(db, start, end, channel, source, key, *, usage_limit=50, usage_off
     first, last = period(start, end, now)
     observed_end = math.nextafter(now, math.inf)
     low, high = midnight(first), min(midnight(last + timedelta(days=1)), observed_end)
-    qualified = first_targets(db, high, source=source, channel=channel)
+    qualified = first_targets(db, high, source=source)
     horizon = min(midnight(last + timedelta(days=9)), observed_end)
     candidates = or_(
         and_(User.first_login_at >= low, User.first_login_at < high),
