@@ -128,6 +128,7 @@ function showUser(user) {
   if (policy) policy.hidden = user.policy_current !== false;
   if (deletion) deletion.hidden = user.deletion_requested !== true;
   window.BerestaTimezone?.start(user,api);
+  window.BerestaProfile?.start(user,api);
 }
 // Everything the app loads right after a person gets in, by password, by Telegram or from a saved session.
 async function enterApp(user) {

@@ -1,0 +1,47 @@
+/* «Знакомство» and «Что beresta знает обо мне». Buttons come from buttons.css. */
+.profile-dialog{width:min(560px,calc(100vw - 32px));max-height:min(88vh,760px);display:none;flex-direction:column}
+.profile-dialog[open]{display:flex}
+.profile-dialog .dialog-heading h2{font-size:24px;line-height:1.25;letter-spacing:-.4px}
+.profile-dialog .dialog-heading h2:focus{outline:none}
+.profile-progress{display:flex;align-items:center;gap:12px;margin:4px 0 14px}
+.profile-progress progress{flex:1 1 auto;min-width:0;height:8px;border:0;border-radius:999px;overflow:hidden;background:#e3eadc;accent-color:#345943;appearance:none;-webkit-appearance:none}
+.profile-progress progress::-webkit-progress-bar{background:#e3eadc;border-radius:999px}
+.profile-progress progress::-webkit-progress-value{background:#345943;border-radius:999px}
+.profile-progress progress::-moz-progress-bar{background:#345943;border-radius:999px}
+.profile-count-text{flex:none;font-size:13px;font-weight:600;color:#38523f}
+.profile-body{min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.profile-dialog#knowledge-dialog[open]{display:block;overflow-y:auto;overscroll-behavior:contain}
+.profile-lead{margin:8px 0;font-size:16px;line-height:1.6;color:#24352d}
+.profile-dialog p.profile-privacy{margin:14px 0 0;padding:12px 14px;border-radius:10px;background:#f1f5ec;font-size:13px;line-height:1.55;color:#3d5144}
+.profile-question{display:block;margin:6px 0 10px!important;font-size:17px!important;font-weight:600;line-height:1.5;color:#24352d}
+.profile-dialog textarea{display:block;width:100%;min-height:140px;resize:vertical}
+.profile-counter{margin:6px 0 0;text-align:right}
+.profile-foot{margin-top:18px}
+.profile-status{min-height:1.4em;margin:10px 0 0;font-size:13px}
+.profile-status:empty{min-height:0;margin:0}
+.profile-channel{margin:8px 0 0;padding:0;border:0;min-width:0}
+.profile-legend{padding:0;font-size:16px;font-weight:600;color:#24352d}
+.profile-dialog label.profile-radio{display:flex;align-items:center;gap:10px;min-height:44px;margin:6px 0 0;padding:6px 12px;border:1px solid #cbd7c6;border-radius:10px;background:#fff;font-size:15px;font-weight:600;color:#24352d;cursor:pointer}
+.profile-radio input{flex:none;width:20px;height:20px;margin:0;accent-color:#345943}
+.profile-radio:has(input:checked){border-color:#345943;background:#f1f5ec}
+.profile-radio:has(input:focus-visible){outline:2px solid #2f6b46;outline-offset:2px}
+.profile-hint{margin:10px 0 0;line-height:1.55}
+.profile-know-channel{margin-top:22px;padding-top:16px;border-top:1px solid #e3e7dd}
+.profile-confirm,.profile-warning{display:flex;flex-wrap:wrap;align-items:center;gap:10px;width:100%;margin-top:14px;padding:12px 14px;border-radius:10px;background:#f5f2e8}
+.profile-confirm-text,.profile-warning p{flex:1 1 100%;margin:0;font-size:14px;color:#3a3220}
+.profile-facts{margin:12px 0 0;padding:0;list-style:none}
+.profile-fact{margin:8px 0 0;padding:12px 14px;border:1px solid #e3e8de;border-radius:12px;background:#fbfcf8}
+.profile-fact-text{display:block;font-size:15px;line-height:1.55;overflow-wrap:anywhere;color:#24352d}
+.profile-fact-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.profile-fact textarea{min-height:64px}
+.profile-tools{margin-top:18px}
+.calendar-link{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.reminder-actions .calendar-link{margin-left:auto}
+@media(max-width:640px){
+  .profile-dialog{width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:none;margin:0;padding:18px 16px calc(16px + env(safe-area-inset-bottom));border:0;border-radius:0;overflow:hidden}
+  .profile-body{flex:1 1 auto}
+  .profile-foot{position:sticky;bottom:0;margin-top:12px;padding-top:10px;background:var(--paper,#fffef9)}
+  .profile-foot button{flex:1 1 auto}
+  .profile-dialog .dialog-heading h2{font-size:21px}
+  .reminder-actions .calendar-link{margin-left:0}
+}

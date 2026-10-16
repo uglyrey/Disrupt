@@ -181,6 +181,17 @@
       return whenShort(local,row.timezone) + (row.timezone === defaultZone() ? '' : ` (${zoneShort(row.timezone)})`);
     } catch (_) { return `${row.scheduled_at} · ${row.timezone}`; }
   }
+  // A ready Google Calendar event. Only a link to Google is drawn; anything else is dropped.
+  function calendarLink(value) {
+    if (typeof value !== 'string' || !value) return null;
+    let url;
+    try { url = new URL(value); } catch (_) { return null; }
+    if (url.protocol !== 'https:' || !['calendar.google.com','www.google.com'].includes(url.hostname)) return null;
+    const link = node('a','В Google Календарь','button-link small calendar-link');
+    link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.dataset.action = 'calendar';
+    const hint = node('span',' (откроется в новой вкладке)','sr-only'); link.append(hint);
+    return link;
+  }
   function drawRows() {
     $('reminders-list').replaceChildren();
     if (!rows.length) $('reminders-list').append(node('p','Напоминаний нет','muted reminders-empty'));
@@ -206,7 +217,9 @@
       // A time that was a guess waits for the person: a small note next to «Изменить», no new dialog.
       const guess = row.status === 'confirmed' && ['ask','unclear'].includes(row.time_check) && Date.parse(row.scheduled_at) > Date.now();
       if (guess) actions.append(node('span','Проверьте время','reminder-check'));
-      actions.append(edit,cancel); card.append(actions); $('reminders-list').append(card);
+      actions.append(edit,cancel);
+      const calendar = calendarLink(row.calendar_url); if (calendar) actions.append(calendar);
+      card.append(actions); $('reminders-list').append(card);
     }
     drawTelegram(); controls();
   }
