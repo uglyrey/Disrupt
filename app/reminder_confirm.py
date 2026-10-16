@@ -13,6 +13,7 @@ from sqlalchemy import select
 
 from app.integration import IntegrationRejection
 from app.models import Item, Note, Reminder
+from app.profile import time_dayparts
 from app.reminder_proposals import label_for, mentions_time
 from app.reminders import instant_of, reschedule
 from app.time_check import ASK, CONFIRMED, CORRECTED, NEEDS_CHECK, parse_words, read_model_time
@@ -133,7 +134,8 @@ def answer_time(db, user_id, reminder_id, generation, text, ai_value=None, now=N
     if row is None or row.generation != generation:
         raise expired()
     local_now = local_now_of(row, now)
-    guess, certain, others = parse_words(text, local_now)
+    dayparts = time_dayparts(db, user_id)
+    guess, certain, others = parse_words(text, local_now, dayparts)
     stamp = instant_of(guess, row.timezone) if guess is not None else None
     if stamp is not None and stamp > now:
         if certain:
@@ -150,6 +152,6 @@ def answer_time(db, user_id, reminder_id, generation, text, ai_value=None, now=N
     if stamp is not None and stamp > now:
         apply_time(db, row, stamp, CORRECTED)
         return {"status": "set", "label": time_label(row, now)}
-    if ai_value is None and defer is not None and mentions_time(text) and defer(row):
+    if ai_value is None and defer is not None and mentions_time(text, dayparts) and defer(row):
         return {"status": "pending"}
     return {"status": "unclear"}

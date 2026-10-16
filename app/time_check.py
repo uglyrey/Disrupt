@@ -39,11 +39,14 @@ def read_model_time(value, local_now, *, skew=timedelta(0)):
     return moment if local_now - skew < moment <= local_now + MAX_AHEAD else None
 
 
-def parse_words(text, local_now):
-    """Our parser's answer for a phrase: (best guess or None, certain, other readings). Past readings are dropped."""
+def parse_words(text, local_now, dayparts=None):
+    """Our parser's answer for a phrase: (best guess or None, certain, other readings). Past readings are dropped.
+
+    `dayparts` are the person's own times of day from the questionnaire (see reminder_proposals.parse_due_text_detailed)."""
     if not isinstance(text, str) or not text.strip():
         return None, False, []
-    detail = reminder_proposals.parse_due_text_detailed(text, local_now)
+    parse = reminder_proposals.parse_due_text_detailed
+    detail = parse(text, local_now, dayparts) if dayparts else parse(text, local_now)
     guess = detail.get("result")
     if not isinstance(guess, datetime) or guess <= local_now:
         guess = None
@@ -59,7 +62,7 @@ def other_reading(chosen, *candidates):
     return None
 
 
-def decide(words, model_value, local_now):
+def decide(words, model_value, local_now, dayparts=None):
     """Combine the parser's reading of `words` with the model's `due_at` (either may be missing).
 
     Both agree to the minute: confirmed, even if the parser alone would have doubted (two independent readings
@@ -69,7 +72,7 @@ def decide(words, model_value, local_now):
     """
     local_now = local_now.replace(second=0, microsecond=0)
     model = read_model_time(model_value, local_now)
-    guess, certain, others = parse_words(words, local_now)
+    guess, certain, others = parse_words(words, local_now, dayparts)
     if model is not None:
         if guess == model:
             return Reading(model, CONFIRMED)
