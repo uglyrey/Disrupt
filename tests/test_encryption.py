@@ -223,6 +223,7 @@ EXPECTED_COLUMNS = {
     "reminders.text", "inbox.response", "outbox.message_text", "assistant_requests.question",
     "assistant_requests.result", "admin_accounts.totp_secret", "feedback.subject", "feedback.description",
     "feedback.steps", "feedback.expected", "feedback.contact", "note_images.data", "time_requests.answer",
+    "user_profiles.answers", "user_profiles.facts", "user_profiles.prefs",
 }
 
 

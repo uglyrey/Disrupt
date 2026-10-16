@@ -52,9 +52,14 @@ def _target(column, value, label):
     return crypto.encrypt_text(value, label)
 
 
+def primary_of(table):
+    """Единственный столбец первичного ключа: `id` почти везде, `user_id` у профиля."""
+    return next(iter(table.primary_key.columns))
+
+
 def _batches(db, table, column, *, lock=True):
     """Страницы по первичному ключу. Строки блокируются, чтобы не затереть правку приложения."""
-    primary = table.c["id"]
+    primary = primary_of(table)
     last = None
     while True:
         count = 10 if isinstance(column.type, EncryptedBinary) else BATCH
@@ -87,7 +92,7 @@ def encrypt_database(sessions):
                     except crypto.EncryptionError:
                         counts["errors"] += 1
                         continue
-                    db.execute(table.update().where(table.c["id"] == row_id).values({column.name: new}))
+                    db.execute(table.update().where(primary_of(table) == row_id).values({column.name: new}))
                     counts["rotated" if state == "old" else "encrypted"] += 1
                 db.commit()
         report[label] = counts

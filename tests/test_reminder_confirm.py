@@ -187,7 +187,7 @@ def test_the_model_sees_the_local_clock_and_the_prompt_stays_short():
     context = json.loads(structure_context(["Работа"], "Europe/Moscow", datetime(2026, 10, 15, 5, 47, tzinfo=MOSCOW)))
     assert (context["today"], context["now"], context["weekday"], context["timezone"]) == (
         "2026-10-15", "05:47", "четверг", "Europe/Moscow")
-    assert len(SYSTEM_PROMPT) <= 3436 * 1.1
+    assert len(SYSTEM_PROMPT) <= 3778 * 1.1  # 3778 before the profile rule (profile-v1)
     assert "due_at" in SYSTEM_PROMPT and "09:00" in SYSTEM_PROMPT and "null" in SYSTEM_PROMPT
     assert "now" in SYSTEM_PROMPT.splitlines()[1] and '"due_at":null' in SYSTEM_PROMPT
     assert len(TIME_PROMPT) < 1000
@@ -410,7 +410,7 @@ def test_worker_disagreement_sets_the_model_time_and_asks(notes):
     assert row.time_check == ASK and row.time_alt is not None
     assert datetime.fromtimestamp(row.time_alt, MOSCOW).replace(tzinfo=None) == tomorrow(10)
     (delivery,) = claim(client).json()["items"]
-    assert delivery["text"].endswith("Напоминание поставлено: завтра в 11:00 по Москве, «Позвонить маме». Верно?")
+    assert "Напоминание поставлено: завтра в 11:00 по Москве, «Позвонить маме». Верно? Добавить в Google Календарь" in delivery["text"]
     assert delivery["confirm"] == [{"reminder_id": row.id, "generation": 1, "alt_label": "В 10:00", "edit_only": False}]
 
 
@@ -471,7 +471,7 @@ def test_one_guessed_reminder_asks_verno_with_one_pair_and_the_other_reading(not
     ids2 = {"user": user, "note": note_id}
     (reminder_id,) = add_reminders(app, ids2, 1)
     (item,) = claim(client).json()["items"]
-    assert "Напоминание поставлено: " in item["text"] and item["text"].endswith("«Дело 1». Верно?")
+    assert "Напоминание поставлено: " in item["text"] and "«Дело 1». Верно? Добавить в Google Календарь" in item["text"]
     assert [(c["reminder_id"], c["generation"]) for c in item["confirm"]] == [(reminder_id, 1)]
     assert item["confirm"][0]["alt_label"].startswith("В ")
 

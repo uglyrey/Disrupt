@@ -43,6 +43,8 @@ class AssistantContext:
 
     notes: list
     items: list
+    # What the person's questionnaire turned into (app/profile.py). Sent as data next to the notes, never quoted from.
+    profile: dict | None = None
 
     @property
     def note_ids(self):

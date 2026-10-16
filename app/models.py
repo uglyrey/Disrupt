@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     UniqueConstraint,
+    event,
     false,
     true,
 )
@@ -67,6 +68,8 @@ class User(Base):
     timezone_source: Mapped[str | None] = mapped_column(String(16), nullable=True)  # auto, manual, telegram
     # When the Telegram bot asked for the zone. It asks once on its own.
     timezone_asked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Offer the «Добавить в Google Календарь» link when a reminder is created (docs/profile-v1.md).
+    calendar_offer: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
 
 
 class LoginSession(Base):
@@ -271,6 +274,8 @@ class Category(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(100))
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # «Общее»: every account has exactly one. It cannot be renamed or deleted and takes every note without a category.
+    is_general: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
 
 class Item(Base):
@@ -319,6 +324,8 @@ class Reminder(Base):
     time_check: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # The other reading of an unclear time (UTC timestamp), offered as a button. Empty when there is none.
     time_alt: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # The advance reminder «Через час: ...» points at the main reminder it belongs to (docs/profile-v1.md).
+    advance_of: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
 
 class Inbox(Base):
@@ -520,6 +527,34 @@ class TimeRequest(Base):
     finished_at: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class UserProfile(Base):
+    """What the AI knows about one person, after the one-time questionnaire «Знакомство» (docs/profile-v1.md).
+
+    No row means the person was never asked (`new`). The API process writes the answers, the worker, which alone holds
+    the model key, turns them into facts and structured hints. Answers, facts and hints are encrypted at rest and are
+    never read by the admin side. `unit_times` holds only the moments when an AI call was paid for.
+    """
+
+    __tablename__ = "user_profiles"
+    __table_args__ = (
+        CheckConstraint("state IN ('declined', 'pending', 'ready', 'failed')", name="ck_user_profiles_state"),
+        Index("ix_user_profiles_state_lease", "state", "lease_until"),
+    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    state: Mapped[str] = mapped_column(String(16))
+    answers: Mapped[dict | None] = mapped_column(EncryptedJSON("user_profiles.answers"), nullable=True)
+    facts: Mapped[list | None] = mapped_column(EncryptedJSON("user_profiles.facts"), nullable=True)
+    prefs: Mapped[dict | None] = mapped_column(EncryptedJSON("user_profiles.prefs"), nullable=True)
+    answers_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    unit_times: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # The person has answered the offer to create the suggested categories (created or skipped).
+    categories_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    updated_at: Mapped[float] = mapped_column(Float, default=time.time)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
+
 class AssistantRequest(Base):
     """One AI assistant action (ask, recommend, digest). The worker leases it like a job."""
 
@@ -588,3 +623,13 @@ class RequestError(Base):
 # Register the independent feedback and admin tables for Alembic metadata.
 from app.admin_models import AdminAccount, AdminAudit, AdminSession  # noqa: E402, F401
 from app.feedback_models import Feedback  # noqa: E402, F401
+
+GENERAL_CATEGORY = "Общее"
+
+
+@event.listens_for(User, "after_insert")
+def create_general_category(mapper, connection, user):
+    """Every account gets «Общее» the moment it exists, however it was created (docs/profile-v1.md)."""
+    connection.execute(Category.__table__.insert().values(
+        id=new_id(), user_id=user.id, name=GENERAL_CATEGORY, version=1, is_general=True,
+    ))

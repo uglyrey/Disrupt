@@ -20,6 +20,7 @@ from app.providers import (
     ASK_PROMPT,
     ASSISTANT_RULES,
     DIGEST_PROMPT,
+    PROFILE_PROMPT,
     RECOMMEND_PROMPT,
     SYSTEM_PROMPT,
 )
@@ -66,7 +67,7 @@ def _windows(text):
 
 
 def _prompt_windows():
-    prompts = (SYSTEM_PROMPT, ASSISTANT_RULES, ASK_PROMPT, RECOMMEND_PROMPT, DIGEST_PROMPT)
+    prompts = (SYSTEM_PROMPT, ASSISTANT_RULES, ASK_PROMPT, RECOMMEND_PROMPT, DIGEST_PROMPT, PROFILE_PROMPT)
     return frozenset().union(*(_windows(_words(prompt)) for prompt in prompts))
 
 

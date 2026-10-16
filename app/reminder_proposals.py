@@ -13,6 +13,9 @@ Rules in short.
 - Spoken times in words and colloquial forms are read too, see docs/time-parsing-v2.md. A spoken time is never
   dropped: if it cannot be read, `parse_due_text_detailed` says `time_spoken` and gives no result instead of 09:00.
 - An hour 1-11 with no daypart and no 24h form («в четыре», «в 4:30») has two readings and is `certain: False`.
+- A person who took the questionnaire «Знакомство» may have personal times (`dayparts`, see app/profile.py): «утром»,
+  «днём», «вечером», «на выходных», and «после пар» / «после работы» (only when set). They replace the defaults above, and
+  the morning time is also the time of a day named without any hour. Without `dayparts` nothing here changes.
 """
 
 import calendar
@@ -70,6 +73,14 @@ MINUTES_BEFORE = {
 HOUR_CARDINAL = {**{w: v for w, v in UNIT_WORDS.items() if v > 1}, "десять": 10, "одиннадцать": 11,
                  "двенадцать": 12, "час": 1}
 MAX_AHEAD = timedelta(days=366 * 2)
+# The words of the daypart times a person can set for themselves, by the key of their profile.
+PERSONAL_WORD = {
+    "утром": "morning", "утра": "morning", "утро": "morning",
+    "днем": "day", "дня": "day",
+    "вечером": "evening", "вечера": "evening", "вечер": "evening",
+}
+AFTER_STUDY = re.compile(r"\bпосле\s+(?:пар|учебы|занятий|лекций|уроков|универа|университета|школы|института|колледжа)\b")
+AFTER_WORK = re.compile(r"\bпосле\s+(?:работы|смены|службы)\b")
 
 RELATIVE = re.compile(
     r"\bчерез\s+(?:(?P<n>\d{1,3})\s*)?"
@@ -297,7 +308,28 @@ class Spec(NamedTuple):
         return [morning, evening] if self.hour >= 7 else [evening, morning]
 
 
-def read_time(text):
+def personal_times(dayparts):
+    """The person's own times as {key: (hour, minute)}. Accepts (hour, minute) pairs or «HH:MM»; bad values are dropped."""
+    found = {}
+    for key, value in (dayparts or {}).items():
+        if isinstance(value, str):
+            match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", value)
+            value = (int(match[1]), int(match[2])) if match else None
+        if isinstance(value, (tuple, list)) and len(value) == 2 and all(type(n) is int for n in value) \
+                and 0 <= value[0] <= 23 and 0 <= value[1] <= 59:
+            found[key] = (value[0], value[1])
+    return found
+
+
+def personal_phrase(text, personal):
+    """(key, time) of «после пар» or «после работы» when the person set a time for it, else None."""
+    for key, pattern in (("after_study", AFTER_STUDY), ("after_work", AFTER_WORK)):
+        if key in personal and pattern.search(text):
+            return key, personal[key]
+    return None
+
+
+def read_time(text, personal=None):
     daypart_match = DAYPART.search(text)
     daypart = daypart_match[1] if daypart_match else None
     special = NOON_MIDNIGHT.search(text)
@@ -316,16 +348,20 @@ def read_time(text):
     lunch = LUNCH.search(text)
     if lunch:
         return Spec(True, 15 if AFTER_LUNCH.search(text) else 13, 0, daypart)
+    phrase = personal_phrase(text, personal or {})
+    if phrase:
+        return Spec(True, phrase[1][0], phrase[1][1], daypart)
     if daypart in DAYPART_HOUR:
-        return Spec(True, DAYPART_HOUR[daypart], 0, daypart)
+        own = (personal or {}).get(PERSONAL_WORD.get(daypart))
+        return Spec(True, own[0], own[1], daypart) if own else Spec(True, DAYPART_HOUR[daypart], 0, daypart)
     if daypart or UNREAD_TIME.search(text):
         return Spec(True, None, 0, daypart)  # "ночью" without an hour is too vague; unread words are not dropped
     return Spec(False, None, 0, daypart)
 
 
-def find_time(text):
+def find_time(text, personal=None):
     """Return (hour, minute, found, daypart, is_midnight). found with hour None means an unusable time."""
-    spec = read_time(text)
+    spec = read_time(text, personal)
     hour = spec.readings()[0] if spec.hour is not None else None
     return hour, spec.minute, spec.found, spec.daypart, spec.midnight
 
@@ -359,14 +395,15 @@ def nearest_day(now, hour, minute, weekdays):
     return None
 
 
-def mentions_time(value):
+def mentions_time(value, dayparts=None):
     """True when the text names some time, usable or not. Tells «no time given» from «time that cannot be used»."""
     if not isinstance(value, str) or not value.strip():
         return False
     text = normalize(value)
     patterns = (RELATIVE, ISO_DATE, NAMED_DATE, DOT_DATE, SLASH_DATE, MONTH_DAY, CLOCK, HOUR, DAYPART,
                 NOON_MIDNIGHT, LUNCH, WEEKEND, WEEK_END, DAY_WORD, PAST_DAY, UNREAD_TIME)
-    return any(pattern.search(text) for pattern in patterns)
+    return any(pattern.search(text) for pattern in patterns) or \
+        personal_phrase(text, personal_times(dayparts)) is not None
 
 
 def month_day_candidate(number, hour, minute, now):
@@ -399,8 +436,11 @@ def pick_moment(day, spec, hour, minute, now):
     return moments[0], moments[1:]
 
 
-def parse_due_text_detailed(due_text, now):
+def parse_due_text_detailed(due_text, now, dayparts=None):
     """Parse a quoted deadline against a naive local wall clock `now`.
+
+    `dayparts` are the person's own times of day ({key: "HH:MM"} or {key: (hour, minute)}, keys morning, day, evening,
+    after_study, after_work, weekend). They replace the default times of those words; absent, the defaults stay.
 
     Returns {"result": naive datetime or None, "certain": bool, "time_spoken": bool, "alternatives": [datetime]}.
     `time_spoken` is True when the phrase names a time of day, even one that could not be read: then `result` is
@@ -409,9 +449,10 @@ def parse_due_text_detailed(due_text, now):
     """
     if not isinstance(due_text, str) or not due_text.strip() or "\x00" in due_text:
         return detailed_answer()
+    personal = personal_times(dayparts)
     text = normalize(due_text)
     if PAST_DAY.search(text):
-        return detailed_answer(time_spoken=read_time(text).found)
+        return detailed_answer(time_spoken=read_time(text, personal).found)
     today = now.date()
     base, rest = parse_relative(text, now)
     if isinstance(base, datetime):
@@ -423,14 +464,17 @@ def parse_due_text_detailed(due_text, now):
         date_value, found_date, rest = find_date(text, today)
     if found_date and date_value is None:
         return detailed_answer()
-    spec = read_time(rest)
+    spec = read_time(rest, personal)
     if spec.found and spec.hour is None:
         return detailed_answer(time_spoken=True)
     weekend, week_end = WEEKEND.search(rest), WEEK_END.search(rest)
     if spec.found:
         hour, minute = spec.readings()[-1], spec.minute  # the latest reading decides which day is still possible
     else:
-        hour, minute = (10, 0) if weekend else (18, 0) if week_end else (DEFAULT_HOUR, 0)
+        hour, minute = (
+            personal.get("weekend", (10, 0)) if weekend else (18, 0) if week_end
+            else personal.get("morning", (DEFAULT_HOUR, 0))
+        )
     day, explicit = None, True
     if isinstance(date_value, int):
         day = month_day_candidate(date_value, hour, minute, now)
@@ -473,9 +517,9 @@ def parse_due_text_detailed(due_text, now):
     return detailed_answer(result, not spec.ambiguous, spec.found, alternatives)
 
 
-def parse_due_text(due_text, now):
+def parse_due_text(due_text, now, dayparts=None):
     """Parse a quoted deadline against a naive local wall clock `now`. Returns a naive datetime or None."""
-    return parse_due_text_detailed(due_text, now)["result"]
+    return parse_due_text_detailed(due_text, now, dayparts)["result"]
 
 
 def label_for(result, now):
@@ -493,7 +537,7 @@ def label_for(result, now):
     return f"{day} в {result:%H:%M}"
 
 
-def propose_reminder(due_text, now, timezone):
+def propose_reminder(due_text, now, timezone, dayparts=None):
     """Proposal for the confirmation form or None. `now` is an aware datetime, `timezone` an IANA name.
 
     `certain` is False when the time had two readings or was a guess; `alternatives` lists the other readings
@@ -503,7 +547,7 @@ def propose_reminder(due_text, now, timezone):
     if now.tzinfo is None:
         now = now.replace(tzinfo=UTC)
     local_now = now.astimezone(zone)
-    detailed = parse_due_text_detailed(due_text, local_now.replace(tzinfo=None))
+    detailed = parse_due_text_detailed(due_text, local_now.replace(tzinfo=None), dayparts)
     result = detailed["result"]
     if result is None:
         return None

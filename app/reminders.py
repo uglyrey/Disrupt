@@ -13,18 +13,43 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
+from app.calendar_link import calendar_url, note_link
 from app.config import Settings
-from app.models import Capture, Item, Outbox, Reminder, User
+from app.models import Capture, Item, Note, Outbox, Reminder, User
+from app.profile import time_prefs
 from app.reminder_proposals import mentions_time, sentence_spans
 from app.services import cancel_reminder_deliveries, lock_account, owned_note
 from app.time_check import ASK, CORRECTED, NEEDS_CHECK, UNCLEAR, Reading, decide
 from app.timezones import effective_zone, zone_guessed
 
 AUTO_KEY_PREFIX = "ai:"
+ADVANCE_KEY_PREFIX = "adv:"
+ADVANCE_TEXT = "Через час: "
+ADVANCE_SECONDS = 3600
+EVENING_DEFAULT = (20, 0)
 MAX_REMINDER_TEXT = 1000
 
 
-def reminder_view(db, reminder):
+def calendar_link_for(db, reminder, settings, *, offer=None):
+    """The «Добавить в Google Календарь» link of a reminder that is still ahead, or None.
+
+    None when the account switched the offer off, for an advance reminder («Через час: ...») and for a reminder that
+    is no longer pending in the future."""
+    if offer is None:
+        offer = db.scalar(select(User.calendar_offer).where(User.id == reminder.user_id))
+    if (
+        not offer or reminder.advance_of is not None or reminder.status != "confirmed"
+        or reminder.scheduled_at <= time.time()
+    ):
+        return None
+    capture_id = db.scalar(select(Note.capture_id).where(Note.id == reminder.note_id, Note.user_id == reminder.user_id))
+    if capture_id is None:
+        return None
+    origin = (settings or Settings()).public_origin
+    return calendar_url(reminder.text, reminder.scheduled_at, note_link(origin, capture_id, reminder.id))
+
+
+def reminder_view(db, reminder, settings=None):
     delivery = db.scalar(select(Outbox.status).where(
         Outbox.reminder_id == reminder.id, Outbox.user_id == reminder.user_id,
         Outbox.generation == reminder.generation,
@@ -43,6 +68,8 @@ def reminder_view(db, reminder):
         "delivery_status": delivery,
         "previous_attempt_unknown": previous_unknown,
         "time_check": reminder.time_check,
+        "calendar_url": calendar_link_for(db, reminder, settings),
+        "advance_of": reminder.advance_of,
     }
 
 
@@ -100,6 +127,7 @@ def create_reminder(db, user_id, note_id, body, key):
     db.add(row)
     db.flush()
     record_event(db, user_id, "reminder_confirmed", f"{row.id}:1", subject_id=row.note_id)
+    sync_advance(db, row)
     return row
 
 
@@ -122,6 +150,97 @@ def reschedule(db, row, scheduled_at, timezone, text, channel="web"):
     # The person (or a snooze) chose this time, so a pending question about the old one is settled.
     row.time_check, row.time_alt = (CORRECTED if row.time_check in NEEDS_CHECK else row.time_check), None
     record_event(db, row.user_id, "reminder_confirmed", f"{row.id}:{row.generation}", channel, subject_id=row.note_id)
+    sync_advance(db, row)
+
+
+def advance_moment(main_at, zone, prefs, now):
+    """When the advance reminder («Через час: ...») for a main reminder at `main_at` goes out, or None to skip it.
+
+    One hour before. Only a time beresta chose moves: if it falls into the person's quiet hours it goes to the end of
+    the quiet hours of that day when that is still before the main time, otherwise to the person's evening of the day
+    before. If neither fits (already past, or inside quiet hours again) there is no advance reminder.
+    """
+    zone = ZoneInfo(zone)
+    when = datetime.fromtimestamp(main_at - ADVANCE_SECONDS, zone)
+    if when.timestamp() <= now:
+        return None
+    quiet = prefs.get("quiet")
+    if not quiet:
+        return when.timestamp()
+    start, end = minutes_of(quiet[0]), minutes_of(quiet[1])
+    minute = when.hour * 60 + when.minute
+    if not in_interval(minute, start, end):
+        return when.timestamp()
+    over_midnight = start > end
+    day = when.date() + timedelta(days=1) if over_midnight and minute >= start else when.date()
+    opens = datetime.combine(day, clock(*quiet[1]), tzinfo=zone)
+    if now < opens.timestamp() < main_at:
+        return opens.timestamp()
+    evening = (prefs.get("dayparts") or {}).get("evening", EVENING_DEFAULT)
+    before = datetime.combine(datetime.fromtimestamp(main_at, zone).date() - timedelta(days=1), clock(*evening), tzinfo=zone)
+    quiet_then = in_interval(before.hour * 60 + before.minute, start, end)
+    if now < before.timestamp() < main_at and not quiet_then:
+        return before.timestamp()
+    return None
+
+
+def sync_advance(db, main, now=None):
+    """Keep the advance reminder of `main` in step with it (docs/profile-v1.md).
+
+    For a person whose profile says `reminder_style = twice` every main reminder has a second one an hour earlier.
+    Moving the main one moves it, cancelling or finishing the main one cancels it. The advance reminder is a row of
+    its own (`advance_of` = the main id) so it is delivered like any other. The caller owns the transaction.
+    Returns the advance reminder or None.
+    """
+    if main.advance_of is not None:
+        return None
+    now = time.time() if now is None else now
+    key = ADVANCE_KEY_PREFIX + main.id
+    existing = db.scalar(select(Reminder).where(Reminder.user_id == main.user_id, Reminder.idempotency_key == key))
+    prefs = time_prefs(db, main.user_id)
+    when = None
+    if prefs and prefs.get("style") == "twice" and main.status == "confirmed":
+        when = advance_moment(main.scheduled_at, main.timezone, prefs, now)
+    if when is None:
+        if existing is not None and existing.status == "confirmed":
+            cancel_deliveries_and_close(db, existing)
+        return None
+    text = (ADVANCE_TEXT + main.text)[:MAX_REMINDER_TEXT]
+    if existing is None:
+        existing = Reminder(
+            user_id=main.user_id, note_id=main.note_id, item_id=main.item_id, scheduled_at=when,
+            timezone=main.timezone, text=text, idempotency_key=key, advance_of=main.id,
+            creation_hash=hashlib.sha256(f"advance:{main.id}".encode()).hexdigest(), zone_guessed=main.zone_guessed,
+        )
+        db.add(existing)
+        db.flush()
+        return existing
+    if existing.status == "confirmed" and existing.scheduled_at == when and existing.text == text:
+        return existing
+    cancel_reminder_deliveries(db, existing.user_id, [existing.id])
+    existing.scheduled_at, existing.timezone, existing.text = when, main.timezone, text
+    existing.note_id, existing.item_id, existing.zone_guessed = main.note_id, main.item_id, main.zone_guessed
+    existing.status, existing.confirmed_at = "confirmed", time.time()
+    existing.generation += 1
+    return existing
+
+
+def cancel_deliveries_and_close(db, row):
+    cancel_reminder_deliveries(db, row.user_id, [row.id])
+    row.status = "cancelled"
+    row.generation += 1
+
+
+def complete_reminder(db, reminder):
+    """«Выполнено» on a reminder that has no task: it is finished together with its advance (or main) twin."""
+    reminder.status = "completed"
+    if reminder.advance_of is not None:
+        main = db.get(Reminder, reminder.advance_of)
+        if main is not None and main.user_id == reminder.user_id and main.status in {"confirmed", "sent", "unknown"}:
+            main.status = "completed"
+            sync_advance(db, main)
+    else:
+        sync_advance(db, reminder)
 
 
 def snooze_time(row, action, now):
@@ -206,6 +325,8 @@ def auto_reminders(db, note, settings=None, now=None, model_times=None):
     zone = effective_zone(user, settings)
     moment = now or datetime.now(UTC)
     local_now = moment.astimezone(ZoneInfo(zone)).replace(tzinfo=None)
+    prefs = time_prefs(db, note.user_id)
+    dayparts = prefs["dayparts"] if prefs else None  # The person's own «утром», «после пар» and so on.
     created = []
     for item in items:
         text = " ".join(item.text.split())[:MAX_REMINDER_TEXT].strip()
@@ -214,7 +335,7 @@ def auto_reminders(db, note, settings=None, now=None, model_times=None):
         key = AUTO_KEY_PREFIX + item.id
         if db.scalar(select(Reminder.id).where(Reminder.user_id == note.user_id, Reminder.idempotency_key == key)):
             continue
-        reading = decide(item.due_text, (model_times or {}).get(item.id), local_now)
+        reading = decide(item.due_text, (model_times or {}).get(item.id), local_now, dayparts)
         when, alt = reading_instants(reading, zone, moment.timestamp())
         if when is None:
             continue
@@ -223,6 +344,7 @@ def auto_reminders(db, note, settings=None, now=None, model_times=None):
         )
         if row is not None:
             created.append(row)
+            sync_advance(db, row, moment.timestamp())
     return created
 
 
@@ -251,17 +373,63 @@ def request_task_text(sentence, match):
     return rest[:1].upper() + rest[1:]
 
 
-def default_reminder_time(now, settings, zone=None):
+def in_interval(minute, start, end):
+    """Is the minute of the day in [start, end)? An interval with end <= start runs over midnight."""
+    return start <= minute < end if start < end else minute >= start or minute < end
+
+
+def minutes_of(clock_pair):
+    return clock_pair[0] * 60 + clock_pair[1]
+
+
+def awake_at(moment, prefs):
+    """Whether a reminder may reach the person at this local time, by their wake, sleep and quiet hours."""
+    minute = moment.hour * 60 + moment.minute
+    quiet = prefs.get("quiet")
+    start = minutes_of(prefs["wake"]) if prefs.get("wake") else minutes_of(quiet[1]) if quiet and quiet[0] > quiet[1] else DAY_START * 60
+    end = minutes_of(prefs["sleep"]) if prefs.get("sleep") else minutes_of(quiet[0]) if quiet and quiet[0] > quiet[1] else DAY_END * 60
+    if quiet and in_interval(minute, minutes_of(quiet[0]), minutes_of(quiet[1])):
+        return False
+    return in_interval(minute, start, end)
+
+
+def next_awake(moment, prefs):
+    """The first time from `moment` on when the person may be reminded. A day that opens late starts at their morning."""
+    probe = moment.replace(second=0, microsecond=0)
+    for _ in range(2 * 1440):
+        if awake_at(probe, prefs):
+            break
+        probe += timedelta(minutes=1)
+    else:
+        return None
+    hour, minute = prefs["dayparts"].get("morning", (MORNING_HOUR, 0)) if prefs.get("dayparts") else (MORNING_HOUR, 0)
+    morning = probe.replace(hour=hour, minute=minute)
+    # The window has just opened: the reminder waits for the person's morning when that is still in the window.
+    if not awake_at(probe - timedelta(minutes=1), prefs) and probe < morning and awake_at(morning, prefs):
+        return morning
+    return probe
+
+
+def default_reminder_time(now, settings, zone=None, prefs=None):
     """When to remind about a request that names no time, as an aware datetime in the account zone.
 
     Between 08:00 and 21:00 local time it is now plus NOTES_REMINDER_DEFAULT_DELAY (an hour by default).
     Earlier it is 09:00 the same morning, later it is 09:00 the next day. A delay of 0 turns this off.
+    With the person's profile (`prefs`, see app.profile.time_prefs) the waking hours are theirs: wake and sleep or quiet
+    hours instead of 08:00-21:00, and their morning instead of 09:00. The delay never lands in quiet hours.
     """
     delay = settings.reminder_default_delay_seconds
     if delay <= 0:
         return None
     zone = ZoneInfo(zone or settings.limit_timezone)
     local = now.astimezone(zone)
+    if prefs:
+        if awake_at(local, prefs):
+            target = local + timedelta(seconds=delay)
+            if target.second or target.microsecond:
+                target = target.replace(second=0, microsecond=0) + timedelta(minutes=1)
+            return target if awake_at(target, prefs) else next_awake(target, prefs)
+        return next_awake(local, prefs)
     if DAY_START <= local.hour < DAY_END:
         target = local + timedelta(seconds=delay)
         if target.second or target.microsecond:
@@ -318,6 +486,8 @@ def request_reminders(db, note, original, settings=None, now=None, model_times=N
     user = db.get(User, note.user_id)
     zone, guessed = effective_zone(user, settings), zone_guessed(user)
     local_now = now.astimezone(ZoneInfo(zone)).replace(tzinfo=None)
+    prefs = time_prefs(db, note.user_id)
+    dayparts = prefs["dayparts"] if prefs else None
     created = []
     for request in reminder_requests(db, note, original):
         if request["covered"]:
@@ -325,14 +495,14 @@ def request_reminders(db, note, original, settings=None, now=None, model_times=N
         sentence, task = request["sentence"], request["task"]
         reading = Reading(None)
         if task and task.due_text:
-            reading = decide(task.due_text, (model_times or {}).get(task.id), local_now)
+            reading = decide(task.due_text, (model_times or {}).get(task.id), local_now, dayparts)
         if reading.when is None:
-            reading = decide(sentence, None, local_now)
+            reading = decide(sentence, None, local_now, dayparts)
         when, alt = reading_instants(reading, zone, now.timestamp())
         check = reading.check
         if when is None:
-            named = bool(task and task.due_text) or mentions_time(sentence)
-            default = default_reminder_time(now, settings, zone)
+            named = bool(task and task.due_text) or mentions_time(sentence, dayparts)
+            default = default_reminder_time(now, settings, zone, prefs)
             if default is None or default.timestamp() <= now.timestamp():
                 continue
             when, alt, check = default.timestamp(), None, UNCLEAR if named else ASK
@@ -354,6 +524,7 @@ def request_reminders(db, note, original, settings=None, now=None, model_times=N
         row = add_auto_reminder(db, note, task, text, when, zone, guessed, check, alt if check == ASK else None)
         if row is not None:
             created.append(row)
+            sync_advance(db, row, now.timestamp())
     return created
 
 
@@ -377,4 +548,5 @@ def cancel_reminder(db, user_id, reminder_id, generation):
     row.status = "cancelled"
     row.generation += 1
     record_event(db, user_id, "reminder_cancelled", f"{row.id}:{row.generation}")
+    sync_advance(db, row)
     return row

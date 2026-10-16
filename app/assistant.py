@@ -27,6 +27,7 @@ from app.error_logging import log_error
 from app.fallback_budget import ESTIMATE_VERSION, PROMPT_OVERHEAD_CHARS, llm_max_cost
 from app.limits import ASSISTANT_UNIT_COST, day_window, within_daily_limit
 from app.models import AssistantRequest, Item, Note, ProviderUsage, User, new_id
+from app.profile import prompt_profile
 from app.provider_router import FALLBACK, PRIMARY
 from app.providers import (
     ASSISTANT_MAX_TOKENS,
@@ -247,10 +248,13 @@ def finish_request(worker, request_id, result, *, units=None):
 
 def build_context(db, row):
     if row.kind == "ask":
-        return context_for_ask(db, row.user_id, row.question or "", row.days or 90)
-    if row.kind == "recommend":
-        return context_for_recommend(db, row.user_id)
-    return context_for_digest(db, row.user_id, row.days or 7)
+        context = context_for_ask(db, row.user_id, row.question or "", row.days or 90)
+    elif row.kind == "recommend":
+        context = context_for_recommend(db, row.user_id)
+    else:
+        context = context_for_digest(db, row.user_id, row.days or 7)
+    context.profile = prompt_profile(db, row.user_id)
+    return context
 
 
 def model_name(provider):

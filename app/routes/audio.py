@@ -16,7 +16,7 @@ from app.account_timezone import zone_question_due
 from app.audio_storage import AudioStorageUnavailable, AudioTooLarge, UnsupportedAudio
 from app.integration import IntegrationRejection
 from app.limits import telegram_state
-from app.models import Capture, Job, Outbox, new_id
+from app.models import Capture, Category, Job, Note, Outbox, new_id
 from app.routes.internal import process_update, telegram_identity
 from app.schemas import TelegramOperation
 from app.security import get_login_session, require_internal_service
@@ -99,6 +99,10 @@ def build_router(database, settings, storage, create_audio_capture):
                 saved["note_url"] = settings.public_origin + "/?capture=" + saved["capture_id"]
                 if isinstance(job, Capture):
                     saved["ai_limit_exceeded"] = True  # Daily AI limit spent, the recording is kept without AI.
+                    saved["category_name"] = db.scalar(
+                        select(Category.name).join(Note, Note.category_id == Category.id)
+                        .where(Note.capture_id == job.id, Note.user_id == identity.user_id)
+                    )
                 db.flush()  # The stored recording counts in the remaining units.
                 saved["ask_timezone"] = zone_question_due(db, identity.user_id)
                 return {**saved, **telegram_state(db, settings, identity.user_id)}

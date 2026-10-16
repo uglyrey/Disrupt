@@ -44,7 +44,8 @@ def build_router(database):
     def categories(request: Request, db=Depends(database)):
         session = get_login_session(request, db)
         rows = db.scalars(
-            select(Category).where(Category.user_id == session.user_id).order_by(Category.name, Category.id)
+            select(Category).where(Category.user_id == session.user_id)
+            .order_by(Category.is_general.desc(), Category.name, Category.id)
         )
         return [category_view(category) for category in rows]
 

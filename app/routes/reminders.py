@@ -16,7 +16,7 @@ from app.security import get_login_session
 from app.services import MAX_OFFSET, owned_note
 
 
-def build_router(database):
+def build_router(database, settings):
     router = APIRouter(prefix="/api/v1", tags=["reminders"])
 
     @router.post(
@@ -39,12 +39,12 @@ def build_router(database):
         rows = db.scalars(select(Reminder).where(
             Reminder.note_id == note_id, Reminder.user_id == session.user_id,
         ).order_by(Reminder.scheduled_at, Reminder.id).offset(min(offset, MAX_OFFSET)).limit(limit))
-        return [reminder_view(db, row) for row in rows]
+        return [reminder_view(db, row, settings) for row in rows]
 
     @router.get("/reminders/{reminder_id}", response_model=ReminderResponse)
     def get_reminder(reminder_id: str, request: Request, db=Depends(database)):
         session = get_login_session(request, db)
-        return reminder_view(db, owned_reminder(db, reminder_id, session.user_id))
+        return reminder_view(db, owned_reminder(db, reminder_id, session.user_id), settings)
 
     @router.post("/notes/{note_id}/reminders", response_model=ReminderResponse, status_code=201)
     def add_reminder(
@@ -54,20 +54,20 @@ def build_router(database):
         session = get_login_session(request, db, write=True)
         row = create_reminder(db, session.user_id, note_id, body, idempotency_key)
         db.commit()
-        return reminder_view(db, row)
+        return reminder_view(db, row, settings)
 
     @router.patch("/reminders/{reminder_id}", response_model=ReminderResponse)
     def update_reminder(reminder_id: str, body: ReminderEdit, request: Request, db=Depends(database)):
         session = get_login_session(request, db, write=True)
         row = edit_reminder(db, session.user_id, reminder_id, body)
         db.commit()
-        return reminder_view(db, row)
+        return reminder_view(db, row, settings)
 
     @router.post("/reminders/{reminder_id}/cancel", response_model=ReminderResponse)
     def remove_reminder(reminder_id: str, body: ReminderCancel, request: Request, db=Depends(database)):
         session = get_login_session(request, db, write=True)
         row = cancel_reminder(db, session.user_id, reminder_id, body.generation)
         db.commit()
-        return reminder_view(db, row)
+        return reminder_view(db, row, settings)
 
     return router

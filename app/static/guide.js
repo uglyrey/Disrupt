@@ -13,6 +13,7 @@
   const PATH = '/api/v1/account/guides';
   const isPhone = () => (typeof window.matchMedia === 'function' ? window.matchMedia('(max-width:640px)').matches : false);
   const menus = () => window.BerestaMenus || null;
+  const profileBusy = () => Boolean(window.BerestaProfile && window.BerestaProfile.pending());
   const noteId = () => (typeof currentNote !== 'undefined' && currentNote ? currentNote.id : null);
 
   /* ---------- Is a target on the screen ---------- */
@@ -338,7 +339,9 @@
       if (shownThisLoad || active || guides[name].done) return false;
       const wait = Number.isFinite(window.guideDelayMs) ? window.guideDelayMs : TOURS[name].wait;
       await pause(wait);
-      if (shownThisLoad || active || !TOURS[name].ready(id)) return false;
+      // The «Знакомство» popup goes first. The tip waits until it is gone.
+      for (let i = 0; i < 600 && profileBusy(); i++) await pause(Number.isFinite(window.guideDelayMs) ? Math.max(window.guideDelayMs, 5) : 500);
+      if (shownThisLoad || active || profileBusy() || !TOURS[name].ready(id)) return false;
       return begin(name, id);
     } catch { return false; }
   }

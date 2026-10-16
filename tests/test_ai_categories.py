@@ -67,7 +67,7 @@ def test_ai_category_is_normalised_and_matches_existing_ignoring_case_and_yo(app
     existing = client.post("/api/v1/categories", json={"name": "Учёба"}).json()
     note = process(app, client, Proposes("учеба"))
     assert note["category_id"] == existing["id"]
-    assert [c["name"] for c in client.get("/api/v1/categories").json()] == ["Учёба"]
+    assert [c["name"] for c in client.get("/api/v1/categories").json()] == ["Общее", "Учёба"]
     note = process(app, client, Proposes("  финансы  "), key="ai-category-2")
     assert note["category_name"] == "Финансы"
 
@@ -76,8 +76,8 @@ def test_ai_category_rejects_bad_names_and_keeps_the_note(app, client):
     register(client)
     for index, name in enumerate(["12345", "«Работа»", "A" * 41, "https://example.com"]):
         note = process(app, client, Proposes(name), key=f"ai-bad-{index}")
-        assert note["category_id"] is None and note["category_name"] is None
-    assert client.get("/api/v1/categories").json() == []
+        assert note["category_name"] == "Общее"  # A name that cannot be used leaves the note in «Общее»
+    assert [c["name"] for c in client.get("/api/v1/categories").json()] == ["Общее"]
 
 
 def test_ai_category_stops_creating_new_ones_at_fifteen_but_reuses(app, client):
@@ -85,11 +85,11 @@ def test_ai_category_stops_creating_new_ones_at_fifteen_but_reuses(app, client):
     with app.state.sessions.begin() as db:
         db.add_all([Category(user_id=owner, name=f"Тема {chr(1040 + i)}") for i in range(MAX_AI_CATEGORIES)])
     note = process(app, client, Proposes("Новая сфера"))
-    assert note["category_id"] is None
-    assert len(client.get("/api/v1/categories").json()) == MAX_AI_CATEGORIES
+    assert note["category_name"] == "Общее"
+    assert len(client.get("/api/v1/categories").json()) == MAX_AI_CATEGORIES + 1  # «Общее» is not counted
     reused = process(app, client, Proposes("тема б"), key="ai-category-2")
     assert reused["category_name"] == "Тема Б"
-    assert len(client.get("/api/v1/categories").json()) == MAX_AI_CATEGORIES
+    assert len(client.get("/api/v1/categories").json()) == MAX_AI_CATEGORIES + 1
 
 
 def test_ai_category_below_fifteen_creates_a_new_broad_category(app, client):
@@ -99,7 +99,7 @@ def test_ai_category_below_fifteen_creates_a_new_broad_category(app, client):
     note = process(app, client, Proposes("путешествия"))
     assert note["category_name"] == "Путешествия"
     with app.state.sessions() as db:
-        assert len(db.scalars(select(Category).where(Category.user_id == owner)).all()) == MAX_AI_CATEGORIES
+        assert len(db.scalars(select(Category).where(Category.user_id == owner)).all()) == MAX_AI_CATEGORIES + 1
 
 
 def test_ai_category_survives_deleting_the_category_during_the_model_call(app, client):
@@ -114,8 +114,8 @@ def test_ai_category_survives_deleting_the_category_during_the_model_call(app, c
             return super().structure(text, categories=categories)
 
     note = process(app, client, Deleting())
-    assert note["category_id"] is None
-    assert client.get("/api/v1/categories").json() == []
+    assert note["category_name"] == "Общее"
+    assert [c["name"] for c in client.get("/api/v1/categories").json()] == ["Общее"]
 
 
 # Mock provider: simple keyword guess for the offline demo
@@ -168,7 +168,7 @@ def test_prompt_has_the_new_rules():
         "due_text содержит точную цитату срока",
     ]:
         assert fragment in SYSTEM_PROMPT, fragment
-    assert len(SYSTEM_PROMPT) <= 3779  # 3436 before the time rule (reminder-confirm-v1), plus 10%
+    assert len(SYSTEM_PROMPT) <= 4155  # 3778 before the profile rule (profile-v1), plus 10%
 
 
 def test_structure_context_is_json_data_with_local_date():

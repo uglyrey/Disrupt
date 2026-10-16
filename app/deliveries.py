@@ -12,11 +12,23 @@ from fastapi import HTTPException
 from sqlalchemy import and_, or_, select
 
 from app.analytics import record_event
+from app.calendar_link import LABEL, LINE_END
 from app.components import record as record_component
-from app.models import Capture, Item, Job, Note, Outbox, Reminder, TelegramIdentity, User
+from app.models import (
+    GENERAL_CATEGORY,
+    Capture,
+    Category,
+    Item,
+    Job,
+    Note,
+    Outbox,
+    Reminder,
+    TelegramIdentity,
+    User,
+)
 from app.reminder_confirm import MAX_BUTTON_REMINDERS, button_entries
 from app.reminder_proposals import label_for
-from app.reminders import AUTO_KEY_PREFIX, NOT_UNDERSTOOD, unscheduled_requests
+from app.reminders import AUTO_KEY_PREFIX, NOT_UNDERSTOOD, calendar_link_for, unscheduled_requests
 from app.security import hash_token
 from app.services import item_view, lock_account, reminder_proposals
 from app.time_check import ASK, NEEDS_CHECK, UNCLEAR
@@ -139,18 +151,59 @@ def short_task(text):
     return task if len(task) <= HINT_TASK_CHARS else task[:HINT_TASK_CHARS - 1].rstrip() + "…"
 
 
-def auto_reminder_hint(db, note, settings, now):
-    """The line for reminders the AI has set for this note, or an empty string. They are still ahead and can be changed.
-
-    Returns (text, ids): ids are the reminders (at most three) that the line asks «Верно?» about. The bot draws
-    «Верно» and «Изменить время» under the message for them.
-    """
-    rows = db.scalars(select(Reminder).where(
+def upcoming_auto_reminders(db, note, now):
+    """The reminders the AI has set for this note that are still ahead, soonest first."""
+    return db.scalars(select(Reminder).where(
         Reminder.note_id == note.id, Reminder.user_id == note.user_id, Reminder.status == "confirmed",
         Reminder.scheduled_at > now, Reminder.idempotency_key.like(AUTO_KEY_PREFIX + "%"),
     ).order_by(Reminder.scheduled_at, Reminder.id)).all()
+
+
+def offers_calendar(db, user_id):
+    return bool(db.scalar(select(User.calendar_offer).where(User.id == user_id)))
+
+
+def link_urls(db, user_id, reminder_ids, settings):
+    """Google Calendar address (or None) of each reminder id, in the given order."""
+    found = {row.id: row for row in db.scalars(select(Reminder).where(
+        Reminder.user_id == user_id, Reminder.id.in_(list(reminder_ids)),
+    ))}
+    return [
+        calendar_link_for(db, found[rid], settings, offer=True) if rid in found else None for rid in reminder_ids
+    ]
+
+
+def attach_links(text, urls, start=0):
+    """(text, links) with the clickable «Добавить в Google Календарь» of every line that ends with it.
+
+    The k-th such line (counted from character `start`) gets urls[k]. A line without an address loses the phrase, so no
+    dead text is left. Offsets are UTF-16 units, as Telegram wants them."""
+    out, links, slot = text[:start], [], 0
+    lines = text[start:].split("\n")
+    for index, line in enumerate(lines):
+        if line.endswith(LINE_END):
+            url = urls[slot] if slot < len(urls) else None
+            slot += 1
+            if url is None:
+                line = line[:-len(LINE_END)]
+            else:
+                links.append({"offset": utf16_units(out + line[:-len(LABEL)]), "length": utf16_units(LABEL), "url": url})
+        out += line + ("\n" if index < len(lines) - 1 else "")
+    return out, links
+
+
+def auto_reminder_hint(db, note, settings, now):
+    """The line for reminders the AI has set for this note, or an empty string. They are still ahead and can be changed.
+
+    Returns (text, ids, linked): ids are the reminders (at most three) that the line asks «Верно?» about. The bot draws
+    «Верно» and «Изменить время» under the message for them. When the account offers the calendar, every reminder line
+    ends with «Добавить в Google Календарь» and `linked` names those reminders in order of the lines.
+    """
+    rows = upcoming_auto_reminders(db, note, now)
     if not rows:
-        return "", []
+        return "", [], []
+    offer = offers_calendar(db, note.user_id)
+    end = LINE_END if offer else ""
     first = rows[0]
     link = settings.public_origin + "/?capture=" + note.capture_id + "&reminder=" + first.id
 
@@ -166,11 +219,14 @@ def auto_reminder_hint(db, note, settings, now):
     ids = [row.id for row in with_buttons]
     if len(rows) == 1:
         task = f"{when(first)}, «{short_task(first.text)}»"
+        linked = [first.id] if offer else []
         if first.time_check == UNCLEAR:
-            return f"Не понял, когда напомнить. Поставил на {task}. Верно?", ids
+            return f"Не понял, когда напомнить. Поставил на {task}. Верно?{end}", ids, linked
         if first.time_check == ASK:
-            return f"Напоминание поставлено: {task}. Верно?", ids
-        return f"Напоминание поставлено: {task}. Изменить: {link}", ids
+            return f"Напоминание поставлено: {task}. Верно?{end}", ids, linked
+        if offer:
+            return f"Напоминание поставлено: {task}.{end}\nИзменить: {link}", ids, linked
+        return f"Напоминание поставлено: {task}. Изменить: {link}", ids, linked
     numbered = len(with_buttons) > 1
     lines = []
     for row in rows[:HINT_LIST]:
@@ -182,18 +238,21 @@ def auto_reminder_hint(db, note, settings, now):
             line = f"• {line}. Проверьте время на сайте."
         else:
             line = f"• {line}"
-        lines.append(line)
+        lines.append(line + end)
     if len(rows) > HINT_LIST:
         lines.append(f"и ещё {len(rows) - HINT_LIST}")
-    return "Напоминания поставлены:\n" + "\n".join(lines) + f"\nИзменить: {link}", ids
+    linked = [row.id for row in rows[:HINT_LIST]] if offer else []
+    return "Напоминания поставлены:\n" + "\n".join(lines) + f"\nИзменить: {link}", ids, linked
 
 
 def reminder_line(db, note, settings, now=None):
-    """(text, ids) of the one line about reminders for a processed note. `ids` are the reminders it asks about."""
+    """(text, ids, linked) of the one line about reminders for a processed note.
+
+    `ids` are the reminders it asks «Верно?» about, `linked` the reminders whose line ends with the calendar link."""
     missed = NOT_UNDERSTOOD if unscheduled_requests(db, note) else ""
-    done, ids = auto_reminder_hint(db, note, settings, time.time() if now is None else now.timestamp())
+    done, ids, linked = auto_reminder_hint(db, note, settings, time.time() if now is None else now.timestamp())
     if done:
-        return done + ("\n" + missed if missed else ""), ids
+        return done + ("\n" + missed if missed else ""), ids, linked
     items = [item_view(item) for item in db.scalars(
         select(Item).where(Item.note_id == note.id, Item.user_id == note.user_id, Item.deleted_at.is_(None))
         .order_by(Item.position, Item.id)
@@ -210,8 +269,8 @@ def reminder_line(db, note, settings, now=None):
                 f"Предлагаю напоминание: {when}, «{short_task(item['text'])}». "
                 f"Подтвердить или изменить время: {link}"
             )
-            return line + ("\n" + missed if missed else ""), []
-    return missed, []
+            return line + ("\n" + missed if missed else ""), [], []
+    return missed, [], []
 
 
 def reminder_hint(db, note, settings, now=None):
@@ -221,13 +280,16 @@ def reminder_hint(db, note, settings, now=None):
     task whose deadline can be read, and nothing is stored: the link opens the note, where the user
     confirms or changes the time.
     """
-    return reminder_line(db, note, settings, now)[0]
+    return reminder_line(db, note, settings, now)[0].replace(LINE_END, "")
 
 
 def add_reminder_set_message(db, note, identity, settings):
     """A note saved without AI has no processing reply, so a reminder it got is confirmed in a short message."""
-    text, ids = reminder_line(db, note, settings)
+    text, ids, linked = reminder_line(db, note, settings)
     if text:
+        # The reminders of the calendar links come first, in the order of the lines. `button_entries` skips the ones
+        # that need no «Верно?», so the same list serves the buttons and the links.
+        ids = [*linked, *(rid for rid in ids if rid not in linked)]
         db.add(Outbox(
             user_id=identity.user_id, bot_id=identity.bot_id, chat_id=identity.chat_id, generation=1,
             status="pending", message_kind="reminder_set", message_text=text, message_reminders=ids or None,
@@ -244,9 +306,21 @@ def reminder_message_text(reminder, note):
     return head + clip(reminder.text.strip(), room) + source
 
 
-def processing_reply_text(note, hint=""):
-    """Reply text. The note part stays within 3500 UTF-16 units, the whole text within Telegram's 4096."""
-    tail = "\n\n" + hint if hint else ""
+def category_line(db, note):
+    """«Категория: Стартап». A note without a category is in «Общее»."""
+    name = db.scalar(select(Category.name).where(Category.id == note.category_id, Category.user_id == note.user_id))
+    return "Категория: " + (name or GENERAL_CATEGORY)
+
+
+def reply_tail(hint, category):
+    return "".join("\n\n" + part for part in (hint, category) if part)
+
+
+def processing_reply_text(note, hint="", category=""):
+    """Reply text. The note part stays within 3500 UTF-16 units, the whole text within Telegram's 4096.
+
+    The reminder line `hint` and the line `category` close the reply, so they are never cut."""
+    tail = reply_tail(hint, category)
     text = "Заметка готова.\n\n" + note.title + "\n\n" + note.markdown
     room = min(REPLY_UNITS, TELEGRAM_UNITS - utf16_units(tail) - utf16_units(REPLY_FOOTER))
     if utf16_units(text) > room:
@@ -333,6 +407,7 @@ def claim_deliveries(db, body, settings):
         ):
             continue
         message = row.message_kind is not None
+        links = []
         if message:
             if not message_deliverable(db, row, now):
                 row.status, row.error_code, row.message_text = "cancelled", "delivery_invalid", None
@@ -341,16 +416,25 @@ def claim_deliveries(db, body, settings):
             confirm = button_entries(
                 db, row.user_id, row.message_reminders or [], now, edit_only=row.message_kind == "reminder_time_edit",
             )
+            text = row.message_text
+            if row.message_kind == "reminder_set":
+                text, links = attach_links(text, link_urls(db, row.user_id, row.message_reminders or [], settings))
         else:
             target = current_target(db, row, now)
             if target is None:
                 continue
             reminder, note = target
             confirm = []
-            reply = None
-            if reminder is None:
-                reply, ids = reminder_line(db, note, settings)
+            if reminder is not None:
+                text = reminder_message_text(reminder, note)  # No calendar link when a reminder fires.
+            else:
+                reply, ids, linked = reminder_line(db, note, settings)
                 confirm = button_entries(db, row.user_id, ids, now)
+                category = category_line(db, note)
+                text = processing_reply_text(note, reply, category)
+                text, links = attach_links(
+                    text, link_urls(db, row.user_id, linked, settings), len(text) - len(reply_tail(reply, category)),
+                )
         lease = secrets.token_urlsafe(32)
         callback = secrets.token_urlsafe(32) if reminder is not None else None
         row.status, row.lease_token_hash = "leased", hash_token(lease)
@@ -360,12 +444,11 @@ def claim_deliveries(db, body, settings):
         results.append({
             "delivery_id": row.id, "lease_token": lease, "generation": row.generation,
             "chat_id": row.chat_id,
-            "text": row.message_text if message else reminder_message_text(reminder, note) if reminder is not None
-            else processing_reply_text(note, reply),
+            "text": text,
             "note_url": settings.public_origin + "/" if message else settings.public_origin
                         + "/?capture=" + note.capture_id
                         + ("&reminder=" + reminder.id if reminder is not None else ""), "callback_token": callback,
-            "confirm": confirm,
+            "confirm": confirm, "links": links,
         })
     db.flush()
     return {"items": results}

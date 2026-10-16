@@ -80,7 +80,7 @@
         chooseCategory(option.value,label);
       };
       item.append(button);
-      if (option.value !== '' && option.value !== 'none') {
+      if (option.value !== '' && !categories.find(category => category.id === option.value)?.is_general) {
         item.dataset.categoryId = option.value;
         button.setAttribute('aria-haspopup','menu');
         const more = document.createElement('button'); more.type = 'button'; more.className = 'category-more';

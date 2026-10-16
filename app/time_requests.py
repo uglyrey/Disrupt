@@ -12,6 +12,7 @@ from sqlalchemy import func, select, update
 from app.error_logging import log_error
 from app.integration import IntegrationRejection
 from app.models import Item, Outbox, TimeRequest
+from app.profile import prompt_dayparts, time_dayparts
 from app.providers import WEEKDAYS
 from app.reminder_confirm import answer_time, local_now_of, waiting_reminder
 from app.services import lock_account
@@ -87,11 +88,15 @@ def claim(worker):
 
 def prompt_data(db, row, text, local_now):
     item = db.get(Item, row.item_id) if row.item_id else None
-    return {
+    data = {
         "answer": text, "sentence": item.source_quote if item is not None else row.text,
         "reminder_text": row.text, "today": local_now.date().isoformat(), "weekday": WEEKDAYS[local_now.weekday()],
         "now": local_now.strftime("%H:%M"), "timezone": row.timezone,
     }
+    profile = prompt_dayparts(db, row.user_id)  # Only the person's own times of day, nothing else of the profile.
+    if profile:
+        data["user_profile"] = profile
+    return data
 
 
 def run_time_request_once(worker):
@@ -107,7 +112,7 @@ def run_time_request_once(worker):
             row = waiting_reminder(db, user_id, reminder_id, time.time())
             if row is not None and row.generation == generation:
                 local_now = local_now_of(row, time.time())
-                if parse_words(text, local_now)[0] is None:  # Our parser may read it by now: then no call is needed.
+                if parse_words(text, local_now, time_dayparts(db, user_id))[0] is None:  # Our parser may read it by now: then no call is needed.
                     data = prompt_data(db, row, text, local_now)
         ai_value = TimeResolver(worker).resolve(user_id, "rt:" + request_id, data) if data is not None else None
         with worker.sessions() as db:
