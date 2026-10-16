@@ -113,11 +113,8 @@
     cards('cards', [
       [dauLabel, count(c.dau)], ['Активные за период', count(c.unique_users)], ['Регистрации', count(c.registrations)],
       ['Новые пользователи', count(c.new_users)], ['Вернувшиеся пользователи', count(c.returning_users)],
-      ['Активация с ИИ', percent(c.ai_activation), ratio(c.ai_activation)],
-      ['Активация без ИИ', percent(c.manual_activation), ratio(c.manual_activation)],
       ['Сохранили запись', count(c.saved_users ?? 0), 'Уникальные пользователи за выбранный период'], ['Получили готовую заметку', count(c.ready_users ?? 0), 'Заметка создана за выбранный период'], ['Возвраты после активации', count(c.returns)],
     ]);
-    $('activation-pending').textContent = `Ожидают завершения окна активации: ${count(c.activation_pending)}.`;
     table('daily', ['Дата','Регистрации','DAU','Новые','Вернувшиеся','Сессии'], data.daily.map(d => [text(d.date), count(d.registrations), count(d.dau), count(d.new_users), count(d.returning_users), count(d.session_count)]));
     const labels = {registered:'Зарегистрировались',capture_saved:'Сохранили запись',note_opened:'Открыли результат',structure_checked:'Проверили структуру',returned:'Вернулись'};
     table('funnel', ['Шаг','Пользователи','Конверсия'], data.funnel.map(f => [labels[f.step] || text(f.step), count(f.users), percent(f.conversion) + ' · ' + ratio(f.conversion)]));
