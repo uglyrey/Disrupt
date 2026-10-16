@@ -229,6 +229,13 @@ class TelegramClient:
                 ],
                 [{"text": "Открыть напоминание", "url": item["note_url"]}],
             ]
+        links = item.get("links") or []
+        if links:
+            # «Добавить в Google Календарь» is a clickable part of the text, not a button.
+            payload["entities"] = [
+                {"type": "text_link", "offset": link["offset"], "length": link["length"], "url": link["url"]}
+                for link in links
+            ]
         result = {"status": "unknown", "telegram_message_id": None,
                   "error_code": "telegram_unknown", "retry_after_seconds": None}
         try:
