@@ -76,17 +76,18 @@
   function render(data, slice, currentOffset) {
     const contest = data.contest;
     if (contest) {
-      cards('contest-cards', [['Реальных пользователей к концу периода',count(contest.real_users)],
+      cards('contest-cards', [['Использовали хотя бы раз к концу периода',count(contest.real_users), 'Сохранили хотя бы одну запись. Просмотр результата не обязателен.'],
         ['Средний DAU за выбранные дни',number(contest.average_dau)],
         ['Учтённые обращения на DAU · среднесуточно',number(contest.average_calls_per_dau)]]);
-      $('contest-method').textContent = 'Целевой сценарий: сохранить запись и просмотреть готовую заметку. Тестовые аккаунты исключены. ' +
+      $('contest-method').textContent = 'Использование сервиса: сохранить запись хотя бы один раз. Просмотр и успешная обработка ИИ не обязательны. ' +
+        'Счётчик накопительный до конечной даты, веб и Telegram вместе. Канал фильтрует активность по дням. Регистрации без записи и тестовые аккаунты исключены. ' +
         'Числитель и знаменатель используют одну группу реальных пользователей. Нулевые дни входят в среднее. ' +
         (contest.preliminary ? 'Период ещё не завершён, показатели предварительные. ' : '') +
         (contest.component_method_pending ? 'Часть записанных этапов пока не включена в зачёт до согласования методики компонентов. ' : '') +
         'Версия ' + text(contest.method_version) + '.';
       table('contest-days',['Дата','DAU','Модельные вызовы','Учтённые обращения','Все записанные этапы','Обращения / DAU'],
         contest.daily.map(day=>[text(day.date),count(day.dau),count(day.model_calls),count(day.calls),count(day.recorded_calls),number(day.calls_per_dau)]));
-      table('traffic-sources',['Источник','Регистрации к концу периода','Прошли основной сценарий к концу периода'],
+      table('traffic-sources',['Источник','Регистрации к концу периода','Использовали хотя бы раз к концу периода'],
         contest.sources.map(row=>[text(row.source),count(row.registrations),count(row.real_users)]));
     }
     const budget = data.budget;
@@ -112,12 +113,9 @@
     cards('cards', [
       [dauLabel, count(c.dau)], ['Активные за период', count(c.unique_users)], ['Регистрации', count(c.registrations)],
       ['Новые пользователи', count(c.new_users)], ['Вернувшиеся пользователи', count(c.returning_users)],
-      ['Активация с ИИ', percent(c.ai_activation), ratio(c.ai_activation)],
-      ['Активация без ИИ', percent(c.manual_activation), ratio(c.manual_activation)],
-      ['Сохранили запись', count(c.saved_users ?? 0), 'Уникальные пользователи за выбранный период'], ['Получили готовую заметку', count(c.ready_users ?? 0), 'Заметка создана за выбранный период'], ['Попробовали основной функционал', count(c.completed_scenario), 'Сохранение и просмотр результата. Дополнительные функции не требуются.'], ['Возвраты после активации', count(c.returns)],
+      ['Сохранили запись', count(c.saved_users ?? 0), 'Уникальные пользователи за выбранный период'], ['Получили готовую заметку', count(c.ready_users ?? 0), 'Заметка создана за выбранный период'], ['Возвраты после активации', count(c.returns)],
     ]);
-    $('activation-pending').textContent = `Ожидают завершения окна активации: ${count(c.activation_pending)}.`;
-    table('daily', ['Дата','Регистрации','DAU','Новые','Вернувшиеся','Сессии','LLM','STT','LLM / DAU','Вызовы без полного usage'], data.daily.map(d => [text(d.date), count(d.registrations), count(d.dau), count(d.new_users), count(d.returning_users), count(d.session_count), money(d.llm_cost), money(d.stt_cost), money(d.llm_cost_per_dau), count(d.unknown_usage_calls)]));
+    table('daily', ['Дата','Регистрации','DAU','Новые','Вернувшиеся','Сессии'], data.daily.map(d => [text(d.date), count(d.registrations), count(d.dau), count(d.new_users), count(d.returning_users), count(d.session_count)]));
     const labels = {registered:'Зарегистрировались',capture_saved:'Сохранили запись',note_opened:'Открыли результат',structure_checked:'Проверили структуру',returned:'Вернулись'};
     table('funnel', ['Шаг','Пользователи','Конверсия'], data.funnel.map(f => [labels[f.step] || text(f.step), count(f.users), percent(f.conversion) + ' · ' + ratio(f.conversion)]));
     cards('retention', ['d1','d7'].map(key => [key.toUpperCase(), r[key].value === null ? 'Пока рано' : percent(r[key]),

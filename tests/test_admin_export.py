@@ -70,7 +70,7 @@ def test_archive_contains_the_agreed_files_and_download_headers(client, populate
     header = {name: files[name].splitlines()[0] for name in FILES if name.endswith(".csv")}
     assert header["daily.csv"] == ("date;dau;new_users;captures_text;captures_audio;captures_web;captures_telegram;"
                                    "ai_calls;ai_calls_per_dau;errors;counted_calls;recorded_calls;calls_per_dau")
-    assert header["users.csv"] == "user_id;registered_date;first_target_scenario_date;active_days;channel_mix;source"
+    assert header["users.csv"] == "user_id;registered_date;first_use_date;active_days;channel_mix;source"
     assert header["events.csv"] == "user_id;timestamp_utc;event;channel;source;operation_id;session_id;outcome;subject_id;capture_id"
     assert header["ai_calls.csv"] == ("timestamp_utc;user_id;kind;model;status;latency_ms;input_tokens;"
                                       "output_tokens;cost;operation_id;counted;capture_id;provider;currency;estimated_cost")
@@ -99,14 +99,14 @@ def test_users_are_pseudonymous_and_real_users_have_a_first_scenario_date(client
     _, files = archive(client)
     users = {row["user_id"]: row for row in table(files, "users.csv")}
     assert users[who(populated["ai"])] == {
-        "user_id": who(populated["ai"]), "registered_date": "2026-10-05", "first_target_scenario_date": "2026-10-05",
+        "user_id": who(populated["ai"]), "registered_date": "2026-10-05", "first_use_date": "2026-10-05",
         "active_days": "2", "channel_mix": "telegram:1|web:2", "source":"paid"}
-    assert users[who(populated["manual"])]["first_target_scenario_date"] == "2026-10-06"
+    assert users[who(populated["manual"])]["first_use_date"] == "2026-10-06"
     assert users[who(populated["manual"])]["active_days"] == "1"
     # Registered after the period, or marked as test: not in the file at all.
     assert who(populated["pending"]) not in users and who(populated["late_test"]) not in users
     # A person who never finished a scenario has no first-scenario date.
-    assert users[who(populated["was_test"])]["first_target_scenario_date"] == ""
+    assert users[who(populated["was_test"])]["first_use_date"] == ""
     assert all(name.startswith("user_") and len(name) == 37 for name in users)
 
 
@@ -215,7 +215,7 @@ def test_another_key_gives_other_pseudonyms(app_factory, client, populated, admi
 def test_readme_gives_the_contest_definitions_in_russian(client, populated):
     _, files = archive(client)
     text = files["README.txt"]
-    for phrase in ["Реальный пользователь", "хотя бы один целевой сценарий", "DAU", "Europe/Moscow", "Тестовые аккаунты",
+    for phrase in ["Реальный пользователь", "хотя бы одну запись", "DAU", "Europe/Moscow", "Тестовые аккаунты",
                    "псевдонимами", "HMAC-SHA256", "2026-10-05", "2026-10-06", "2026-10-07T09:00:00+00:00"]:
         assert phrase in text, phrase
     assert "—" not in text and "один и тот же псевдоним во всех файлах и во всех архивах" in text

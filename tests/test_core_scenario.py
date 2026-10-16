@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.admin_metrics import aggregate
 from app.analytics import record_event
-from app.contest_metrics import first_targets, report
+from app.contest_metrics import first_targets, report, target_completions
 from app.models import Capture, Note, ProductEvent, ProviderUsage, User, new_id
 
 
@@ -63,8 +63,8 @@ def test_simple_manual_and_ai_notes_qualify_without_any_other_feature(app):
         assert value.cards.completed_scenario == 2  # Saving before the selected window is still valid.
         assert value.cards.dau == 2
         assert value.cards.saved_users == value.cards.ready_users == 0
-        assert set(first_targets(db, at("2026-10-07"))) == {manual.id, ai.id}
-        assert unfinished.id not in first_targets(db, at("2026-10-07"))
+        assert set(first_targets(db, at("2026-10-07"))) == {manual.id, ai.id, unfinished.id}
+        assert set(target_completions(db, at("2026-10-07"))) == {manual.id, ai.id}
         assert team.id not in first_targets(db, at("2026-10-07"))
 
 
@@ -83,7 +83,8 @@ def test_viewing_a_different_unsaved_note_cannot_complete_the_saved_capture(app)
         db.flush()
         record_event(db, user.id, "note_opened", new_id(), subject_id=note.id, occurred_at=at("2026-10-06"))
         db.commit()
-        assert first_targets(db, at("2026-10-07")) == {}
+        assert set(first_targets(db, at("2026-10-07"))) == {user.id}
+        assert target_completions(db, at("2026-10-07")) == {}
 
 
 def test_day_ratio_uses_only_qualified_active_people_and_excludes_mock(app):
