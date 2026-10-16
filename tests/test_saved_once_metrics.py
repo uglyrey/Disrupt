@@ -57,6 +57,6 @@ def test_cumulative_save_and_period_activity_are_separate_from_viewed_result(app
         db.commit()
         value = report(db, "2026-10-05", "2026-10-06", now=at("2026-10-07"))
         assert value["real_users"] == 1
-        assert value["saved_and_viewed_users"] == 0
+        assert "saved_and_viewed_users" not in value
         assert [day["dau"] for day in value["daily"]] == [0, 1]
         assert sum(row["real_users"] for row in value["sources"]) == 1

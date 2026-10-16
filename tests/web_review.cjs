@@ -5,7 +5,7 @@ const fixture=JSON.parse(fs.readFileSync(path.join(root,'docs/fixtures/admin-sum
 const dom=new JSDOM(fs.readFileSync(path.join(assets,'review.html'),'utf8'),{url:'https://beresta.invalid/review',runScripts:'outside-only'});
 const w=dom.window,$=id=>w.document.getElementById(id),requests=[],downloads=[];
 let signedIn=false,expired=false,pendingContest=null;
-const contest={method_version:"saved-once-v3",real_users:3,saved_and_viewed_users:2,average_dau:1,average_calls_per_dau:0.5,
+const contest={method_version:"saved-once-v3",real_users:3,average_dau:1,average_calls_per_dau:0.5,
   preliminary:true,component_method_pending:true,sources:[{source:"direct",registrations:3,real_users:2}],
   daily:[{date:"2026-10-06",dau:1,model_calls:1,calls:1,recorded_calls:2,calls_per_dau:1}],
   start:"2026-11-03",end:"2026-11-30",days:28,days_dau_1000:0,days_dau_2500:0};
@@ -38,10 +38,10 @@ async function login(){
     for(const file of ['admin.auth.js','admin.js','admin.tools.js','review.navigation.js'])w.eval(fs.readFileSync(path.join(assets,file),'utf8'));
     await settle();assert.equal($('admin-app').hidden,true);assert.deepEqual(requests,['/review-api/v1/me']);
     await login();assert.equal($('admin-app').hidden,false);assert.equal($('dashboard').hidden,false);
-    assert.ok($('cards').textContent.includes('Сохранили и просмотрели результат'));
+    assert.ok(!$('cards').textContent.includes('Сохранили и просмотрели результат'));
     assert.ok($('contest-method').textContent.includes('сохранить запись хотя бы один раз'));
     assert.ok($('contest-cards').textContent.includes('Использовали хотя бы раз к концу периода3'));
-    assert.ok($('contest-cards').textContent.includes('Сохранили и просмотрели результат к концу периода2'));
+    assert.ok(!$('contest-cards').textContent.includes('Сохранили и просмотрели результат'));
     const dailyHeaders=[...$('daily').querySelectorAll('th')].map(cell=>cell.textContent);
     assert.deepEqual(dailyHeaders,['Дата','Регистрации','DAU','Новые','Вернувшиеся','Сессии']);
     assert.ok(!$('daily').textContent.includes('Не рассчитано'));

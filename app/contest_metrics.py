@@ -100,7 +100,6 @@ def report(db, start, end, *, source="all", channel="all", counted_components=("
         raise ValueError("Invalid contest period")
     low, high = midnight(first), min(midnight(last + timedelta(days=1)), math.nextafter(now, math.inf))
     qualified = first_targets(db, high, source=source, channel=channel)
-    viewed = target_completions(db, high, source=source, channel=channel)
     active = defaultdict(set)
     events = (
         select(ProductEvent.user_id, ProductEvent.name, ProductEvent.occurred_at)
@@ -177,7 +176,6 @@ def report(db, start, end, *, source="all", channel="all", counted_components=("
         ),
         "preliminary": midnight(last + timedelta(days=1)) > now,
         "real_users": len(qualified),
-        "saved_and_viewed_users": len(viewed),
         "average_dau": average,
         "average_calls_per_dau": ratio,
         "days_dau_1000": sum(row["dau"] >= 1000 for row in days),

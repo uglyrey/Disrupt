@@ -76,9 +76,7 @@
   function render(data, slice, currentOffset) {
     const contest = data.contest;
     if (contest) {
-      const useCards = [['Использовали хотя бы раз к концу периода',count(contest.real_users), 'Сохранили хотя бы одну запись. Просмотр результата не обязателен.']];
-      if (contest.saved_and_viewed_users !== undefined) useCards.push(['Сохранили и просмотрели результат к концу периода', count(contest.saved_and_viewed_users)]);
-      cards('contest-cards', [...useCards,
+      cards('contest-cards', [['Использовали хотя бы раз к концу периода',count(contest.real_users), 'Сохранили хотя бы одну запись. Просмотр результата не обязателен.'],
         ['Средний DAU за выбранные дни',number(contest.average_dau)],
         ['Учтённые обращения на DAU · среднесуточно',number(contest.average_calls_per_dau)]]);
       $('contest-method').textContent = 'Использование сервиса: сохранить запись хотя бы один раз. Просмотр и успешная обработка ИИ не обязательны. ' +
@@ -117,7 +115,7 @@
       ['Новые пользователи', count(c.new_users)], ['Вернувшиеся пользователи', count(c.returning_users)],
       ['Активация с ИИ', percent(c.ai_activation), ratio(c.ai_activation)],
       ['Активация без ИИ', percent(c.manual_activation), ratio(c.manual_activation)],
-      ['Сохранили запись', count(c.saved_users ?? 0), 'Уникальные пользователи за выбранный период'], ['Получили готовую заметку', count(c.ready_users ?? 0), 'Заметка создана за выбранный период'], ['Сохранили и просмотрели результат', count(c.completed_scenario), 'Просмотр результата за выбранный период. Сохранение могло быть раньше.'], ['Возвраты после активации', count(c.returns)],
+      ['Сохранили запись', count(c.saved_users ?? 0), 'Уникальные пользователи за выбранный период'], ['Получили готовую заметку', count(c.ready_users ?? 0), 'Заметка создана за выбранный период'], ['Возвраты после активации', count(c.returns)],
     ]);
     $('activation-pending').textContent = `Ожидают завершения окна активации: ${count(c.activation_pending)}.`;
     table('daily', ['Дата','Регистрации','DAU','Новые','Вернувшиеся','Сессии'], data.daily.map(d => [text(d.date), count(d.registrations), count(d.dau), count(d.new_users), count(d.returning_users), count(d.session_count)]));
