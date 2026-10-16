@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app import totp
 from app.admin_auth import COOKIE_NAME
 from app.admin_models import AdminAccount
-from app.contest_metrics import first_targets, report
+from app.contest_metrics import first_targets, report, target_completions
 from app.models import ComponentCall, ProductEvent, User, new_id
 from app.policy import POLICY_VERSION
 from tests.conftest import ADMIN_ADDRESS, ADMIN_PASSWORD, admin_login, make_admin, register
@@ -66,7 +66,7 @@ def test_observer_is_https_only_read_only_and_separate_from_owner(app_factory):
         response = client.get("/review-api/v1/summary?from=2026-10-01&to=2026-10-02")
         assert response.status_code == 200
         assert response.json()["budget"] is None
-        assert response.json()["contest"]["method_version"] == "saved-and-viewed-v2"
+        assert response.json()["contest"]["method_version"] == "saved-once-v3"
         assert client.get("/review-api/v1/feedback").status_code == 404
         assert client.get("/review-api/v1/audit").status_code == 404
         assert client.patch("/review-api/v1/feedback/fake", json={"status": "resolved"}).status_code == 404
@@ -155,7 +155,8 @@ def test_saved_and_viewed_is_enough_and_get_alone_never_completes(app, client):
     note = saved["note_id"]
     assert client.get("/api/v1/notes/" + note).status_code == 200
     with app.state.sessions() as db:
-        assert user["id"] not in first_targets(db, time.time() + 1)
+        assert user["id"] in first_targets(db, time.time() + 1)
+        assert user["id"] not in target_completions(db, time.time() + 1)
     one, two = new_id(), new_id()
     for operation in (one, one, two):
         assert (
@@ -164,6 +165,7 @@ def test_saved_and_viewed_is_enough_and_get_alone_never_completes(app, client):
         )
     with app.state.sessions() as db:
         assert user["id"] in first_targets(db, time.time() + 1)
+        assert user["id"] in target_completions(db, time.time() + 1)
         assert len(db.scalars(select(ComponentCall).where(ComponentCall.component == "note_view")).all()) == 1
 
 

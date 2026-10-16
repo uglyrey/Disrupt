@@ -12,7 +12,7 @@ from sqlalchemy.orm import aliased
 
 from app.models import Capture, ComponentCall, Note, ProductEvent, ProviderUsage, User
 
-METHOD_VERSION = "saved-and-viewed-v2"
+METHOD_VERSION = "saved-once-v3"
 ACTIVE = {
     "capture_saved",
     "note_opened",
@@ -70,8 +70,26 @@ def target_completions(db, high, *, low=None, source="all", channel="all"):
     return dict(db.execute(query).all())
 
 
-def first_targets(db, high, *, source="all"):
-    return target_completions(db, high, source=source)
+def first_targets(db, high, *, source="all", channel="all"):
+    """First server-recorded save, even without AI success or a view. Never count mere registrations.
+
+    The event remains evidence after a note is removed. Historical test events and currently marked
+    test accounts stay excluded; no missing events are inferred from registrations or model calls.
+    """
+    query = (
+        select(ProductEvent.user_id, func.min(ProductEvent.occurred_at))
+        .join(User, User.id == ProductEvent.user_id)
+        .where(
+            User.is_test.is_(False), ProductEvent.is_test.is_(False),
+            ProductEvent.name == "capture_saved", ProductEvent.occurred_at < high,
+        )
+        .group_by(ProductEvent.user_id)
+    )
+    if source != "all":
+        query = query.where(User.source == source)
+    if channel != "all":
+        query = query.where(ProductEvent.channel == channel)
+    return dict(db.execute(query).all())
 
 
 def report(db, start, end, *, source="all", channel="all", counted_components=("llm", "stt"), now=None):
@@ -81,7 +99,8 @@ def report(db, start, end, *, source="all", channel="all", counted_components=("
     if first > last or (last - first).days >= 366:
         raise ValueError("Invalid contest period")
     low, high = midnight(first), min(midnight(last + timedelta(days=1)), math.nextafter(now, math.inf))
-    qualified = first_targets(db, high, source=source)
+    qualified = first_targets(db, high, source=source, channel=channel)
+    viewed = target_completions(db, high, source=source, channel=channel)
     active = defaultdict(set)
     events = (
         select(ProductEvent.user_id, ProductEvent.name, ProductEvent.occurred_at)
@@ -158,6 +177,7 @@ def report(db, start, end, *, source="all", channel="all", counted_components=("
         ),
         "preliminary": midnight(last + timedelta(days=1)) > now,
         "real_users": len(qualified),
+        "saved_and_viewed_users": len(viewed),
         "average_dau": average,
         "average_calls_per_dau": ratio,
         "days_dau_1000": sum(row["dau"] >= 1000 for row in days),
