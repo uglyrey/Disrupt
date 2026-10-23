@@ -146,7 +146,9 @@ services:
     volumes:
       - audio-originals:/app/data/audio:ro
       - ./data/billing:/app/data/billing:ro
-    restart: "no"
+    # После включения владельцем worker восстанавливается после сбоя или перезагрузки.
+    # Явный docker stop по-прежнему оставляет его выключенным.
+    restart: unless-stopped
     command: ["python", "-m", "app.worker"]
     environment:
       <<: *backend-environment
