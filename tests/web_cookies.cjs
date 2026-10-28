@@ -16,7 +16,7 @@ function page({stored=null,blocked=false,file='index.html'}={}){
  w.eval(read('cookie-consent.js'));
  return {dom,w,$:id=>w.document.getElementById(id)};
 }
-const record=choice=>JSON.stringify({choice,version:1,at:'2026-10-12T09:00:00.000Z'});
+const record=choice=>JSON.stringify({choice,version:2,at:'2026-10-12T09:00:00.000Z'});
 
 function firstVisit(){
  const {dom,w,$}=page();
@@ -45,7 +45,7 @@ function choices(){
    assert.equal($('cookie-consent'),null,'hidden after '+choice);
    assert.equal(w.document.body.classList.contains('cookie-bar-open'),false);
    const saved=JSON.parse(w.localStorage.getItem(KEY));
-   assert.equal(saved.choice,choice);assert.equal(saved.version,1);assert.ok(!Number.isNaN(Date.parse(saved.at)),'time saved');
+   assert.equal(saved.choice,choice);assert.equal(saved.version,2);assert.ok(!Number.isNaN(Date.parse(saved.at)),'time saved');
    assert.equal(w.berestaConsent.choice(),choice);assert.equal(w.berestaConsent.allowsOptional(),choice==='all');
    // Same stored record on a fresh page load: the banner stays away.
    const again=page({stored:w.localStorage.getItem(KEY)});
@@ -53,7 +53,7 @@ function choices(){
    finally{again.dom.window.close();}
   }finally{dom.window.close();}
  }
- for(const bad of ['not json','{"choice":"maybe","version":1}',record('all').replace('"version":1','"version":0')]){
+ for(const bad of ['not json','{"choice":"maybe","version":1}',record('all').replace('"version":2','"version":0')]){
   const {dom,$}=page({stored:bad});
   try{assert.ok($('cookie-consent'),'unusable record asks again: '+bad);}finally{dom.window.close();}
  }

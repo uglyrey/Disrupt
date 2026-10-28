@@ -118,6 +118,7 @@ async function api(path, options = {}, withHeaders = false) {
       ? 'Проверьте заполненные поля.' : 'Не удалось выполнить запрос');
     error.status = response.status; error.data = data; throw error;
   }
+  try { window.BerestaMetrika?.success(path, options.method || 'GET', data); } catch { /* optional analytics */ }
   return withHeaders ? {data,headers:response.headers} : data;
 }
 function showUser(user) {

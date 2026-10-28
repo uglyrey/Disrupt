@@ -258,9 +258,20 @@ def create_app(
         if not (request.url.path == "/api/v1/timezones" and response.headers.get("Cache-Control") == TIMEZONES_CACHE):
             response.headers["Cache-Control"] = "no-store"
         if request.url.path not in {"/docs", "/redoc", "/docs/oauth2-redirect"}:
+            metrika_page = request.url.path in {"/", "/privacy", "/terms", "/cookies", "/data-deletion"}
+            metrika_scripts = " https://mc.yandex.ru https://yastatic.net" if metrika_page else ""
+            metrika_sources = ""
+            if metrika_page:
+                metrika_sources = " " + " ".join(
+                    f"https://mc.yandex.{suffix}" for suffix in (
+                        "ru", "az", "by", "co.il", "com", "com.am", "com.ge", "com.tr",
+                        "ee", "fr", "kg", "kz", "lt", "lv", "md", "tj", "tm", "ua", "uz",
+                    )
+                )
             response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; media-src 'self' blob:; "
-                f"connect-src {connect_sources}; "
+                f"default-src 'self'; script-src 'self'{metrika_scripts}; style-src 'self'; "
+                f"img-src 'self' blob:{metrika_sources}; media-src 'self' blob:; "
+                f"connect-src {connect_sources}{metrika_sources}; "
                 "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
             )
         return response

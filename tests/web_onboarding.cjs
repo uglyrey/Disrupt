@@ -33,7 +33,7 @@ async function firstRun({storage='ok',notes=[],preset=false}={}){
  if(storage==='throws')for(const method of ['getItem','setItem'])Object.defineProperty(w.Storage.prototype,method,{configurable:true,value(){throw new Error('blocked');}});
  else{
   // Optional storage is written to localStorage only after "Принять все", so start from that choice.
-  w.localStorage.setItem('beresta.cookie-consent.v1',JSON.stringify({choice:'all',version:1,at:'2026-10-12T09:00:00.000Z'}));
+  w.localStorage.setItem('beresta.cookie-consent.v1',JSON.stringify({choice:'all',version:2,at:'2026-10-12T09:00:00.000Z'}));
   if(preset)w.localStorage.setItem('beresta.onboarding.dismissed.v1','1');
  }
  w.fetch=async(input)=>{

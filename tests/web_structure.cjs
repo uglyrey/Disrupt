@@ -190,6 +190,7 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
     await require('./web_mobile_guide.cjs')();
     await require('./web_onboarding.cjs')();
     await require('./web_cookies.cjs')();
+    await require('./web_metrika.cjs')();
     await require('./web_timezone.cjs')();
     await require('./web_profile.cjs')();
     await require('./web_auth.cjs')();

@@ -37,6 +37,7 @@
   function write(route, replace = false) {
     const next = state(route,replace ? current.index : current.index + 1,current.group);
     history[replace ? 'replaceState' : 'pushState'](next,'',url(route)); current = next;
+    document.dispatchEvent(new Event('beresta:navigation'));
   }
   function start() {
     if (ready || !visible()) return;
@@ -125,7 +126,10 @@
         try { accepted = await show(target.route); }
         catch (error) { if (ticket === serial && account === epoch) message(error.message); }
         if (ticket !== serial || account !== epoch || !visible()) continue;
-        if (accepted) { current = target; history.replaceState(target,'',url(target.route)); }
+        if (accepted) {
+          current = target; history.replaceState(target,'',url(target.route));
+          document.dispatchEvent(new Event('beresta:navigation'));
+        }
         else if (same(current.route,target.route) && current.index === target.index) {
           // An unavailable bookmarked note/source starts on the library, rather than creating a failed-entry loop.
           current = state({kind:'home'},target.index,target.group);
