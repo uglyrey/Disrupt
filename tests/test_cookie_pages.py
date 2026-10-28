@@ -30,19 +30,24 @@ def test_every_public_page_loads_the_banner_without_inline_code(client):
         page = client.get(path)
         assert page.status_code == 200
         assert '/static/cookie-consent.js"' in page.text and '/static/cookie-consent.css"' in page.text
+        assert '/static/metrika.js"' in page.text
+        assert "mc.yandex.ru" in page.headers["content-security-policy"]
         assert "data-cookie-settings" in page.text
         assert not re.search(r"<script(?![^>]*\bsrc=)", page.text) and " style=" not in page.text
     for path in ("/privacy", "/terms", "/data-deletion", "/"):
         assert 'href="/cookies"' in client.get(path).text
     assert client.get("/static/cookie-consent.js").status_code == 200
     assert client.get("/static/cookie-consent.css").status_code == 200
+    assert client.get("/static/metrika.js").status_code == 200
+    for path in ("/api/v1/auth/me", "/admin", "/review"):
+        assert "mc.yandex" not in client.get(path).headers.get("content-security-policy", "")
 
 
 def test_policy_mentions_cookies_age_and_current_version(client):
     from app.policy import POLICY_VERSION
 
     page = client.get("/privacy").text
-    assert POLICY_VERSION == "2026-10-14" and f"Версия {POLICY_VERSION}" in page
+    assert POLICY_VERSION == "2026-10-28" and f"Версия {POLICY_VERSION}" in page
     assert 'href="/cookies"' in page and "старше 18 лет" in page
 
 

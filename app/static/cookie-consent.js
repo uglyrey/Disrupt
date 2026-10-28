@@ -2,7 +2,7 @@
 // Cookie and storage banner. It also gives other scripts one place to ask whether optional
 // browser storage is allowed. Strictly necessary cookies (sign-in) never wait for this choice.
 (() => {
-  const KEY = 'beresta.cookie-consent.v1', VERSION = 1;
+  const KEY = 'beresta.cookie-consent.v1', VERSION = 2;
   // Conveniences that are written to localStorage only after "Принять все".
   const OPTIONAL_KEYS = ['beresta.onboarding.dismissed.v1', 'beresta.reminderZone',
     'beresta.timezoneDismissed', 'beresta.profile.draft.v1'];
@@ -15,12 +15,14 @@
       const raw = window.localStorage.getItem(KEY);
       if (!raw) return null;
       const saved = JSON.parse(raw);
-      if (saved && (saved.choice === 'all' || saved.choice === 'necessary') && saved.version === VERSION) return saved;
+      if (saved && (saved.choice === 'all' || saved.choice === 'necessary') && [1, VERSION].includes(saved.version)) return saved;
     } catch { /* blocked or damaged storage counts as no choice */ }
     return null;
   }
   function choice() { return readChoice()?.choice || null; }
   function allowsOptional() { return choice() === 'all'; }
+  // Previous acceptance covered preferences only, not the newly introduced analytics.
+  function allowsAnalytics() { return allowsOptional() && readChoice()?.version === VERSION; }
 
   function purgeOptional() {
     for (const key of OPTIONAL_KEYS) { try { window.localStorage.removeItem(key); } catch { /* nothing to remove */ } }
@@ -75,7 +77,7 @@
     const title = node('p', 'cookie-title', 'Файлы cookie и память браузера'); title.id = 'cookie-consent-title';
     const text = node('p', 'cookie-text');
     text.id = 'cookie-consent-text';
-    text.append('Для входа нужны служебные cookie, они работают при любом выборе. Остальное необязательно, это скрытые подсказки и ответ на вопрос о смене часового пояса. Рекламы и аналитики нет. ');
+    text.append('Для входа нужны служебные cookie. С вашего согласия Яндекс Метрика считает посещения и использование функций, а браузер запоминает подсказки. Тексты заметок, пароли и коды входа в Метрику не передаются. При выборе «Только необходимые» Метрика не включается. ');
     const link = node('a', '', 'Подробнее о cookie'); link.href = '/cookies';
     text.append(link, '.');
     copy.append(title, text);
@@ -95,12 +97,17 @@
     show(true);
   }
 
-  window.berestaConsent = {choice, allowsOptional, read, write, reopen};
+  window.berestaConsent = {choice, allowsOptional, allowsAnalytics, read, write, reopen};
+  window.addEventListener('storage', event => {
+    if (event.key !== KEY && event.key !== null) return;
+    memoryChoice = null;
+    document.dispatchEvent(new CustomEvent('beresta:cookie-consent',{detail:{choice:choice()}}));
+  });
   document.addEventListener('click', event => {
     const target = event.target.closest ? event.target.closest('[data-cookie-settings]') : null;
     if (!target) return;
     event.preventDefault();
     reopen();
   });
-  if (!choice()) show(false);
+  if (!choice() || (choice() === 'all' && !allowsAnalytics())) show(false);
 })();

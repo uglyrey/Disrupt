@@ -7,7 +7,7 @@ existing users to accept it again on their next visit.
 
 from fastapi import HTTPException
 
-POLICY_VERSION = "2026-10-14"
+POLICY_VERSION = "2026-10-28"
 MARKETING_CONSENT_VERSION = "2026-10-14"
 
 
