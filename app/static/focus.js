@@ -165,8 +165,11 @@
   } else window.addEventListener('resize', refit);
 
   function grow() {
-    body.style.height = 'auto';
-    if (body.scrollHeight) body.style.height = `${body.scrollHeight}px`;
+    // The field is shortened for a moment to measure it. The page keeps its place (see holdScroll in app.js).
+    holdScroll(body, () => {
+      body.style.height = 'auto';
+      if (body.scrollHeight) body.style.height = `${body.scrollHeight}px`;
+    });
   }
 
   /* ---------- Autosave ---------- */
