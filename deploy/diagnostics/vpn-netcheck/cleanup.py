@@ -68,6 +68,8 @@ def cleanup():
         if BINARY.is_symlink() or BINARY.resolve() != BINARY:
             raise SystemExit('Unsafe probe executable path')
         BINARY.unlink()
+    subprocess.run(['systemctl', 'stop', 'beresta-vpn-netcheck-expiry.timer'],
+                   capture_output=True, check=False)
     # The directory is fixed, checked above, and contains only this probe's files.
     shutil.rmtree(ROOT)
     print(json.dumps(checks))
