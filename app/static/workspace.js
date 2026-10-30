@@ -32,14 +32,40 @@
     if (get('mobile-back-label').textContent !== text) get('mobile-back-label').textContent = text;
   }
   new MutationObserver(phoneBackLabel).observe(get('workspace'), {attributes:true,attributeFilter:['class']});
+  const closeLibrary = () => {
+    get('workspace').classList.remove('library-open');
+    get('mobile-library-toggle').setAttribute('aria-expanded','false');
+  };
+  // With the list open the button says «Новая запись», so it must end on the capture form, not on whatever
+  // screen came before the list (a section, a note). Back through history only when that screen is the capture form.
+  function focusCaptureAfterNavigation() {
+    const focus = () => {
+      document.removeEventListener('beresta:navigation',focus); clearTimeout(timer);
+      if (!get('capture-card').hidden && !get('workspace').classList.contains('library-open') && !get('thought').disabled) get('thought').focus();
+    };
+    const timer = setTimeout(() => document.removeEventListener('beresta:navigation',focus),1500);
+    document.addEventListener('beresta:navigation',focus);
+  }
+  const historyBack = () => history.state?.berestaNavigation === 1 && history.state.index > 0;
   phoneBack.onclick = () => {
-    if (history.state?.berestaNavigation === 1 && history.state.index > 0) history.back();
-    else if (get('workspace').classList.contains('library-open')) {
-      get('workspace').classList.remove('library-open');
-      get('mobile-library-toggle').setAttribute('aria-expanded', 'false');
+    if (get('workspace').classList.contains('library-open')) {
+      const before = window.BerestaNavigation?.previous?.();
+      if (historyBack() && before && (before.kind === 'home' || before.kind === 'new')) { focusCaptureAfterNavigation(); history.back(); }
+      else get('new-note').click();
     }
+    else if (historyBack()) history.back();
     else get('new-note').click();
   };
+  // A new screen starts at the top. The page keeps its scroll between screens otherwise, and the capture form
+  // can come back below the fold after a long list.
+  let screenKey = '';
+  new MutationObserver(() => {
+    const classes = get('workspace').classList;
+    const key = ['library-open','has-note','has-source','has-view'].filter(name => classes.contains(name)).join();
+    if (key === screenKey) return;
+    screenKey = key;
+    if (window.matchMedia?.('(max-width:640px)').matches && window.scrollY > 0) window.scrollTo(0,0);
+  }).observe(get('workspace'),{attributes:true,attributeFilter:['class']});
   function phoneLibraryCount() {
     const badge = get('mobile-library-count');
     const filtered = filter.value !== '' || get('search-query').value.trim() !== '';
@@ -51,8 +77,9 @@
   new MutationObserver(phoneLibraryCount).observe(get('notes'), {childList:true});
   new MutationObserver(phoneLibraryCount).observe(get('more-notes'), {attributes:true,attributeFilter:['hidden']});
   get('search-form').addEventListener('submit', () => setTimeout(phoneLibraryCount, 0));
-  window.BerestaPhone = {openList() { if (!get('workspace').classList.contains('library-open')) get('mobile-library-toggle').click(); }};
-  get('new-note').addEventListener('click',()=>{if(get('capture-card').hidden)return;window.BerestaFocus?.closeAll();if(!get('thought').disabled)get('thought').focus();});
+  window.BerestaPhone = {openList() { if (!get('workspace').classList.contains('library-open')) get('mobile-library-toggle').click(); }, openCapture() { get('new-note').click(); }};
+  // «Новая запись» always shows the form. On a phone the open list would otherwise keep it hidden.
+  get('new-note').addEventListener('click',()=>{if(get('capture-card').hidden)return;closeLibrary();window.BerestaFocus?.closeAll();if(!get('thought').disabled)get('thought').focus();});
   // ---- Category navigation: plus button, inline create and rename, context menu, delete dialog ----
   window.categoryLongPressMs = 500;
   const list = get('category-navigation'), filter = get('category-filter');
