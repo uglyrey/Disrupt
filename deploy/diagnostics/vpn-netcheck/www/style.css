@@ -6,11 +6,13 @@ main { max-width: 680px; margin: auto; padding: 28px; background: #fffef9; borde
 h1 { font-size: clamp(1.5rem, 5vw, 2rem); line-height: 1.2; }
 .success { padding: 12px; background: #eaf1e5; border-radius: 10px; }
 .muted { color: #596b5c; font-size: .9rem; }
-button { border: 0; border-radius: 10px; padding: 12px 16px; font: inherit; font-weight: 600; color: white; background: #3f604b; cursor: pointer; }
+button, .primary { display: inline-block; border: 0; border-radius: 10px; padding: 12px 16px; font: inherit; font-weight: 600; color: white; background: #3f604b; cursor: pointer; text-decoration: none; }
 button:disabled { opacity: .6; cursor: wait; }
 button.secondary { background: #eaf0e5; color: #233a32; margin-top: 8px; }
 label { display: block; margin: 20px 0 8px; }
 textarea { width: 100%; padding: 12px; border: 1px solid #cbd6c5; border-radius: 10px; font: .9rem/1.5 ui-monospace, monospace; resize: vertical; }
+select, input { width: 100%; padding: 12px; border: 1px solid #cbd6c5; border-radius: 10px; background: white; font: inherit; color: inherit; }
 a { color: #315b42; }
+a.primary { color: white; }
 :focus-visible { outline: 3px solid #799b59; outline-offset: 3px; }
-@media (max-width: 420px) { main { padding: 20px; } button { width: 100%; } }
+@media (max-width: 420px) { main { padding: 20px; } button, .primary { width: 100%; text-align: center; } }

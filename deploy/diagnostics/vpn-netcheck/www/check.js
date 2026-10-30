@@ -1,51 +1,35 @@
 'use strict';
-const button = document.getElementById('check');
-const statusLine = document.getElementById('status');
 const report = document.getElementById('report');
+const statusLine = document.getElementById('status');
+let openedAt = '';
 
-button.addEventListener('click', async () => {
-  button.disabled = true;
-  statusLine.textContent = 'Проверяем соединение, до 10 секунд…';
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10000);
-  const started = performance.now();
-  const date = new Date().toISOString();
-  let result;
-  let detail = '';
-  try {
-    // A public SVG avoids browser blocking of cross-origin opaque JSON (ORB).
-    // Opaque mode confirms transport only. It cannot reveal the response status.
-    await fetch('https://app.berestaapp.ru/static/favicon.svg', {
-      mode: 'no-cors', credentials: 'omit', cache: 'no-store',
-      referrerPolicy: 'no-referrer', redirect: 'error', signal: controller.signal,
-    });
-    result = 'Публичный ресурс основного сайта получен. Вход и работа приложения отдельно не проверялись.';
-  } catch (error) {
-    detail = error.name + ': ' + error.message;
-    result = error.name === 'AbortError'
-      ? 'За 10 секунд основной адрес не ответил.'
-      : 'Браузер не смог получить ответ основного адреса. Это может быть DNS, TLS, сеть или блокировка браузером.';
-  } finally {
-    clearTimeout(timer);
-    button.disabled = false;
-  }
-  const elapsed = Math.round(performance.now() - started);
-  statusLine.textContent = result;
+function updateReport() {
+  const result = document.getElementById('main-result');
+  const vpnState = document.getElementById('vpn-state');
+  const vpnName = document.getElementById('vpn-name').value.trim();
   report.value = [
-    'Дата UTC: ' + date,
+    'Дата отчёта UTC: ' + new Date().toISOString(),
+    'Версия проверки: 3, ручное сравнение',
     'Тестовая страница: открылась',
-    'Версия проверки: 2',
-    'Основной адрес: https://app.berestaapp.ru/static/favicon.svg',
-    result,
-    ...(detail ? ['Подробность браузера: ' + detail] : []),
-    'Время: ' + elapsed + ' мс',
-    'VPN оставался включён: допишите да или нет',
-    'Название VPN: допишите',
-    'Ошибка при обычном открытии сайта: допишите, если есть',
+    'Основной адрес: https://app.berestaapp.ru/',
+    'Ссылка открыта для проверки UTC: ' + (openedAt || 'не зафиксировано'),
+    'Результат обычного открытия: ' + result.options[result.selectedIndex].text,
+    'VPN включён: ' + vpnState.options[vpnState.selectedIndex].text,
+    'Название VPN: ' + (vpnName || 'не указано'),
+    'Автоматические межсайтовые запросы не выполняются.',
   ].join('\n');
-});
+}
 
+document.getElementById('open-main').addEventListener('click', () => {
+  openedAt = new Date().toISOString();
+  updateReport();
+});
+for (const name of ['main-result', 'vpn-state', 'vpn-name']) {
+  document.getElementById(name).addEventListener('input', updateReport);
+  document.getElementById(name).addEventListener('change', updateReport);
+}
 document.getElementById('copy').addEventListener('click', async () => {
+  updateReport();
   try {
     await navigator.clipboard.writeText(report.value);
     statusLine.textContent = 'Результат скопирован.';
@@ -55,3 +39,4 @@ document.getElementById('copy').addEventListener('click', async () => {
     statusLine.textContent = 'Выделили результат. Скопируйте его обычным способом.';
   }
 });
+updateReport();
