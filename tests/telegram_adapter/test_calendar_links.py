@@ -81,12 +81,15 @@ def link(**changes):
 
 
 @pytest.mark.parametrize("links", [
-    "x", [GOOD], [link()] * 6, [link(url="https://evil.test/calendar/render?action=TEMPLATE&")],
+    "x", [GOOD], [link()] * 7, [link(url="https://evil.test/calendar/render?action=TEMPLATE&")],
     [link(url="http://calendar.google.com/calendar/render?action=TEMPLATE&text=x")],
     [link(url="https://calendar.google.com.evil.test/calendar/render?action=TEMPLATE&text=x")],
     [link(url=GOOD + "a" * 2000)], [link(url=GOOD + " x")], [link(url=GOOD + "\n")], [link(url=GOOD + "Ж")],
     [link(url=5)], [link(extra=1)], [{}], [None], [link(offset=-1)], [link(offset=True)], [link(length=0)],
     [link(offset=units(TEXT))], [link(offset=units(TEXT) - 2, length=5)],
+    [link(url="https://evil.test/?capture=c1")], [link(url="https://example.test.evil.test/?capture=c1")],
+    [link(url="http://example.test/?capture=c1")], [link(url="https://example.test/other?capture=c1")],
+    [link(url="https://user@example.test/?capture=c1")], [link(url="https://example.test/")],
 ])
 def test_a_link_list_that_is_not_ours_stops_the_sender(settings, links):  # noqa: F811
     sender = DeliverySender(settings, CoreClient(None, settings), None, None)
@@ -108,3 +111,25 @@ def test_a_note_saved_without_ai_names_its_category_in_the_reply():
     assert "Категория" not in saved_reply({"category_name": "  "})
     limited = saved_reply({"ai_limit_exceeded": True, "category_name": "Общее"})
     assert limited.endswith("Категория: Общее") and "Лимит ИИ" in limited
+
+
+NOTE = "https://example.test/?capture=c1&reminder=" + RID
+NOTE_TEXT = "Напоминание поставлено: завтра, «x». Открыть заметку"
+
+
+def test_the_note_address_is_a_text_link_and_the_text_has_no_raw_address():
+    offset = units(NOTE_TEXT) - units("Открыть заметку")
+    body = sending(base(text=NOTE_TEXT, note_url=NOTE, links=[{"offset": offset, "length": units("Открыть заметку"), "url": NOTE}]))
+    assert body["entities"] == [{"type": "text_link", "offset": offset, "length": units("Открыть заметку"), "url": NOTE}]
+    assert "http" not in body["text"] and body["text"].endswith("Открыть заметку")
+    assert "parse_mode" not in body
+
+
+def test_note_links_and_calendar_links_go_together(settings):  # noqa: F811
+    sender = DeliverySender(settings, CoreClient(None, settings), None, None)
+    text = "x " + LABEL + "\nОткрыть заметку"
+    sender.validate_claim(claimed(text=text, links=[link(), {"offset": units(text) - 15, "length": 15, "url": NOTE}]))
+    body = sending(base(text=text, links=[
+        {"offset": 2, "length": units(LABEL), "url": GOOD}, {"offset": units(text) - 15, "length": 15, "url": NOTE},
+    ]))
+    assert [entity["type"] for entity in body["entities"]] == ["text_link", "text_link"]

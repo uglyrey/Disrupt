@@ -158,8 +158,9 @@ def test_the_confirmation_ends_with_a_text_link_and_has_no_new_buttons(reminders
     assert item["text"].startswith("Напоминание поставлено: ")
     first = item["text"].split("\n")[0]
     assert first.endswith("«Позвонить». " + LABEL)
-    (link,) = item["links"]
+    link, note = item["links"]
     assert clicked(item, link) == LABEL and link["url"].startswith(BASE + "&")
+    assert clicked(item, note) == "Открыть заметку" and note["url"].startswith("http") and "http" not in item["text"]
     assert f"reminder={reminder_id}" in fields(link["url"])["details"]
     assert "calendar" not in item and item["confirm"] == []  # No button of any kind was added
     assert auth(client, item).status_code == 200 and result(client, item).status_code == 200
@@ -170,8 +171,10 @@ def test_with_the_offer_off_the_confirmation_has_no_link_and_no_phrase(reminders
     offer(client, False)
     reminder_set(app, client, ids)
     (item,) = claim(client).json()["items"]
-    assert item["links"] == [] and "Google" not in item["text"]
-    assert item["text"].split("\n")[0].endswith("«Позвонить». Изменить: " + item["text"].split("Изменить: ")[1])
+    (note,) = item["links"]  # Only the note address is a link, no calendar phrase
+    assert "Google" not in item["text"] and "http" not in item["text"]
+    assert item["text"].split("\n")[0].endswith("«Позвонить». Изменить: Открыть заметку")
+    assert clicked(item, note) == "Открыть заметку" and "reminder=" in note["url"]
 
 
 def test_a_cancelled_reminder_leaves_no_dead_phrase(reminders):
@@ -179,7 +182,8 @@ def test_a_cancelled_reminder_leaves_no_dead_phrase(reminders):
     reminder_id = reminder_set(app, client, ids)
     client.post("/api/v1/reminders/" + reminder_id + "/cancel", json={"generation": 1})
     for item in claim(client).json()["items"]:
-        assert item["links"] == [] and "Google" not in item["text"]
+        assert all(link["url"].startswith("http") and not link["url"].startswith(BASE) for link in item["links"])
+        assert "Google" not in item["text"] and "http" not in item["text"]
 
 
 def test_the_message_that_fires_has_no_link_because_the_time_has_come(reminders):
@@ -206,3 +210,23 @@ def test_a_phrase_inside_the_text_of_a_task_is_not_a_link():
     text = "Напоминание поставлено: завтра, «купить " + LABEL + " зря». " + LABEL
     full, links = attach_links(text, [BASE + "&text=a"])
     assert len(links) == 1 and links[0]["offset"] == len(text) - len(LABEL) and full == text
+
+
+def test_note_addresses_become_one_label_and_move_the_calendar_links_in_utf16():
+    from app.deliveries import NOTE_LABEL, link_note_urls
+    origin = "https://example.test"
+    url = origin + "/?capture=c1&reminder=r1"
+    text = "😀 первая. " + LABEL + "\nИзменить: " + url + "\nещё"
+    full, links = attach_links(text, [BASE + "&text=a"])
+    out, links = link_note_urls(full, links, origin)
+    assert out == "😀 первая. " + LABEL + "\nИзменить: " + NOTE_LABEL + "\nещё"
+    units = out.encode("utf-16-le")
+    assert [units[i["offset"] * 2:(i["offset"] + i["length"]) * 2].decode("utf-16-le") for i in links] == [LABEL, NOTE_LABEL]
+    assert [i["url"] for i in links] == [BASE + "&text=a", url]
+    # An address after the calendar phrase does not move it; one before it does.
+    head = "Открыть: " + url + "\nx "
+    before, links = link_note_urls(head + LABEL, [{"offset": len(head), "length": len(LABEL), "url": BASE}], origin)
+    assert [before[item["offset"]:item["offset"] + item["length"]] for item in links] == [NOTE_LABEL, LABEL]
+    # Other addresses and plain text stay as they are.
+    assert link_note_urls("см. https://other.test/?capture=1", [], origin) == ("см. https://other.test/?capture=1", [])
+    assert link_note_urls("без ссылок", [], origin) == ("без ссылок", [])

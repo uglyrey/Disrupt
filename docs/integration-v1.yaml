@@ -1255,7 +1255,7 @@
             }
           },
           "413": {
-            "description": "Request Entity Too Large",
+            "description": "Content Too Large",
             "content": {
               "application/json": {
                 "schema": {
@@ -1276,7 +1276,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
@@ -1523,7 +1523,7 @@
             }
           },
           "413": {
-            "description": "Request Entity Too Large",
+            "description": "Content Too Large",
             "content": {
               "application/json": {
                 "schema": {
@@ -1544,7 +1544,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
@@ -1773,7 +1773,7 @@
             }
           },
           "413": {
-            "description": "Request Entity Too Large",
+            "description": "Content Too Large",
             "content": {
               "application/json": {
                 "schema": {
@@ -1794,7 +1794,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
@@ -1934,7 +1934,7 @@
             }
           },
           "413": {
-            "description": "Request Entity Too Large",
+            "description": "Content Too Large",
             "content": {
               "application/json": {
                 "schema": {
@@ -1944,7 +1944,7 @@
             }
           },
           "422": {
-            "description": "Unprocessable Entity",
+            "description": "Unprocessable Content",
             "content": {
               "application/json": {
                 "schema": {
@@ -2074,7 +2074,7 @@
                 }
               }
             },
-            "description": "Request Entity Too Large"
+            "description": "Content Too Large"
           },
           "422": {
             "content": {
@@ -2084,7 +2084,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity"
+            "description": "Unprocessable Content"
           },
           "429": {
             "content": {
@@ -2202,7 +2202,7 @@
                 }
               }
             },
-            "description": "Request Entity Too Large"
+            "description": "Content Too Large"
           },
           "422": {
             "content": {
@@ -2212,7 +2212,7 @@
                 }
               }
             },
-            "description": "Unprocessable Entity"
+            "description": "Unprocessable Content"
           },
           "429": {
             "content": {
@@ -9077,7 +9077,7 @@
               "$ref": "#/components/schemas/TextLink"
             },
             "type": "array",
-            "maxItems": 5,
+            "maxItems": 6,
             "title": "Links"
           }
         },
@@ -11590,8 +11590,8 @@
           "url": {
             "type": "string",
             "maxLength": 2000,
-            "minLength": 40,
-            "pattern": "^https://calendar\\.google\\.com/calendar/render\\?action=TEMPLATE&",
+            "minLength": 12,
+            "pattern": "^(https://calendar\\.google\\.com/calendar/render\\?action=TEMPLATE&|https?://[^/\\s]+/\\?capture=)",
             "title": "Url"
           }
         },
@@ -11603,7 +11603,7 @@
           "url"
         ],
         "title": "TextLink",
-        "description": "A clickable part of the message text: «Добавить в Google Календарь». Offset and length are UTF-16 units."
+        "description": "A clickable part of the message text: «Добавить в Google Календарь» or «Открыть заметку». Offset and length are UTF-16 units."
       },
       "TokenBody": {
         "properties": {

@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import json
+import re
 import secrets
 import time
 from datetime import datetime
@@ -190,6 +191,29 @@ def attach_links(text, urls, start=0):
                 links.append({"offset": utf16_units(out + line[:-len(LABEL)]), "length": utf16_units(LABEL), "url": url})
         out += line + ("\n" if index < len(lines) - 1 else "")
     return out, links
+
+
+NOTE_LABEL = "Открыть заметку"
+
+
+def link_note_urls(text, links, origin):
+    """(text, links) where every address of a note of this service in the text is the clickable «Открыть заметку».
+
+    Telegram shows a bare address as a long line. The address moves into a `text_link` entry (UTF-16 offsets) and the
+    text keeps the short label. Entries that already exist and sit after an address move left by what it gave up."""
+    found = list(re.finditer(re.escape(origin) + r"/\?capture=[^\s]+", text))
+    if not found:
+        return text, links
+    out, pos, added, cut = "", 0, [], []
+    for match in found:
+        out += text[pos:match.start()]
+        added.append({"offset": utf16_units(out), "length": utf16_units(NOTE_LABEL), "url": match.group()})
+        out += NOTE_LABEL
+        cut.append((utf16_units(text[:match.end()]), utf16_units(match.group()) - utf16_units(NOTE_LABEL)))
+        pos = match.end()
+    out += text[pos:]
+    moved = [{**link, "offset": link["offset"] - sum(gain for end, gain in cut if end <= link["offset"])} for link in links]
+    return out, sorted([*moved, *added], key=lambda link: link["offset"])
 
 
 def auto_reminder_hint(db, note, settings, now):
@@ -419,6 +443,7 @@ def claim_deliveries(db, body, settings):
             text = row.message_text
             if row.message_kind == "reminder_set":
                 text, links = attach_links(text, link_urls(db, row.user_id, row.message_reminders or [], settings))
+            text, links = link_note_urls(text, links, settings.public_origin)
         else:
             target = current_target(db, row, now)
             if target is None:
@@ -435,6 +460,7 @@ def claim_deliveries(db, body, settings):
                 text, links = attach_links(
                     text, link_urls(db, row.user_id, linked, settings), len(text) - len(reply_tail(reply, category)),
                 )
+                text, links = link_note_urls(text, links, settings.public_origin)
         lease = secrets.token_urlsafe(32)
         callback = secrets.token_urlsafe(32) if reminder is not None else None
         row.status, row.lease_token_hash = "leased", hash_token(lease)
