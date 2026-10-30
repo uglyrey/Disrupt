@@ -1,0 +1,48 @@
+{
+    admin off
+    persist_config off
+    grace_period 2s
+    log {
+        level WARN
+    }
+    servers {
+        protocols h1 h2
+        timeouts {
+            read_header 5s
+            read_body 5s
+            write 15s
+            idle 20s
+        }
+    }
+}
+
+beresta-netcheck-20261030.185-106-94-251.sslip.io {
+    tls {
+        issuer acme {
+            dir https://acme-v02.api.letsencrypt.org/directory
+            disable_tlsalpn_challenge
+        }
+    }
+    root * /run/beresta-vpn-netcheck/www
+    header {
+        -Server
+        Cache-Control "no-store"
+        Referrer-Policy "no-referrer"
+        X-Content-Type-Options "nosniff"
+        Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://app.berestaapp.ru; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+    @bad_method not method GET HEAD
+    respond @bad_method 405
+    handle /health {
+        header Content-Type application/json
+        respond `{"status":"ok","purpose":"network-diagnostic"}` 200
+    }
+    @files path / /check.js /style.css
+    handle @files {
+        file_server
+    }
+    handle {
+        respond 404
+    }
+}

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <title>beresta · проверка доступности</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/check.js" defer></script>
+</head>
+<body>
+  <main>
+    <p class="brand">beresta</p>
+    <h1>Проверка доступности</h1>
+    <p class="success">Тестовая страница на зарубежном сервере открылась.</p>
+    <p>Оставьте VPN включённым и проверьте основной адрес. Затем передайте Марку результат. Если сама эта страница не открывается, сообщите код ошибки браузера.</p>
+    <p>Здесь нет входа в аккаунт, заметок и аналитики. Результат остаётся в этой вкладке. Проверка запрашивает только публичный значок Beresta без cookie.</p>
+    <p class="muted">Временная ссылка действует до __EXPIRES_MSK__ по Москве.</p>
+    <button id="check" type="button">Проверить основной адрес</button>
+    <p id="status" role="status" aria-live="polite">Проверка ещё не запускалась.</p>
+    <label for="report">Результат для передачи Марку</label>
+    <textarea id="report" rows="9" readonly>Тестовая страница открылась. Основной адрес ещё не проверен.</textarea>
+    <button id="copy" type="button" class="secondary">Скопировать результат</button>
+    <p><a href="https://app.berestaapp.ru/" target="_blank" rel="noopener noreferrer">Открыть основной сайт</a></p>
+    <p class="muted">Не вводите здесь пароль или код входа. Эта страница проверяет соединение. Точный код DNS-ошибки JavaScript браузера не сообщает.</p>
+  </main>
+</body>
+</html>
