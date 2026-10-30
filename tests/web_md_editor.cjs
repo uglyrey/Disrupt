@@ -419,6 +419,11 @@ async function newNoteField() {
 }
 
 async function gear() {
+  // The gear is visible at rest, full green on hover, and light on the dark selected row.
+  const buttons = read('buttons.css');
+  assert.match(buttons, /button\.category-more\{color:#57715c!important;opacity:1!important\}/);
+  assert.match(buttons, /button\.category-more:hover:not\(:disabled\)[^{]*\{color:#345943!important/);
+  assert.match(buttons, /@media\(min-width:641px\)\{\s*\.category-item:has\(>\.category-button\[aria-pressed=true\]\)>button\.category-more\{color:#e6efe0!important/);
   const t = boot({categories: [{id: 'c1', name: 'Дом', version: 1}, {id: 'c2', name: 'Работа', version: 1}]}); const {w, $} = t;
   try {
     await settled();
