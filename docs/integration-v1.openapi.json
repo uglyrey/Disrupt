@@ -7211,6 +7211,23 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/auth/logout-others": {
+      "post": {
+        "summary": "Logout Others",
+        "operationId": "logout_others_api_v1_auth_logout_others_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/api/v1/captures/text": {
       "post": {
         "summary": "Create Capture",
