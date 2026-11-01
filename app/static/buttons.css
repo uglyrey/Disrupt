@@ -10,11 +10,11 @@
   --btn-radius:10px;--btn-weight:600;--btn-leading:1.25;
   --btn-fs-sm:13px;--btn-fs:14px;--btn-fs-lg:15px;
   --btn-px-sm:12px;--btn-px:16px;--btn-px-lg:20px;
-  --btn-primary:#345943;--btn-primary-hover:#2a4a37;--btn-on-primary:#fff;
-  --btn-secondary:#eaf0e6;--btn-secondary-hover:#dde8d5;--btn-on-secondary:#264431;
-  --btn-ink:#2d4d3a;--btn-quiet-hover:#e6ede0;--btn-line:#7b9382;--btn-line-hover:#5f7a69;
-  --btn-danger:#8c3b2b;--btn-danger-hover:#7a3224;
-  --btn-link:#2f5a3f;--btn-ring:#2f6b46;--btn-disabled:.5;
+  --btn-primary:#3f7a2b;--btn-primary-hover:#2f5f1f;--btn-on-primary:#fff;
+  --btn-secondary:#eaf3e3;--btn-secondary-hover:#deebd2;--btn-on-secondary:#383832;
+  --btn-ink:#40403a;--btn-quiet-hover:#e6f0dd;--btn-line:#8c8c82;--btn-line-hover:#717168;
+  --btn-danger:#a33a28;--btn-danger-hover:#8f2f20;
+  --btn-link:#3f7a2b;--btn-ring:#3f7a2b;--btn-disabled:.5;
 }
 @media(max-width:640px){:root{--btn-h-sm:36px;--btn-h:44px}}
 
@@ -38,8 +38,8 @@ button.quiet:hover:not(:disabled),a.quiet:hover,a.cta-quiet:hover,.cta-quiet:hov
 button.danger,a.danger{background:var(--btn-danger)!important;border-color:var(--btn-danger)!important;color:#fff!important;filter:none!important}
 button.danger:hover:not(:disabled),a.danger:hover{background:var(--btn-danger-hover)!important;border-color:var(--btn-danger-hover)!important;color:#fff!important}
 /* Text: looks like a link, keeps the same hit area as a small button */
-button.text-button,button.text-link,button.reminder-link,button.cookie-settings-link,button.tk-note{min-height:var(--btn-h-sm)!important;padding:4px 6px!important;border-color:transparent!important;background:transparent!important;color:var(--btn-link)!important;font-size:var(--btn-fs-sm)!important;text-decoration:underline!important;text-underline-offset:3px;text-decoration-color:#9db6a4}
-button.text-button:hover:not(:disabled),button.text-link:hover:not(:disabled),button.reminder-link:hover:not(:disabled),button.cookie-settings-link:hover:not(:disabled),button.tk-note:hover:not(:disabled){background:transparent!important;border-color:transparent!important;color:#1f3a2a!important;text-decoration-color:currentColor}
+button.text-button,button.text-link,button.reminder-link,button.cookie-settings-link,button.tk-note{min-height:var(--btn-h-sm)!important;padding:4px 6px!important;border-color:transparent!important;background:transparent!important;color:var(--btn-link)!important;font-size:var(--btn-fs-sm)!important;text-decoration:underline!important;text-underline-offset:3px;text-decoration-color:#b5ad9e}
+button.text-button:hover:not(:disabled),button.text-link:hover:not(:disabled),button.reminder-link:hover:not(:disabled),button.cookie-settings-link:hover:not(:disabled),button.tk-note:hover:not(:disabled){background:transparent!important;border-color:transparent!important;color:#2f5f1f!important;text-decoration-color:currentColor}
 /* Disabled */
 button:disabled,button[aria-disabled=true]{opacity:var(--btn-disabled)!important;cursor:not-allowed!important;filter:none!important}
 button:not(:disabled):active{transform:translateY(1px)}
@@ -107,10 +107,10 @@ button:focus-visible,a.telegram-channel-link:focus-visible,a.cta-primary:focus-v
 /* ---- Gear of a category (category settings) ----
    Quiet but visible: muted green at rest (4.4:1 on the sidebar), full green on hover and focus.
    On a selected row the fill is dark green, so there the gear is light (9:1). On a phone the gear sits beside the chip, not on it. */
-button.category-more{color:#57715c!important;opacity:1!important}
-button.category-more:hover:not(:disabled),button.category-more:focus-visible,button.category-more[aria-expanded=true]{color:#345943!important;background:#d5dfcf!important}
+button.category-more{color:#686860!important;opacity:1!important}
+button.category-more:hover:not(:disabled),button.category-more:focus-visible,button.category-more[aria-expanded=true]{color:#3f7a2b!important;background:#d6e6c8!important}
 @media(min-width:641px){
-  .category-item:has(>.category-button[aria-pressed=true])>button.category-more{color:#e6efe0!important}
+  .category-item:has(>.category-button[aria-pressed=true])>button.category-more{color:#e7f0df!important}
   .category-item:has(>.category-button[aria-pressed=true])>button.category-more:hover:not(:disabled),.category-item:has(>.category-button[aria-pressed=true])>button.category-more:focus-visible,.category-item:has(>.category-button[aria-pressed=true])>button.category-more[aria-expanded=true]{color:#fff!important;background:#ffffff2e!important}
   .category-item:has(>.category-button[aria-pressed=true])>button.category-more:focus-visible{outline-color:#fff}
 }

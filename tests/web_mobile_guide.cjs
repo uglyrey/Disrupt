@@ -301,7 +301,7 @@ async function placeholders() {
       assert.ok(field.placeholder.includes('\n'), 'several lines');
       for (const sample of ['«- »', '«1. »', '«- [ ] »']) assert.ok(field.placeholder.includes(sample), sample);
     }
-    assert.match(read('guide.css'), /#6b7a6e/, 'quiet but readable colour');
+    assert.match(read('guide.css'), /#6f6b5f/, 'quiet but readable colour');
     assert.match(read('guide.css'), /#thought::placeholder/);
   } finally { await closeWindow(t); }
 }

@@ -4,7 +4,7 @@
 .trash-status:empty{display:none}
 .trash-body{margin-top:12px}
 .trash-list{margin:0;padding:0;list-style:none}
-.trash-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding:12px 0;border-top:1px solid var(--line,#e0e5dc)}
+.trash-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px;padding:12px 0;border-top:1px solid var(--line,#e0ecd5)}
 .trash-row:first-child{border-top:0}
 .trash-info{display:flex;flex-direction:column;gap:2px;flex:1 1 220px;min-width:0}
 .trash-title{font-weight:650;overflow-wrap:anywhere}
@@ -12,7 +12,7 @@
 .trash-buttons{display:flex;flex-wrap:wrap;gap:8px}
 .trash-buttons button{min-height:40px;padding:0 14px;font-size:13.5px}
 .trash-empty{padding:18px 0 6px;text-align:center}
-.trash-empty-title{margin:0 0 4px;font-size:16px;font-weight:650;color:var(--note-ink,#1f3328)}
+.trash-empty-title{margin:0 0 4px;font-size:16px;font-weight:650;color:var(--note-ink,#2b2b27)}
 @media(max-width:640px){
   .trash-dialog{margin:auto 12px 12px;max-height:90dvh}
   .trash-buttons{width:100%}

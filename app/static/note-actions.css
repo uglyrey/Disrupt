@@ -1,20 +1,20 @@
 /* Действия с заметкой: меню, выбор заметок, подтверждения, плашка «Отменить». Грузится после focus.css. */
-:root{--na-danger:#8c3b2b;--na-line:#d5dfcf}
+:root{--na-danger:#a33a28;--na-line:#d6e6c8}
 
 /* Старый значок «Связанные заметки» переехал в меню «Действия». */
 .tool[data-tool="related"]{display:none!important}
 #pop-actions{width:min(380px,calc(100vw - 32px))}
 .na-menu{display:grid;gap:4px;margin:2px 0 14px}
-.tools .na-item,.na-item{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:0 12px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--note-ink,#1f3328);font-size:15px;font-weight:600;text-align:left}
-.na-item:hover:not(:disabled){background:var(--tool-hover,#eef2e8);filter:none}
-.na-item svg{flex:none;color:var(--tool-ink,#4f6a58)}
+.tools .na-item,.na-item{display:flex;align-items:center;gap:12px;width:100%;min-height:44px;padding:0 12px;border:1px solid transparent;border-radius:10px;background:transparent;color:var(--note-ink,#2b2b27);font-size:15px;font-weight:600;text-align:left}
+.na-item:hover:not(:disabled){background:var(--tool-hover,#edf4e6);filter:none}
+.na-item svg{flex:none;color:var(--tool-ink,#616158)}
 .na-item.is-danger,.na-item.is-danger svg{color:var(--na-danger)}
-.na-section{padding-top:12px;border-top:1px solid var(--line,#e0e5dc)}
-.na-section h3{margin:0 0 6px;font-size:12.5px;font-weight:700;letter-spacing:.02em;color:#5a7060}
+.na-section{padding-top:12px;border-top:1px solid var(--line,#e0ecd5)}
+.na-section h3{margin:0 0 6px;font-size:12.5px;font-weight:700;letter-spacing:.02em;color:#696961}
 .na-links-list{margin:0 0 8px;padding:0;list-style:none}
 .na-link-row{display:flex;align-items:center;gap:4px}
-.na-link-open{flex:1 1 auto;min-width:0;min-height:40px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--note-ink,#1f3328);font-size:14px;font-weight:500;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.na-link-open:hover:not(:disabled){background:var(--tool-hover,#eef2e8);filter:none}
+.na-link-open{flex:1 1 auto;min-width:0;min-height:40px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--note-ink,#2b2b27);font-size:14px;font-weight:500;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.na-link-open:hover:not(:disabled){background:var(--tool-hover,#edf4e6);filter:none}
 .na-link-remove{flex:none;display:grid;place-items:center;width:40px;height:40px;min-height:0;padding:0;border:0;border-radius:8px;font-size:20px;line-height:1}
 .na-empty{margin:0 0 8px;font-size:13px}
 
@@ -27,17 +27,17 @@
 /* Окна */
 .na-dialog{width:min(520px,calc(100vw - 24px))}
 .na-dialog .na-intro{margin:10px 0 0}
-.na-extra{margin:8px 0 0;padding:8px 12px;border-radius:10px;background:#eef3e9;color:#41584a;font-size:13px}
+.na-extra{margin:8px 0 0;padding:8px 12px;border-radius:10px;background:#eef4e8;color:#505049;font-size:13px}
 .na-dialog input[type=search]{margin-top:12px}
 .na-list{display:grid;gap:2px;margin-top:10px;max-height:min(40dvh,320px);overflow-y:auto;overscroll-behavior:contain}
 .na-row{display:flex;align-items:center;gap:12px;min-height:46px;margin:0;padding:6px 8px;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer}
-.na-row:hover{background:#eef2e8}
+.na-row:hover{background:#edf4e6}
 .na-row input{flex:none;width:20px;height:20px;margin:0;padding:0}
 .na-row-text{display:flex;flex-direction:column;min-width:0}
 .na-row-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.na-row-meta{font-size:12px;color:var(--muted,#616e62);font-weight:400}
+.na-row-meta{font-size:12px;color:var(--muted,#6c6c63);font-weight:400}
 .na-chosen{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
-.na-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:32px;padding:0 10px;border:1px solid var(--na-line);border-radius:999px;background:#eaf0e6;color:#345943;font-size:13px}
+.na-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:32px;padding:0 10px;border:1px solid var(--na-line);border-radius:999px;background:#eaf3e3;color:#3f7a2b;font-size:13px}
 .na-chip-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
 .na-more{margin-top:8px}
 .na-count{margin:12px 0 0}
@@ -45,7 +45,7 @@
 .na-confirm p{margin:12px 0 0}
 
 /* Плашка «Задача удалена. Отменить» */
-.na-toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom));z-index:90;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 24px);padding:8px 8px 8px 16px;border-radius:12px;background:#24372d;color:#fff;font-size:14px;box-shadow:0 12px 32px #1f33284d;transform:translateX(-50%)}
+.na-toast{position:fixed;left:50%;bottom:max(20px,env(safe-area-inset-bottom));z-index:90;display:flex;align-items:center;gap:12px;max-width:calc(100vw - 24px);padding:8px 8px 8px 16px;border-radius:12px;background:#30302b;color:#fff;font-size:14px;box-shadow:0 12px 32px #1f33284d;transform:translateX(-50%)}
 .na-toast-text{min-width:0}
 .na-toast .na-toast-action{flex:none;min-height:40px;padding:0 14px;border:1px solid #ffffff55;border-radius:8px;background:transparent;color:#fff}
 .na-toast .na-toast-action:hover:not(:disabled){background:#ffffff22;filter:none}
