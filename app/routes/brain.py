@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import case, func, select
 
 from app.dashboard import build_dashboard
-from app.models import Item, Note, User
+from app.models import Item, Note, Reminder, User
 from app.notes_manage import manual_edges
 from app.related import MIN_SCORE, NoteDoc, build_index, graph_edges, related_notes
 from app.security import get_login_session
@@ -43,12 +43,36 @@ def load_docs(db, user_id, *, must_include=None, cap=CORPUS_LIMIT):
     ]
 
 
-def task_row(item, title, note_version, updated_at, created_at, timezone):
-    """One task for the list. `due_resolved_at` is the deadline as a moment, or None when it is unknown."""
-    resolved, has_time = resolve_due(item.due_at, item.due_text, created_at, timezone)
+# A reminder that still stands for its task. Cancelled and finished ones do not decide the date.
+LIVE_REMINDER = ("confirmed", "sent", "unknown", "blocked", "failed")
+
+
+def reminder_moment():
+    """SQL: the current time of the task's own reminder (not the advance «Через час» one), or NULL.
+
+    Every move of a reminder (site, bot buttons, time question) sets confirmed_at, so the latest one is the current one."""
+    return (
+        select(Reminder.scheduled_at)
+        .where(
+            Reminder.item_id == Item.id, Reminder.user_id == Item.user_id,
+            Reminder.advance_of.is_(None), Reminder.status.in_(LIVE_REMINDER),
+        )
+        .order_by(Reminder.confirmed_at.desc(), Reminder.id)
+        .limit(1).scalar_subquery()
+    )
+
+
+def task_row(item, title, note_version, updated_at, created_at, timezone, reminder_at=None):
+    """One task for the list. `due_resolved_at` is the deadline as a moment, or None when it is unknown.
+
+    The time of the task's live reminder wins over the date kept on the task, so a moved reminder moves the task."""
+    if reminder_at is not None:
+        resolved, has_time = float(reminder_at), True
+    else:
+        resolved, has_time = resolve_due(item.due_at, item.due_text, created_at, timezone)
     return {
         "id": item.id, "text": item.text, "status": item.status, "version": item.version,
-        "due_at": item.due_at, "due_text": item.due_text, "due_resolved_at": resolved, "due_has_time": has_time,
+        "due_at": reminder_at if reminder_at is not None else item.due_at, "due_text": item.due_text, "due_resolved_at": resolved, "due_has_time": has_time,
         "position": item.position, "category_id": item.category_id, "note_id": item.note_id,
         "note_title": title, "note_version": note_version, "note_updated_at": updated_at,
     }
@@ -107,8 +131,10 @@ def build_router(database, settings):
             .join(Note, (Note.id == Item.note_id) & (Note.user_id == Item.user_id))
             .where(*mine, Note.deleted_at.is_(None)).group_by(Item.status)
         ).all())
+        moment = reminder_moment().label("reminder_at")
+        due = func.coalesce(moment, Item.due_at)
         statement = (
-            select(Item, Note.title, Note.version, Note.updated_at, Note.created_at)
+            select(Item, Note.title, Note.version, Note.updated_at, Note.created_at, moment)
             .join(Note, (Note.id == Item.note_id) & (Note.user_id == Item.user_id))
             .where(*mine, Note.deleted_at.is_(None))
         )
@@ -118,8 +144,8 @@ def build_router(database, settings):
         # Open first when both are shown. Position and id keep paging stable.
         statement = statement.order_by(
             (Item.status == "completed").asc(),
-            (Item.due_at.is_(None) | (Item.status == "completed")).asc(),
-            case((Item.status == "open", Item.due_at), else_=None).asc(),
+            (due.is_(None) | (Item.status == "completed")).asc(),
+            case((Item.status == "open", due), else_=None).asc(),
             Note.updated_at.desc(), Item.position, Item.id,
         ).limit(limit + 1).offset(offset)
         rows = db.execute(statement).all()
@@ -127,8 +153,8 @@ def build_router(database, settings):
         return {
             "status": status, "limit": limit, "offset": offset, "has_more": len(rows) > limit,
             "counts": {"open": counts.get("open", 0), "completed": counts.get("completed", 0)},
-            "items": [task_row(item, title, note_version, updated_at, created_at, zone)
-                      for item, title, note_version, updated_at, created_at in rows[:limit]],
+            "items": [task_row(item, title, note_version, updated_at, created_at, zone, reminder_at)
+                      for item, title, note_version, updated_at, created_at, reminder_at in rows[:limit]],
         }
 
     return router
