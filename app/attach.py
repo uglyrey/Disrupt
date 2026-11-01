@@ -270,6 +270,21 @@ def heading_for(db, user_id, settings, now):
     return f"{local.day} {MONTH_NAMES[local.month]}{year}"
 
 
+REQUEST_LINE = re.compile(
+    r"(?:^|(?<=[.!?]\s))(?:пожалуйста,?\s*)?(?:добавь(?:те)?|допиши(?:те)?|запиши(?:те)?|внеси(?:те)?|дополни(?:те)?)\s+"
+    r"(?:это\s+|ещё\s+|еще\s+|туда\s+)?(?:к|в|на)\s+заметк\w*\s+(?:(?:про|о|об|по)\s+)?[^:\n,.;]{2,80}[:,]?\s*",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def without_request(body):
+    """A safety net for the model: the words «добавь к заметке про X:» are not part of the added text."""
+    def clean(line):
+        stripped = REQUEST_LINE.sub("", line, count=1).strip()
+        return stripped[:1].upper() + stripped[1:] if stripped and stripped != line.strip() else line
+    return "\n".join(clean(line) for line in (body or "").split("\n"))
+
+
 def section_of(heading, body):
     return f"## {heading}\n\n{(body or '').strip()}"
 
@@ -292,7 +307,7 @@ def attach_capture(db, capture, target, settings, *, explicit, now=None):
     now = time.time() if now is None else now
     own = db.scalar(select(Note).where(Note.capture_id == capture.id, Note.user_id == capture.user_id))
     heading = heading_for(db, capture.user_id, settings, now)
-    section = section_of(heading, own.markdown)
+    section = section_of(heading, without_request(own.markdown) if explicit else own.markdown)
     if target.id == own.id or len(target.markdown) + len(section) + 2 > MAX_MARKDOWN:
         raise HTTPException(409, "Заметка получится слишком длинной. Запись осталась отдельной.")
     user_id = capture.user_id
@@ -349,7 +364,9 @@ def separate_capture(db, capture, settings=None, now=None):
         raise HTTPException(409, "Заметка, куда добавили запись, в корзине или удалена. Верните её и повторите.")
     moved = capture.attach_moved or {}
     kept = False
-    section = "\n\n" + section_of(capture.attach_heading or "", own.markdown)
+    section = "\n\n" + section_of(
+        capture.attach_heading or "", without_request(own.markdown) if capture.attach_explicit else own.markdown,
+    )
     taken = set(moved.get("conclusions") or [])
     conclusions = [c for c in target.conclusions if c.get("id") not in taken]
     if section in target.markdown:

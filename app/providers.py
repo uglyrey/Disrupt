@@ -37,7 +37,7 @@ from app.note_style import (
 )
 from app.profile_example import EXAMPLE_ANSWERS, EXAMPLE_PROFILE
 from app.reminder_proposals import sentence_spans
-from app.schemas import ProposedItem, StrictModel, StructuredNote, well_formed_local_minute
+from app.schemas import ContinuesNote, ProposedItem, StrictModel, StructuredNote, well_formed_local_minute
 from app.time_check import SKEW, read_model_time
 
 SYSTEM_PROMPT = """Ты помогаешь структурировать мысли пользователя. Пиши на языке оригинала.
@@ -647,7 +647,7 @@ class MockProvider:
         for candidate in candidates:
             roots = {root for root, _ in terms(candidate["title"])}
             if roots & wanted:
-                return {"ref": candidate["ref"], "hint": hint[:200], "confidence": 0.9}
+                return ContinuesNote(ref=candidate["ref"], hint=hint[:200], confidence=0.9)
         return None
 
     def structure(self, text, *, categories=(), timezone=None, profile=None, candidates=None):
