@@ -107,6 +107,18 @@ class Capture(Base):
     audio_media_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     transcript: Mapped[str | None] = mapped_column(EncryptedText("captures.transcript"), nullable=True)
     transcript_version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # Продолжение заметки (docs/attach-to-note-v1.md). Пусто, пока запись остаётся своей заметкой без вопроса.
+    # offered: спросили, заметка-кандидат в attach_note_id. attached: запись добавлена в attach_note_id, своя заметка
+    # скрыта и хранит исходник. separate: человек выбрал отдельную заметку или отменил добавление.
+    attach_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    attach_note_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    attach_explicit: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    attach_offered_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    attach_decided_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Заголовок раздела («2 ноября»), чтобы отмена нашла в заметке ровно тот раздел, который мы добавили.
+    attach_heading: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Что переехало вместе с записью: {"items": [[id, position]], "reminders": [id], "conclusions": [id]}.
+    attach_moved: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class TranscriptRevision(Base):

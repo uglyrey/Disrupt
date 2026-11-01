@@ -79,6 +79,7 @@ category_name: если у записи ясная сфера жизни, выб
 Иначе дай новую общую: 1-2 слова, с заглавной буквы, например Работа, Семья, Здоровье,
 Покупки, Учёба, Финансы, Дом, Идеи, Путешествия, Спорт. Не называй её по конкретной
 записи и не добавляй даты. null только для пустого или непонятного текста.
+note_candidates (если есть) это заметки автора с ref и title. Если запись продолжает одну из них («ещё по курсовой», «к заметке про ремонт»), верни continues_note: ref, hint (слова автора), confidence 0..1. Иначе null. Просьбу «добавь к заметке…» в текст не включай.
 Если note_text начинается с «[Объединение заметок]», это несколько заметок автора под строками «=== Заметка N: ... ===».
 Собери одну цельную заметку: сохрани все факты, задачи, идеи и сроки, повторы сведи, противоречия оставь.
 Служебные строки в текст не включай.
@@ -86,7 +87,7 @@ category_name: если у записи ясная сфера жизни, выб
 {"title":"Заголовок","markdown":"Текст с базовой разметкой",
 "conclusions":[{"text":"Возможный вывод","source_quote":"Точная цитата"}],
 "items":[{"kind":"task","text":"Явное действие","source_quote":"Точная цитата","due_text":null,"due_at":null,"duration_minutes":null}],
-"category_name":null}
+"category_name":null,"continues_note":null}
 """.replace("{style}", STYLE_PROMPT.strip())
 
 # Один короткий вопрос: какое время человек имел в виду в письменном ответе на «Верно?» (app/time_ai.py).
@@ -225,7 +226,7 @@ STRUCTURE_MAX_TOKENS = 4000
 WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 
 
-def structure_context(categories, timezone, now=None, profile=None):
+def structure_context(categories, timezone, now=None, profile=None, candidates=None):
     """Compact JSON data for the model: today and the clock in the account time zone and the user's categories.
 
     `profile` is what the person's questionnaire turned into (facts, vocabulary, note style, personal daypart times,
@@ -244,6 +245,9 @@ def structure_context(categories, timezone, now=None, profile=None):
     }
     if profile:
         data["user_profile"] = profile
+    if candidates:
+        # Only a short ref and the title of up to three notes (app/attach.py). Never their text.
+        data["note_candidates"] = [{"ref": c["ref"], "title": c["title"]} for c in candidates]
     return json.dumps(data, ensure_ascii=False)
 
 DEMO_TEXT = (
@@ -285,6 +289,7 @@ class LLMProvider(Protocol):
     # `timezone` is the IANA zone of the account for this job. A provider that does not take it uses its own.
     def structure(
         self, text: str, *, categories: tuple[str, ...] = (), timezone: str | None = None, profile: dict | None = None,
+        candidates: list | None = None,
     ) -> StructuredNote: ...
 
     def assistant(self, kind: str, context, *, question: str | None = None) -> dict: ...
@@ -627,7 +632,30 @@ class MockProvider:
             conclusions=[], items=items, category_name=mock_category(text, categories),
         )
 
-    def structure(self, text, *, categories=(), timezone=None, profile=None):
+    @staticmethod
+    def continues(text, candidates):
+        """Offline demo of «this continues a note»: «Продолжаю про X» or the phrases of app/attach.py name a candidate."""
+        if not candidates:
+            return None
+        found = re.search(r"продолжа\w*\s+(?:тему\s+|про\s+)(?P<hint>[^:\n.]{2,80})", text, re.IGNORECASE)
+        from app.attach import hint_of
+        hint = found.group("hint").strip() if found else hint_of(text)[0]
+        if not hint:
+            return None
+        from app.related import terms
+        wanted = {root for root, _ in terms(hint)}
+        for candidate in candidates:
+            roots = {root for root, _ in terms(candidate["title"])}
+            if roots & wanted:
+                return {"ref": candidate["ref"], "hint": hint[:200], "confidence": 0.9}
+        return None
+
+    def structure(self, text, *, categories=(), timezone=None, profile=None, candidates=None):
+        result = self.structure_plain(text, categories=categories)
+        link = self.continues(text, candidates)
+        return result.model_copy(update={"continues_note": link}) if link else result
+
+    def structure_plain(self, text, *, categories=()):
         if text == DEMO_TEXT:
             return StructuredNote(
                 title="Запуск проекта",
@@ -885,9 +913,10 @@ class CloudRuProvider:
         self._timezone = timezone
         self.endpoint = base_url + "/chat/completions"
 
-    def structure(self, text, *, categories=(), timezone=None, now=None, profile=None):
+    def structure(self, text, *, categories=(), timezone=None, now=None, profile=None, candidates=None):
         return self.structure_with_usage(
             text, categories=categories, on_usage=lambda _: None, timezone=timezone, now=now, profile=profile,
+            candidates=candidates,
         )
 
     @staticmethod
@@ -1056,7 +1085,9 @@ class CloudRuProvider:
             raise ProviderError("provider_invalid_response")
         return "".join(parts), finish_reason, usage
 
-    def structure_with_usage(self, text, *, categories=(), on_usage, timezone=None, now=None, profile=None):
+    def structure_with_usage(
+        self, text, *, categories=(), on_usage, timezone=None, now=None, profile=None, candidates=None,
+    ):
         zone_name = timezone or self._timezone
         try:
             zone = ZoneInfo(zone_name)
@@ -1072,7 +1103,7 @@ class CloudRuProvider:
                     "response_format": self.response_format(StructuredNote),
                     "messages": [
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": structure_context(categories, zone_name, moment, profile)},
+                        {"role": "user", "content": structure_context(categories, zone_name, moment, profile, candidates)},
                         {"role": "user", "content": json.dumps({"note_text": text}, ensure_ascii=False)},
                     ],
                 },

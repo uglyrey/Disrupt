@@ -87,8 +87,10 @@ def build_router(database, settings):
         owned_capture(db, image.capture_id, session.user_id)
         # Deleted notes hide their images even when requested through the original capture.
         note = db.scalar(select(Note).where(Note.capture_id == image.capture_id))
-        if note is not None:
-            owned_note(db, note.id, session.user_id)
+        # A record added to another note moves its pictures there (docs/attach-to-note-v1.md): that note decides.
+        holder = image.note_id or (note.id if note is not None else None)
+        if holder is not None:
+            owned_note(db, holder, session.user_id)
         return Response(image.data, media_type=image.media_type, headers={
             "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
             "Cross-Origin-Resource-Policy": "same-origin", "Content-Disposition": 'inline; filename="image.webp"',
