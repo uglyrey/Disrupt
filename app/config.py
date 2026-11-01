@@ -14,6 +14,8 @@ PROGRAM_BASE_URL = "https://shared1.multitool.works:4000/v1"
 OFFICIAL_BASE_URL = "https://foundation-models.api.cloud.ru/v1"
 ALLOWED_MODEL_BASE_URLS = {PROGRAM_BASE_URL, OFFICIAL_BASE_URL}
 LLM_READ_TIMEOUT_SECONDS = 90
+# Вход продлевается не чаще раза в сутки.
+SESSION_RENEW_SECONDS = 86400
 STT_PROMPT_MAX = 200
 STT_PROMPT_DEFAULT = "Напомни сегодня в 16:00 позвонить маме. Завтра в 9:30 встреча. 15 октября в 14:00."
 LLM_READ_TIMEOUT_RANGE = (30, 240)
@@ -114,7 +116,8 @@ class Settings:
     limit_timezone: str = "Europe/Moscow"
     # Когда напомнить, если человек попросил напомнить, но время не назвал. Секунды, 0 отключает.
     reminder_default_delay_seconds: int = 3600
-    session_seconds: int = 86400
+    # Вход держится 30 дней и продлевается при использовании (app/security.py, не чаще раза в сутки).
+    session_seconds: int = 30 * 86400
     lease_seconds: int = 120
     # Ждём ответ модели не дольше этого времени на одно чтение. Потоковый режим включают только после ручной проверки.
     llm_read_timeout_seconds: int = LLM_READ_TIMEOUT_SECONDS
@@ -259,6 +262,8 @@ class Settings:
             raise ValueError("NOTES_REVISION_KEEP must be 0 or between 5 and 1000")
         if len(self.stt_prompt) > STT_PROMPT_MAX or "\x00" in self.stt_prompt:
             raise ValueError(f"NOTES_STT_PROMPT must be at most {STT_PROMPT_MAX} characters")
+        if not 2 * SESSION_RENEW_SECONDS <= self.session_seconds <= 365 * 86400:
+            raise ValueError("NOTES_SESSION_SECONDS must be between 2 days and 365 days")
         if not 1 <= self.trash_days <= 3650:
             raise ValueError("NOTES_TRASH_DAYS must be between 1 and 3650")
         if self.fallback_enabled:
@@ -386,6 +391,7 @@ class Settings:
             provider=os.environ.get("NOTES_PROVIDER", "mock"),
             auto_worker=flag("NOTES_AUTO_WORKER", True),
             secure_cookies=flag("NOTES_SECURE_COOKIES", False),
+            session_seconds=int(os.environ.get("NOTES_SESSION_SECONDS", str(30 * 86400))),
             admin_allowed_networks=os.environ.get("NOTES_ADMIN_ALLOWED_NETWORKS", DEFAULT_ADMIN_NETWORKS),
             admin_cookie_secure=flag("NOTES_ADMIN_COOKIE_SECURE", True),
             review_enabled=flag("NOTES_REVIEW_ENABLED", False),

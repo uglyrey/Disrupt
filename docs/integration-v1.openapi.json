@@ -7211,6 +7211,23 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/auth/logout-others": {
+      "post": {
+        "summary": "Logout Others",
+        "operationId": "logout_others_api_v1_auth_logout_others_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/api/v1/captures/text": {
       "post": {
         "summary": "Create Capture",
@@ -9077,7 +9094,7 @@
               "$ref": "#/components/schemas/TextLink"
             },
             "type": "array",
-            "maxItems": 5,
+            "maxItems": 6,
             "title": "Links"
           }
         },
@@ -11590,8 +11607,8 @@
           "url": {
             "type": "string",
             "maxLength": 2000,
-            "minLength": 40,
-            "pattern": "^https://calendar\\.google\\.com/calendar/render\\?action=TEMPLATE&",
+            "minLength": 12,
+            "pattern": "^(https://calendar\\.google\\.com/calendar/render\\?action=TEMPLATE&|https?://[^/\\s]+/\\?capture=)",
             "title": "Url"
           }
         },
@@ -11603,7 +11620,7 @@
           "url"
         ],
         "title": "TextLink",
-        "description": "A clickable part of the message text: «Добавить в Google Календарь». Offset and length are UTF-16 units."
+        "description": "A clickable part of the message text: «Добавить в Google Календарь» or «Открыть заметку». Offset and length are UTF-16 units."
       },
       "TokenBody": {
         "properties": {

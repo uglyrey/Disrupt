@@ -1,0 +1,5 @@
+/* Hidden copy of a text field, only used to measure where the caret is (typewriter.js). Loaded last. */
+.tw-mirror{position:absolute;top:0;left:-10000px;visibility:hidden;pointer-events:none;box-sizing:border-box;margin:0;border:0;white-space:pre-wrap;overflow:hidden;contain:layout style}
+.tw-mirror>span{display:inline-block;vertical-align:top;width:0;overflow:hidden}
+/* Room under the last line, so that it can come up to the middle of the screen while the note is edited */
+.note-body.is-editing{padding-bottom:38vh}

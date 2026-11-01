@@ -103,3 +103,14 @@ button:focus-visible,a.telegram-channel-link:focus-visible,a.cta-primary:focus-v
   outline:2px solid var(--btn-ring)!important;outline-offset:2px!important;box-shadow:none}
 .guide-bubble button:focus-visible{outline-color:#fff!important}
 @media(prefers-reduced-motion:reduce){button,a.telegram-channel-link,a.cta-primary,a.cta-quiet,a.cta-channel,a.button-link{transition:none}}
+
+/* ---- Gear of a category (category settings) ----
+   Quiet but visible: muted green at rest (4.4:1 on the sidebar), full green on hover and focus.
+   On a selected row the fill is dark green, so there the gear is light (9:1). On a phone the gear sits beside the chip, not on it. */
+button.category-more{color:#57715c!important;opacity:1!important}
+button.category-more:hover:not(:disabled),button.category-more:focus-visible,button.category-more[aria-expanded=true]{color:#345943!important;background:#d5dfcf!important}
+@media(min-width:641px){
+  .category-item:has(>.category-button[aria-pressed=true])>button.category-more{color:#e6efe0!important}
+  .category-item:has(>.category-button[aria-pressed=true])>button.category-more:hover:not(:disabled),.category-item:has(>.category-button[aria-pressed=true])>button.category-more:focus-visible,.category-item:has(>.category-button[aria-pressed=true])>button.category-more[aria-expanded=true]{color:#fff!important;background:#ffffff2e!important}
+  .category-item:has(>.category-button[aria-pressed=true])>button.category-more:focus-visible{outline-color:#fff}
+}

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -8,6 +9,7 @@ import httpx
 from .config import Settings
 
 MAX_AUDIO_BYTES = 10 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 # A reminder button carries one of these prefixes before the secret token: done, in an hour, tomorrow.
@@ -245,9 +247,19 @@ class TelegramClient:
                     self._base + "sendMessage", json=payload, timeout=httpx.Timeout(8, connect=3),
                 )
                 data = response.json()
-        except (httpx.HTTPError, ValueError, TimeoutError):
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as error:
+            # No HTTP request has been sent. Record the receipt durably and let the
+            # core authorize a later attempt; do not retry inside this lease.
+            logger.warning("telegram_delivery_not_sent reason=%s", type(error).__name__)
+            return {**result, "status": "retryable", "error_code": "telegram_not_sent",
+                    "retry_after_seconds": 30}
+        except (httpx.HTTPError, ValueError, TimeoutError) as error:
+            # A write/read failure may follow a successful send. Never replay it.
+            # Exception messages and request URLs can contain secrets and note text.
+            logger.warning("telegram_delivery_unknown reason=%s", type(error).__name__)
             return result
         if not isinstance(data, dict):
+            logger.warning("telegram_delivery_unknown reason=invalid_json_shape")
             return result
         message = data.get("result")
         if response.status_code == 200 and data.get("ok") is True and isinstance(message, dict):
@@ -260,6 +272,7 @@ class TelegramClient:
         # Only coherent Telegram rejections prove that this request did not send a message.
         code = data.get("error_code")
         if data.get("ok") is not False or type(code) is not int or response.status_code != code:
+            logger.warning("telegram_delivery_unknown reason=incoherent_response http_status=%d", response.status_code)
             return result
         if code == 403:
             return {**result, "status": "blocked", "error_code": "telegram_403"}
@@ -270,6 +283,7 @@ class TelegramClient:
                 return {**result, "status": "retryable", "error_code": "telegram_429", "retry_after_seconds": retry}
         if code == 401:
             return {**result, "error_code": "telegram_401"}
+        logger.warning("telegram_delivery_unknown reason=telegram_rejection http_status=%d", response.status_code)
         return result
 
     async def voice(self, file_id):

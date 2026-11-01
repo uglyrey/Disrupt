@@ -85,7 +85,7 @@ def test_full_scheduler_sender_and_completed_button_flow(reminders, tmp_path):
         assert db.scalar(select(func.count()).select_from(ProductEvent).where(ProductEvent.name == "reminder_sent")) == 1
 
 
-@pytest.mark.parametrize("failure", ["timeout", "invalid_json", "invalid_success", "500", "400", "fake_403", "bad_429"])
+@pytest.mark.parametrize("failure", ["timeout", "write_timeout", "write_error", "invalid_json", "invalid_success", "500", "400", "fake_403", "bad_429"])
 def test_ambiguous_send_is_unknown_without_retry(reminders, tmp_path, failure, caplog):
     app, client, ids = reminders
     make_due(app, client, ids)
@@ -96,6 +96,9 @@ def test_ambiguous_send_is_unknown_without_retry(reminders, tmp_path, failure, c
         attempts.append(request)
         if failure == "timeout":
             raise httpx.ReadTimeout("secret token and private note", request=request)
+        if failure in {"write_timeout", "write_error"}:
+            error = httpx.WriteTimeout if failure == "write_timeout" else httpx.WriteError
+            raise error("secret token and private note", request=request)
         if failure == "invalid_json":
             return httpx.Response(200, text="private note")
         if failure == "invalid_success":
@@ -117,6 +120,47 @@ def test_ambiguous_send_is_unknown_without_retry(reminders, tmp_path, failure, c
     with app.state.sessions() as db:
         assert db.scalar(select(Outbox)).status == "unknown"
         assert db.scalar(select(Reminder)).status == "unknown"
+
+
+@pytest.mark.parametrize("error", [httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout])
+def test_unsent_connection_failure_survives_restart_and_retries_after_delay(reminders, tmp_path, error, caplog):
+    app, client, ids = reminders
+    make_due(app, client, ids)
+    Scheduler(app.state.sessions).run_once()
+    settings, attempts = settings_for(tmp_path), []
+
+    def handler(request):
+        attempts.append(request)
+        if len(attempts) == 1:
+            raise error("secret token and private note", request=request)
+        return success(request)
+
+    async def scenario():
+        c, t, core, telegram = await clients(app, settings, handler)
+        async with c, t:
+            sender = DeliverySender(settings, core, telegram, journal_for(settings))
+            assert await sender.run_once()
+            assert not await sender.run_once()
+            with app.state.sessions() as db:
+                row = db.scalar(select(Outbox))
+                assert row.status == "retryable"
+                assert row.error_code == "telegram_not_sent"
+                assert row.retry_at > time.time() + 25
+            restarted = DeliverySender(settings, core, telegram, journal_for(settings))
+            assert not await restarted.run_once()
+            with app.state.sessions() as db:
+                db.scalar(select(Outbox)).retry_at = time.time() - 1
+                db.commit()
+            assert await restarted.run_once()
+            assert not await restarted.run_once()
+
+    asyncio.run(scenario())
+    assert len(attempts) == 2
+    assert "telegram_delivery_not_sent" in caplog.text
+    assert "private" not in caplog.text and "test_only_token" not in caplog.text
+    with app.state.sessions() as db:
+        row = db.scalar(select(Outbox))
+        assert row.status == "sent" and row.telegram_message_id == 123
 
 
 @pytest.mark.parametrize("code", [403, 429, 401])

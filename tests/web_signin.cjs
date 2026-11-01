@@ -112,6 +112,9 @@ function staticChecks() {
   // Account menu.
   assert.ok(doc.querySelector('#general-menu [data-proxy="open-password"]'));
   assert.equal(doc.getElementById('open-password').textContent.trim(), 'Сменить пароль');
+  assert.ok(doc.querySelector('#general-menu [data-proxy="open-logout-others"]'), 'the phone menu has the item');
+  assert.equal(doc.getElementById('open-logout-others').textContent.trim(), 'Выйти на других устройствах');
+  assert.match(read('mobile-menu.js'), /open-\(telegram\|feedback\|delete\|trash\|timezone\|password\|profile\|logout-others\)/);
   assert.match(doc.getElementById('nopassword-text').textContent, /У вас нет пароля, вы входите через Telegram или по коду из почты\./);
   assert.equal(doc.getElementById('nopassword-ok').textContent.trim(), 'Понятно');
   assert.match(doc.querySelector('#recovery-dialog p').textContent, /Опишите, как вы входили и что случилось\. Мы ответим на почту\./);
@@ -352,6 +355,39 @@ async function recovery() {
   } finally { limited.close(); }
 }
 
+/* ---------- Sign out on other devices ---------- */
+async function logoutOthers() {
+  let answer = () => reply({closed: 2});
+  const t = await boot({me: user(), routes: {'POST /api/v1/auth/logout-others': () => answer()}});
+  const {$} = t;
+  try {
+    assert.equal($('logout-others-dialog').open, false);
+    $('open-logout-others').click();
+    assert.equal($('logout-others-dialog').open, true, 'it asks first');
+    assert.equal(t.callsTo('/logout-others').length, 0, 'nothing is sent before the answer');
+    $('logout-others-dialog').querySelector('[data-close-dialog].secondary').click();
+    assert.equal($('logout-others-dialog').open, false);
+    assert.equal(t.callsTo('/logout-others').length, 0, 'cancel sends nothing');
+    $('open-logout-others').click();
+    $('logout-others-confirm').click(); await settled();
+    assert.equal(t.callsTo('/logout-others').length, 1);
+    assert.equal(t.callsTo('/logout-others')[0].method, 'POST');
+    assert.equal($('logout-others-dialog').open, false);
+    assert.equal($('message').textContent, 'Готово. На других устройствах нужно будет войти заново.');
+    assert.equal($('workspace').hidden, false, 'this device stays signed in');
+    answer = () => reply({closed: 0});
+    $('open-logout-others').click();
+    $('logout-others-confirm').click(); await settled();
+    assert.equal($('message').textContent, 'Других входов нет.');
+    answer = () => reply({detail: 'Сессия истекла. Войдите снова'}, 401);
+    $('open-logout-others').click();
+    $('logout-others-confirm').click(); await settled();
+    assert.equal($('logout-others-dialog').open, true, 'an error keeps the dialog');
+    assert.equal($('logout-others-dialog').querySelector('.dialog-status').textContent, 'Сессия истекла. Войдите снова');
+    assert.equal($('logout-others-confirm').disabled, false);
+  } finally { t.close(); }
+}
+
 /* ---------- Password change ---------- */
 async function passwordChange() {
   let outcome = () => reply({status: 'ok'});
@@ -498,8 +534,9 @@ module.exports = async () => {
   await oldLogin();
   await recovery();
   await passwordChange();
+  await logoutOthers();
   await noPasswordPopup();
   await eyeIcon();
-  console.log('Sign-in checks passed: two buttons, email code with consent step, resend wait, paste, disabled email, old login, recovery request, password change, no-password popup, eye icon on every password field.');
+  console.log('Sign-in checks passed: two buttons, email code with consent step, resend wait, paste, disabled email, old login, recovery request, password change, sign out on other devices, no-password popup, eye icon on every password field.');
 };
 if (require.main === module) module.exports().catch(error => { console.error(error); process.exitCode = 1; });

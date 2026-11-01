@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 import time
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from .clients import RemoteFailure
@@ -129,7 +130,7 @@ class DeliverySender:
                 if label is not None and (not isinstance(label, str) or not 1 <= len(label) <= 40 or not label.isprintable()):
                     raise ValueError()
             links = item.get("links", [])
-            if not isinstance(links, list) or len(links) > 5:
+            if not isinstance(links, list) or len(links) > 6:
                 raise ValueError()
             units = len(item["text"].encode("utf-16-le")) // 2
             for entry in links:
@@ -142,12 +143,20 @@ class DeliverySender:
                 ):
                     raise ValueError()
                 if (
-                    not isinstance(link, str) or not link.startswith(CALENDAR_PREFIX) or len(link) > 2000
-                    or not link.isascii() or not link.isprintable() or " " in link
+                    not isinstance(link, str) or not (link.startswith(CALENDAR_PREFIX) or self.note_link(link))
+                    or len(link) > 2000 or not link.isascii() or not link.isprintable() or " " in link
                 ):
                     raise ValueError()
         except (ValueError, KeyError, TypeError, AttributeError):
             raise RemoteFailure("core_invalid_delivery", fatal=True) from None
+
+    def note_link(self, link):
+        """A note of this service: the address of the web app with a capture, the same host as the note button."""
+        parsed, expected = urlsplit(link), urlsplit(self.settings.web_url)
+        return (
+            (parsed.scheme, parsed.netloc) == (expected.scheme, expected.netloc) and not parsed.username
+            and parsed.path == "/" and parsed.query.startswith("capture=")
+        )
 
     async def flush_result(self):
         pending = self.journal.pending

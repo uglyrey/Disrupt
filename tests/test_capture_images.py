@@ -1,3 +1,4 @@
+import re
 import uuid
 
 from fastapi.testclient import TestClient
@@ -93,6 +94,13 @@ def test_csrf_large_body_and_no_files(client):
     assert create(client, sources=[b"x" * (10 * 1024 * 1024 + 65537)]).status_code == 413
     response = client.post("/api/v1/captures/with-images", headers={"Idempotency-Key": "empty"}, data={"text": "abc"})
     assert response.status_code == 422
-    policy = client.get("/").headers["content-security-policy"]
-    assert "img-src 'self' blob:;" in policy
-    assert "img-src *" not in policy and "data:" not in policy
+    def images(path):
+        policy = client.get(path).headers["content-security-policy"]
+        assert "*" not in policy and "data:" not in policy
+        return next(part for part in policy.split("; ") if part.startswith("img-src ")).split()[1:]
+
+    # Pages without Metrika keep the exact old list. Pages with it add only Yandex Metrika hosts after 'self' blob:.
+    assert images("/health") == ["'self'", "blob:"]
+    on_page = images("/")
+    assert on_page[:2] == ["'self'", "blob:"] and len(on_page) > 2
+    assert all(re.fullmatch(r"https://mc\.yandex\.[a-z.]+", source) for source in on_page[2:])

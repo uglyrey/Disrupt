@@ -62,6 +62,27 @@ module.exports = async () => {
     await until(()=>w.location.hash==='#notes'&&get('workspace').classList.contains('library-open'),'back to list');
     get('mobile-back').click();
     await until(()=>w.location.hash===''&&!get('capture-card').hidden,'back to capture again');
+    // The list over an open note: the button says «Новая запись» and must show the form, not the note it came from.
+    get('mobile-library-toggle').click();
+    get('notes').querySelector('button[data-note-id]').click();
+    await until(()=>w.location.hash==='#note='+ID&&!get('note-card').hidden,'open note again');
+    get('nav-notes').click();
+    await until(()=>w.location.hash==='#notes'&&get('workspace').classList.contains('library-open'),'list over the note');
+    assert.equal(get('mobile-back-label').textContent,'Новая запись');
+    assert.equal(w.BerestaNavigation.previous().kind,'note');
+    get('mobile-back').click();
+    await until(()=>w.location.hash==='#new'&&!get('capture-card').hidden&&get('note-card').hidden,'back button shows the form');
+    assert.equal(get('workspace').classList.contains('library-open'),false);
+    // «Новая запись» (the button, or the general menu item that clicks it) closes an open list by itself.
+    get('mobile-library-toggle').click();
+    assert.equal(get('workspace').classList.contains('library-open'),true);
+    get('new-note').click();
+    await until(()=>!get('workspace').classList.contains('library-open'),'new note closes the list');
+    assert.equal(get('capture-card').hidden,false);
+    assert.equal(get('mobile-library-toggle').getAttribute('aria-expanded'),'false');
+    // The general menu has its own item for it, first in the sections group.
+    const first=html.indexOf('data-proxy="new-note"');
+    assert.ok(first>0&&first<html.indexOf('data-proxy="nav-notes"'),'general menu item «Новая запись»');
     console.log('Mobile capture checks passed: capture first, list button, note and Back through existing history.');
   } finally {await wait(20);dom.window.close();}
 };

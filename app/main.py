@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -28,7 +28,7 @@ from app.gateway_budget import available as money_available
 from app.integration import IntegrationRejection
 from app.limits import daily_state
 from app.mailer import build_mailer
-from app.models import Capture, Job, Note, ProviderBudget, Revision, User
+from app.models import Capture, Job, LoginSession, Note, ProviderBudget, Revision, User, new_id
 from app.policy import POLICY_VERSION, require_consent
 from app.providers import DEMO_TEXT
 from app.request_metrics import RequestMetrics
@@ -251,6 +251,15 @@ def create_app(
             )
             if request.url.path.startswith("/internal/"):
                 response = integration_error(503, "Временная ошибка. Повторите ту же операцию.", operation_id=request_id)
+        renewal = getattr(request.state, "session_cookie", None)
+        if renewal and not any(
+            value.startswith(COOKIE_NAME + "=") for value in response.headers.getlist("set-cookie")
+        ):
+            # get_login_session moved the expiry forward. Same token and attributes, new lifetime.
+            response.set_cookie(
+                COOKIE_NAME, renewal[0], httponly=True, secure=settings.secure_cookies,
+                samesite="lax", max_age=renewal[1], path="/",
+            )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -423,6 +432,18 @@ def create_app(
         db.delete(session)
         db.commit()
         response.delete_cookie(COOKIE_NAME, path="/")
+
+    @app.post("/api/v1/auth/logout-others")
+    def logout_others(request: Request, db=Depends(database)):
+        session = get_login_session(request, db, write=True)
+        closed = db.execute(
+            delete(LoginSession).where(
+                LoginSession.user_id == session.user_id, LoginSession.token_hash != session.token_hash,
+            )
+        ).rowcount
+        record_event(db, session.user_id, "sessions_closed", new_id())
+        db.commit()
+        return {"closed": closed}
 
     @app.post("/api/v1/captures/text", status_code=202)
     def create_capture(

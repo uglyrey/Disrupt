@@ -29,7 +29,7 @@ module.exports=async()=>{
   assert.equal($('preview').hidden,true);$('markdown').value='Unsaved';
   $('tool-original').click();await settled();assert.equal($('original-details').open,true);assert.equal($('pop-original').hidden,false);assert.equal($('markdown').value,'Unsaved');assert.equal($('markdown').hidden,false);
   $('mobile-library-toggle').click();assert.equal($('workspace').classList.contains('library-open'),true,'The button opens the list');
-  $('mobile-back').click();assert.equal($('workspace').classList.contains('library-open'),false,'Back closes it');
+  $('mobile-library-toggle').click();assert.equal($('workspace').classList.contains('library-open'),false,'The same button closes it');
   $('open-telegram').click();assert.ok($('telegram-dialog').querySelector('.dialog-status'));$('telegram-dialog').close();
   $('open-feedback').click();assert.equal($('feedback-dialog').open,true);
   $('feedback-subject').value='Bug';$('feedback-description').value='Synthetic reproduction';

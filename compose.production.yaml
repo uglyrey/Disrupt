@@ -56,6 +56,7 @@ x-backend-environment: &backend-environment
   # Через сколько секунд напомнить, если человек просил напомнить, но не назвал время. 0 отключает.
   NOTES_REMINDER_DEFAULT_DELAY: ${NOTES_REMINDER_DEFAULT_DELAY:-3600}
   NOTES_TRASH_DAYS: ${NOTES_TRASH_DAYS:-30}
+  NOTES_SESSION_SECONDS: ${NOTES_SESSION_SECONDS:-2592000}
   NOTES_AUTO_WORKER: "false"
   # Шифрование текстов и аудио на диске. Ключ лежит в Docker secret. См. docs/encryption-v1.md.
   NOTES_DATA_ENCRYPTION: required

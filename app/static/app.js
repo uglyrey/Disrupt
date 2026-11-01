@@ -682,6 +682,22 @@ $('logout').onclick = async () => {
   try { await api('/api/v1/auth/logout',{method:'POST'}); pendingVisibleResult=null; epoch++; location.reload(); }
   catch(e) { message(e.message); }
 };
+// Sign out everywhere except here. A dialog asks first, the result comes as a message under the header.
+$('open-logout-others').onclick = event => {
+  const dialog = $('logout-others-dialog');
+  dialog.querySelector('.dialog-status')?.replaceChildren();
+  dialog.showModal(); dialog._opener = event.currentTarget;
+  $('logout-others-confirm').focus();
+};
+$('logout-others-confirm').onclick = async event => {
+  const button = event.currentTarget; if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const result = await api('/api/v1/auth/logout-others',{method:'POST'});
+    $('logout-others-dialog').close();
+    message(result.closed ? 'Готово. На других устройствах нужно будет войти заново.' : 'Других входов нет.');
+  } catch(e) { message(e.message); } finally { button.disabled = false; }
+};
 $('example').onclick = async () => {
   try {
     if ($('thought').value.trim() && !confirm('Заменить ваш текст примером?')) return;
@@ -901,9 +917,27 @@ function saveItem(item, patch, row, restore) {
     if (row.isConnected) restore();
   });
 }
+// Fitting a field to its text shrinks it for a moment. The page is shorter then and the browser pulls the scroll
+// position up to 0. The page also has html{scroll-behavior:smooth}, so the old code that put it back rolled down
+// from the top: the jumps and the drift while typing. This runs `change` and puts every scroll back at once.
+function holdScroll(field, change) {
+  const saved = [];
+  for (let node = field.parentElement; node; node = node.parentElement) if (node.scrollTop) saved.push([node,node.scrollTop]);
+  const x = window.scrollX, y = window.scrollY;
+  try { change(); }
+  finally {
+    for (const [node,top] of saved) {
+      if (node.scrollTop === top) continue;
+      if (typeof node.scrollTo === 'function') node.scrollTo({top,behavior:'instant'}); else node.scrollTop = top;
+    }
+    if (window.scrollY !== y || window.scrollX !== x) window.scrollTo({left:x,top:y,behavior:'instant'});
+  }
+}
 function growField(field) {
-  field.style.height = 'auto';
-  if (field.scrollHeight) field.style.height = `${field.scrollHeight}px`;
+  holdScroll(field,() => {
+    field.style.height = 'auto';
+    if (field.scrollHeight) field.style.height = `${field.scrollHeight}px`;
+  });
 }
 function updateItemsCount(note) {
   const tasks = note.items.filter(item => item.kind === 'task'), done = tasks.filter(item => item.status === 'completed').length;

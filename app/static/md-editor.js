@@ -339,10 +339,12 @@
       if (!editing) { renderPreview(); return; }
       if (window.BerestaFocus && window.BerestaFocus.grow) window.BerestaFocus.grow();
       if (!focus) return;
-      ta.focus();
+      // Focus must not scroll by itself: it would show the first line of a long note. The caret line goes to the middle.
+      ta.focus({preventScroll: true});
       const lines = ta.value.split('\n');
       const pos = start ? 0 : line !== null && line < lines.length ? offsetOf(lines, line, lines[line].length) : end ? ta.value.length : 0;
       ta.setSelectionRange(pos, pos);
+      if (window.BerestaTypewriter) window.BerestaTypewriter.reveal(ta);
     }
     function leave() {
       if (mode !== 'edit') return;

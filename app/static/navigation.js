@@ -6,6 +6,9 @@
   const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
   const idRoute = new RegExp(`^#(note|source)=(${uuid})$`,'i');
   let current = null, ready = false, serial = 0, running = false, queued = false, timer = null;
+  // Screens of this tab by history position, for the phone Back button. Only identifiers, nothing else.
+  const routes = new Map();
+  const remember = value => { if (value && Number.isSafeInteger(value.index)) routes.set(`${value.group}:${value.index}`,value.route); };
   const owner = () => get('username').textContent;
   const visible = () => !get('workspace').hidden;
   const same = (a,b) => a?.kind === b?.kind && a?.id === b?.id && (a?.reminder || null) === (b?.reminder || null);
@@ -36,7 +39,7 @@
   }
   function write(route, replace = false) {
     const next = state(route,replace ? current.index : current.index + 1,current.group);
-    history[replace ? 'replaceState' : 'pushState'](next,'',url(route)); current = next;
+    history[replace ? 'replaceState' : 'pushState'](next,'',url(route)); current = next; remember(next);
     document.dispatchEvent(new Event('beresta:navigation'));
   }
   function start() {
@@ -49,7 +52,7 @@
       history.replaceState(current,'',/^(#reset=|#verify-email=)/.test(location.hash) ? location.href : url(current.route));
       if (views.includes(initial.kind) || ['note','source','library','new','trash'].includes(initial.kind)) write(initial);
     }
-    ready = true;
+    remember(current); ready = true;
   }
   function record(route) {
     if (!visible()) return;
@@ -127,7 +130,7 @@
         catch (error) { if (ticket === serial && account === epoch) message(error.message); }
         if (ticket !== serial || account !== epoch || !visible()) continue;
         if (accepted) {
-          current = target; history.replaceState(target,'',url(target.route));
+          current = target; remember(target); history.replaceState(target,'',url(target.route));
           document.dispatchEvent(new Event('beresta:navigation'));
         }
         else if (same(current.route,target.route) && current.index === target.index) {
@@ -166,7 +169,12 @@
     start(); record({kind:'trash',behind:current.route});
   }
   function trashClosed() { if (!running && ready && current?.route.kind === 'trash' && location.hash === '#trash') history.back(); }
-  window.BerestaNavigation = {record,restoreInitial,consumeReminderLink,trashOpened,trashClosed};
+  // The screen one Back step away, or null when it is not known (a reload, a bookmark).
+  function previous() {
+    if (!ready || !current || current.index < 1) return null;
+    return routes.get(`${current.group}:${current.index - 1}`) || null;
+  }
+  window.BerestaNavigation = {record,restoreInitial,consumeReminderLink,trashOpened,trashClosed,previous};
   window.addEventListener('popstate',schedule); window.addEventListener('hashchange',schedule);
   get('mobile-library-toggle').addEventListener('click',() => {
     if (get('workspace').classList.contains('library-open')) record({kind:'library'});

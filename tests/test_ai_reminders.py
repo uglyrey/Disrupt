@@ -128,12 +128,15 @@ def test_telegram_reply_says_the_reminder_was_set(reminders):
     hint = delivery["text"].split("\n\n")[-2]  # The category line closes the reply
     assert hint == (
         "Напоминание поставлено: завтра в 09:00 по Москве, «Андрей завтра уточнит ситуацию.». Добавить в Google Календарь\n"
-        f"Изменить: {delivery['note_url']}&reminder={row.id}"
+        "Изменить: Открыть заметку"
     )
     assert delivery["text"].split("\n")[-1].startswith("Категория: ")
-    (link,) = delivery["links"]
+    link, note = delivery["links"]
     assert delivery["text"].encode("utf-16-le")[link["offset"] * 2:(link["offset"] + link["length"]) * 2].decode(
         "utf-16-le") == "Добавить в Google Календарь"
+    assert delivery["text"].encode("utf-16-le")[note["offset"] * 2:(note["offset"] + note["length"]) * 2].decode(
+        "utf-16-le") == "Открыть заметку"
+    assert note["url"] == f"{delivery['note_url']}&reminder={row.id}" and "http" not in delivery["text"]
     assert "Предлагаю" not in delivery["text"] and delivery["callback_token"] is None
     assert len(delivery["text"].encode("utf-16-le")) <= 4096 * 2
 
@@ -146,7 +149,7 @@ def test_telegram_reply_is_a_proposal_again_when_the_setting_is_off(reminders):
     reply = claim(client).json()["items"][0]["text"]
     hint = reply.split("\n\n")[-2]
     assert hint.startswith("Предлагаю напоминание: завтра в 09:00") and "Google" not in hint
-    assert hint.endswith("#remind") and reply.split("\n")[-1].startswith("Категория: ")
+    assert hint.endswith("Открыть заметку") and reply.split("\n")[-1].startswith("Категория: ")
 
 
 def test_cancelled_reminder_is_not_made_again(reminders):
