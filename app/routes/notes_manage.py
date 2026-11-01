@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 
+from app import attach
 from app.models import User
 from app.notes_manage import (
     add_link,
@@ -21,6 +22,8 @@ from app.notes_manage import (
 )
 from app.schemas import (
     MAX_COUNTER,
+    AttachRequest,
+    AttachResult,
     AudioJobResponse,
     GuidesResponse,
     GuideUpdate,
@@ -107,6 +110,24 @@ def build_router(database, settings, audio_storage):
     def unlink(note_id: str, other_id: str, request: Request, db=Depends(database)):
         session = get_login_session(request, db, write=True)
         remove_link(db, owned_note(db, note_id, session.user_id), other_id)
+
+    @router.post("/captures/{capture_id}/attach", response_model=AttachResult)
+    def attach_capture(capture_id: str, body: AttachRequest, request: Request, db=Depends(database)):
+        """«Добавить к «X»». Повтор отвечает так же. Чужая и удалённая заметка не находятся (404)."""
+        session = get_login_session(request, db, write=True)
+        return attach.choose_attach(db, session.user_id, capture_id, body.note_id, settings)
+
+    @router.post("/captures/{capture_id}/separate", response_model=AttachResult)
+    def separate_capture(capture_id: str, request: Request, db=Depends(database)):
+        """«Отдельная заметка». После добавления то же самое, что «Отменить»."""
+        session = get_login_session(request, db, write=True)
+        return attach.choose_separate(db, session.user_id, capture_id, settings)
+
+    @router.post("/captures/{capture_id}/detach", response_model=AttachResult)
+    def detach_capture(capture_id: str, request: Request, db=Depends(database)):
+        """«Отменить» добавление: запись снова своя заметка."""
+        session = get_login_session(request, db, write=True)
+        return attach.choose_separate(db, session.user_id, capture_id, settings)
 
     @router.get("/account/guides", response_model=GuidesResponse)
     def guides(request: Request, db=Depends(database)):

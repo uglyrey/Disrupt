@@ -24,6 +24,28 @@ CONFIRM_PREFIXES = {"rv": "ok", "re": "edit", "ra": "alt"}
 CONFIRM_DATA = re.compile(r"r([vea]):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}):([1-9][0-9]{0,8})")
 
 
+# «Добавить к «X»», «Отдельная заметка» and «Отменить» under the reply about a record that may continue a note.
+# The data is the prefix and the capture id, 39 bytes: at add, as separate, au undo.
+ATTACH_PREFIXES = {"t": "attach", "s": "separate", "u": "undo"}
+ATTACH_DATA = re.compile(r"a([tsu]):([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+BUTTON_TITLE = 28
+
+
+def attach_rows(entry):
+    """Inline keyboard rows of an `attach` entry of a delivery: two choices, or one «Отменить»."""
+    if not isinstance(entry, dict) or not ATTACH_DATA.fullmatch(f"at:{entry.get('capture_id')}"):
+        return []
+    cid = entry["capture_id"]
+    if entry.get("mode") == "undo":
+        return [[{"text": "Отменить", "callback_data": "au:" + cid}]]
+    title = " ".join(str(entry.get("title") or "").split())
+    title = title if len(title) <= BUTTON_TITLE else title[:BUTTON_TITLE - 1].rstrip() + "…"
+    return [
+        [{"text": f"Добавить к «{title}»", "callback_data": "at:" + cid}],
+        [{"text": "Отдельная заметка", "callback_data": "as:" + cid}],
+    ]
+
+
 def confirm_rows(entries):
     """Inline keyboard rows for the reminders a message asks about: one pair per reminder, plus the other reading."""
     numbered = len(entries) > 1
@@ -67,6 +89,7 @@ REJECTIONS = {
     "empty_input": "В записи нет текста.",
     "quota_exceeded": "Лимит обработки исчерпан. Сохрани текст без ИИ командой /save текст записи.",
     "action_forbidden": "Это действие недоступно для твоего аккаунта.",
+    "attach_expired": "Кнопка устарела, запись осталась отдельной заметкой.",
     "action_expired": "Кнопка устарела: напоминание уже выполнено, перенесено или отменено. Посмотри его в beresta.",
     "invalid_login": "Ссылка входа недействительна. Начни вход в beresta ещё раз.",
     "login_expired": "Ссылка входа истекла. Начни вход в beresta ещё раз.",
@@ -220,6 +243,9 @@ class TelegramClient:
         if confirm:
             # A message that asks «Верно?» about the time: its pairs of buttons, and the link under them.
             payload["reply_markup"]["inline_keyboard"] = [*confirm_rows(confirm), *payload["reply_markup"]["inline_keyboard"]]
+        extra = attach_rows(item.get("attach"))
+        if extra:
+            payload["reply_markup"]["inline_keyboard"] = [*extra, *payload["reply_markup"]["inline_keyboard"]]
         token = item["callback_token"]
         if token is not None:
             # A reminder: three actions in one row and a link to the reminder under them.

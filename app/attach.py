@@ -399,7 +399,7 @@ def result_of(db, capture, *, kept=False):
             "target_text_kept": kept}
 
 
-def choose_attach(db, user_id, capture_id, note_id, settings, now=None):
+def choose_attach(db, user_id, capture_id, note_id, settings, now=None, commit=True):
     """«Добавить к «X»». Idempotent: pressing again answers the same."""
     now = time.time() if now is None else now
     lock_account(db, user_id)
@@ -413,11 +413,12 @@ def choose_attach(db, user_id, capture_id, note_id, settings, now=None):
     if state is None or state[1].id != target.id:
         raise HTTPException(409, "Время выбора вышло, запись осталась отдельной заметкой.")
     attach_capture(db, capture, target, settings, explicit=False, now=now)
-    db.commit()
+    if commit:
+        db.commit()
     return result_of(db, capture)
 
 
-def choose_separate(db, user_id, capture_id, settings=None, now=None):
+def choose_separate(db, user_id, capture_id, settings=None, now=None, commit=True):
     """«Отдельная заметка» before the answer, «Отменить» after it. Idempotent."""
     now = time.time() if now is None else now
     lock_account(db, user_id)
@@ -425,5 +426,6 @@ def choose_separate(db, user_id, capture_id, settings=None, now=None):
     if capture.attach_state == ATTACHED and not can_undo(capture, now):
         raise HTTPException(409, "Отменить добавление можно в течение суток.")
     _, kept = separate_capture(db, capture, settings, now)
-    db.commit()
+    if commit:
+        db.commit()
     return result_of(db, capture, kept=kept)

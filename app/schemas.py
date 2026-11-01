@@ -619,6 +619,12 @@ class TelegramReminderConfirm(TelegramOperation):
     action: Literal["ok", "edit", "alt"]
 
 
+class TelegramAttach(TelegramOperation):
+    """A button under the reply about a record that may continue a note: add, keep apart, or undo."""
+    capture_id: str = Field(min_length=36, max_length=36, pattern=r"^[0-9a-f-]+$")
+    action: Literal["attach", "separate", "undo"]
+
+
 class TelegramReminderTime(TelegramOperation):
     """The written answer to «Изменить время»."""
     reminder_id: str = Field(min_length=1, max_length=36, pattern=r"^[A-Za-z0-9-]+$")

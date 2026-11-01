@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.account_timezone import mark_zone_asked, set_account_timezone, telegram_zone_state, zone_question_due
 from app.analytics import record_event
+from app.attach_telegram import attach_answer
 from app.contracts import (
     ActionRequest,
     ActionResponse,
@@ -48,6 +49,7 @@ from app.reminders import complete_reminder, local_clock, reschedule, snooze_tim
 from app.schemas import (
     IntegrationError,
     LinkResponse,
+    TelegramAttach,
     TelegramCaptureResponse,
     TelegramLink,
     TelegramLoginConfirm,
@@ -404,6 +406,16 @@ def build_router(database, settings):
             return confirm_action(db, identity.user_id, body.reminder_id, body.generation, body.action)
 
         return process_update(db, body, "reminder_confirm", handle)
+
+    # «Добавить к «X»», «Отдельная заметка», «Отменить» (docs/attach-to-note-v1.md). Not in the published contract.
+    @router.post("/telegram/attach", include_in_schema=False)
+    def telegram_attach(body: TelegramAttach, db=Depends(database)):
+        def handle(operation_id):
+            identity = telegram_identity(db, body)
+            lock_account(db, identity.user_id)
+            return attach_answer(db, identity.user_id, body, settings)
+
+        return process_update(db, body, "attach", handle)
 
     @router.post("/telegram/reminder-time", include_in_schema=False)
     def reminder_time(body: TelegramReminderTime, db=Depends(database)):
