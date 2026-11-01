@@ -12,10 +12,10 @@
 .code-input{text-align:center;font-size:26px;letter-spacing:.35em;font-variant-numeric:tabular-nums;padding-left:calc(14px + .35em)}
 .code-input::placeholder{letter-spacing:.35em;opacity:.4}
 .landing-cta.landing-cta-phone{display:none}
-.field-error{margin:6px 0 0;color:#8c3b2b;font-size:13px}
+.field-error{margin:6px 0 0;color:#a33a28;font-size:13px}
 .field-error[hidden]{display:none}
-input[aria-invalid]{border-color:#8c3b2b}
+input[aria-invalid]{border-color:#a33a28}
 /* The shared dark hover of polish.css would sit under dark text on the text buttons. */
-.signin-links .text-link:hover:not(:disabled),.auth-extra .text-link:hover:not(:disabled){background:transparent;color:#24372d}
+.signin-links .text-link:hover:not(:disabled),.auth-extra .text-link:hover:not(:disabled){background:transparent;color:#30302b}
 @media(max-width:980px){.landing-cta.landing-cta-phone{display:flex}}
 .field-hint a{color:var(--accent);text-underline-offset:3px}
