@@ -682,6 +682,22 @@ $('logout').onclick = async () => {
   try { await api('/api/v1/auth/logout',{method:'POST'}); pendingVisibleResult=null; epoch++; location.reload(); }
   catch(e) { message(e.message); }
 };
+// Sign out everywhere except here. A dialog asks first, the result comes as a message under the header.
+$('open-logout-others').onclick = event => {
+  const dialog = $('logout-others-dialog');
+  dialog.querySelector('.dialog-status')?.replaceChildren();
+  dialog.showModal(); dialog._opener = event.currentTarget;
+  $('logout-others-confirm').focus();
+};
+$('logout-others-confirm').onclick = async event => {
+  const button = event.currentTarget; if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const result = await api('/api/v1/auth/logout-others',{method:'POST'});
+    $('logout-others-dialog').close();
+    message(result.closed ? 'Готово. На других устройствах нужно будет войти заново.' : 'Других входов нет.');
+  } catch(e) { message(e.message); } finally { button.disabled = false; }
+};
 $('example').onclick = async () => {
   try {
     if ($('thought').value.trim() && !confirm('Заменить ваш текст примером?')) return;
