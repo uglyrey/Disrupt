@@ -92,6 +92,54 @@ module.exports = async () => {
     assert.throws(() => w.__holdScroll(t.$('markdown'), () => { y = 7; throw new Error('boom'); }), /boom/);
     assert.equal(y, 4200, 'restored even if fitting fails');
 
+    // The on-screen keyboard. Android Chrome and iOS Safari shrink only the visual viewport.
+    const kb = w.BerestaTypewriter.keyboard;
+    assert.deepEqual({...kb({height: 500, offsetTop: 0}, 800)}, {kb: 300, visible: 500, top: 0});
+    assert.equal(kb({height: 450, offsetTop: 50}, 800).kb, 300, 'iOS pans the visual viewport: its offset is not keyboard');
+    assert.equal(kb({height: 740, offsetTop: 0}, 800).kb, 0, 'a browser bar is not a keyboard');
+    assert.equal(kb(null, 800).kb, 0);
+    const doc = w.document.documentElement, thought = t.$('thought');
+    const style = name => doc.style.getPropertyValue(name);
+    const view = Object.assign(new w.EventTarget(), {height: 800, offsetTop: 0});
+    Object.defineProperty(w, 'visualViewport', {value: view, configurable: true});
+    Object.defineProperty(w, 'innerHeight', {value: 800, configurable: true});
+    // Resize before the listener was added is not seen: load typewriter.js again on the page with a viewport.
+    w.eval(read('typewriter.js'));
+    thought.disabled = false; thought.focus();
+    view.height = 500; view.dispatchEvent(new w.Event('resize'));
+    assert.equal(doc.classList.contains('kb-open'), true, 'the room is made at once, before the page is asked to scroll');
+    assert.equal(style('--kb'), '300px'); assert.equal(style('--vv-half'), '250px');
+    thought.blur(); await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(doc.classList.contains('kb-open'), false, 'no strip when no field is open');
+    thought.focus(); assert.equal(doc.classList.contains('kb-open'), true, 'a field focused with the keyboard already up');
+    assert.match(css, /html\.kb-open body::after\{[^}]*height:calc\(var\(--kb,0px\) \+ var\(--vv-half/);
+    assert.match(css, /scroll-padding-bottom:var\(--kb/);
+
+    // The caret line goes to the middle of what the keyboard leaves visible, not of the whole window.
+    thought.value = 'строка\n'.repeat(40); thought.setSelectionRange(thought.value.length, thought.value.length);
+    Object.defineProperty(thought, 'clientWidth', {value: 300, configurable: true});
+    thought.getBoundingClientRect = () => ({top: 100, bottom: 900, left: 0, right: 300, height: 800, width: 300});
+    Object.defineProperty(w.HTMLElement.prototype, 'offsetTop', {configurable: true, get() { return this.parentElement && this.parentElement.classList.contains('tw-mirror') ? 700 : 0; }});
+    Object.defineProperty(doc, 'scrollHeight', {value: 3000, configurable: true});
+    Object.defineProperty(doc, 'clientHeight', {value: 800, configurable: true});
+    const moved = [];
+    w.scrollTo = options => { moved.push(options.top); };
+    // Caret line: 100 (field) + 700 (line) + half a line, about 810 on the screen.
+    view.height = 500; view.offsetTop = 0;
+    assert.equal(w.BerestaTypewriter.reveal(thought), true);
+    assert.ok(Math.abs(moved.at(-1) - (810 - 250)) < 5, `Android: caret to the middle of 0..500, got ${moved.at(-1)}`);
+    view.height = 450; view.offsetTop = 50;
+    w.BerestaTypewriter.reveal(thought);
+    assert.ok(Math.abs(moved.at(-1) - (810 - 275)) < 5, `iOS: caret to the middle of 50..500, got ${moved.at(-1)}`);
+    // Without a keyboard the fixed tool bar of a phone is not part of the visible area.
+    view.height = 800; view.offsetTop = 0;
+    const bar = t.$('note-tools'); bar.style.position = 'fixed';
+    Object.defineProperty(bar, 'offsetParent', {get: () => w.document.body, configurable: true});
+    bar.getBoundingClientRect = () => ({top: 744, bottom: 800, height: 56, left: 0, right: 300, width: 300});
+    w.BerestaTypewriter.reveal(thought);
+    assert.ok(Math.abs(moved.at(-1) - (810 - 372)) < 5, `bar: middle of 0..744, got ${moved.at(-1)}`);
+    delete w.visualViewport;
+
     // Opening the note for editing: no scroll from focus itself, the caret line is centered.
     await settled(); t.$('notes').querySelector('button').click(); await settled();
     const field = t.$('markdown'), focus = [];

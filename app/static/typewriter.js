@@ -1,11 +1,11 @@
 'use strict';
-// Typewriter mode for the two text fields (#markdown, #thought). While a person types, the line with the caret
+// Typewriter mode for the text fields (#markdown, #thought, #title). While a person types, the line with the caret
 // stays near the middle of what is visible, above the on-screen keyboard too (window.visualViewport).
 // The caret position comes from a hidden mirror of the field (same width, font and padding), no library.
 // It reacts only to typing and caret keys, never to scrolling, so the person can still scroll away on their own.
 // Loaded after md-editor.js. Pure part: BerestaTypewriter.plan. No inline styles are written as text, CSP stays strict.
 (() => {
-  const IDS = ['markdown', 'thought'];
+  const IDS = ['markdown', 'thought', 'title'];
   const NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']);
   const COPY = ['direction', 'fontStyle', 'fontVariant', 'fontWeight', 'fontStretch', 'fontSize', 'fontFamily',
     'lineHeight', 'letterSpacing', 'wordSpacing', 'textTransform', 'textIndent', 'textAlign', 'tabSize',
@@ -62,15 +62,40 @@ const behavior = smooth => (smooth && !(reducedQuery && reducedQuery.matches) ? 
     }
     return document.scrollingElement || document.documentElement;
   }
+  // The on-screen keyboard. Android Chrome (resizes-visual) and iOS Safari keep the layout viewport and shrink only the
+  // visual one, so the keyboard is what lies under the visual viewport: layout height - visual height - its offset.
+  // Under 80px it is a browser bar, not a keyboard.
+  const KEYBOARD_MIN = 80;
+  function keyboard(view, layoutHeight) {
+    if (!view || !(layoutHeight > 0)) return {kb: 0, visible: layoutHeight || 0, top: 0};
+    const kb = Math.max(0, Math.round(layoutHeight - view.height - view.offsetTop));
+    return {kb: kb >= KEYBOARD_MIN ? kb : 0, visible: view.height, top: view.offsetTop};
+  }
+  const layoutHeight = () => window.innerHeight || document.documentElement.clientHeight || 0;
+  // Bars that lie over the page: the fixed tool bar of a phone (only when no keyboard hides it) and the sticky format
+  // bar of the note at the top. The caret must not end up under them.
+  function covered(top, bottom, kb) {
+    const bar = document.getElementById('note-tools');
+    if (bar && !kb && window.getComputedStyle(bar).position === 'fixed' && bar.offsetParent !== null) {
+      const box = bar.getBoundingClientRect();
+      if (box.height > 0 && box.top < bottom) bottom = Math.min(bottom, box.top);
+    }
+    const format = document.querySelector('.note-body > .md-toolbar');
+    if (format && !format.hidden && window.getComputedStyle(format).position === 'sticky') {
+      const box = format.getBoundingClientRect();
+      if (box.height > 0 && box.top <= top + 2 && box.bottom > top) top = box.bottom;
+    }
+    return {top, bottom};
+  }
   function visibleArea(scroller) {
-    const view = window.visualViewport;
-    let top = view ? view.offsetTop : 0;
-    let bottom = top + (view ? view.height : window.innerHeight);
+    const state = keyboard(window.visualViewport, layoutHeight());
+    let top = window.visualViewport ? state.top : 0;
+    let bottom = top + (window.visualViewport ? state.visible : layoutHeight());
     if (scroller !== document.scrollingElement && scroller !== document.documentElement) {
       const box = scroller.getBoundingClientRect();
       top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom);
     }
-    return {top, bottom};
+    return covered(top, bottom, state.kb);
   }
   function moveTo(scroller, top, smooth) {
     const options = {top, behavior: behavior(smooth)};
@@ -104,6 +129,22 @@ const behavior = smooth => (smooth && !(reducedQuery && reducedQuery.matches) ? 
     return true;
   }
 
+  /* ---------- Room for the keyboard ---------- */
+  // While a field has the focus and the keyboard is up, the page gets an empty strip at the end: the keyboard height
+  // plus half of the visible area (CSS variables on <html>, see typewriter.css). Without it the last lines of a note
+  // could never be scrolled up to the middle, and the keyboard stayed on top of them. scroll-padding-bottom uses the
+  // same height, so the browser's own scroll to the focused field keeps clear of the keyboard too.
+  const root = document.documentElement;
+  function syncRoom() {
+    const focused = IDS.some(id => document.getElementById(id) === document.activeElement);
+    const state = keyboard(window.visualViewport, layoutHeight());
+    const open = focused && state.kb > 0;
+    root.style.setProperty('--kb', `${state.kb}px`);
+    root.style.setProperty('--vv-half', `${Math.round(state.visible / 2)}px`);
+    root.classList.toggle('kb-open', open);
+    return open;
+  }
+
   /* ---------- Events ---------- */
   let active = null, frame = 0, wantForce = false, touching = false, lastWheel = 0, waits = 0;
   function run() {
@@ -125,6 +166,9 @@ const behavior = smooth => (smooth && !(reducedQuery && reducedQuery.matches) ? 
     const field = document.getElementById(id);
     if (!field) continue;
     field.addEventListener('input', () => schedule(field));
+    // Another field was already open with the keyboard: the new one has no resize to wait for.
+    field.addEventListener('focus', () => { syncRoom(); schedule(field); });
+    field.addEventListener('blur', () => window.setTimeout(syncRoom, 0));
     field.addEventListener('compositionend', () => schedule(field));
     field.addEventListener('keyup', event => { if (NAV_KEYS.has(event.key)) schedule(field); });
   }
@@ -135,6 +179,7 @@ const behavior = smooth => (smooth && !(reducedQuery && reducedQuery.matches) ? 
   if (window.visualViewport) {
     let timer = 0;
     window.visualViewport.addEventListener('resize', () => {
+      syncRoom();  // At once: the strip must exist before the page is asked to scroll.
       const field = IDS.map(id => document.getElementById(id)).find(node => node && node === document.activeElement);
       if (!field) return;
       window.clearTimeout(timer);
@@ -143,7 +188,7 @@ const behavior = smooth => (smooth && !(reducedQuery && reducedQuery.matches) ? 
   }
 
   window.BerestaTypewriter = {
-    plan, caretBox,
+    plan, caretBox, keyboard, syncRoom,
     // Show the caret line in the middle at once (opening a note for editing). No band, no animation.
     reveal(field) { return center(field, {force: true, smooth: false}); },
   };
