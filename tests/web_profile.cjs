@@ -103,6 +103,10 @@ function boot({phone = false, profile = {}, me = {}, gate = null, guides, cookie
       if (state.failures.offer) return reply({detail: 'Не удалось выполнить запрос'}, 500);
       record.calendar_offer = body.calendar_offer; return reply({calendar_offer: body.calendar_offer});
     }
+    if (p === '/api/v1/profile/calendar-minutes' && method === 'PATCH') {
+      if (state.failures.minutes) return reply({detail: 'Не удалось выполнить запрос'}, 500);
+      record.calendar_default_minutes = body.calendar_default_minutes; return reply({calendar_default_minutes: body.calendar_default_minutes});
+    }
     if (p === '/api/v1/profile/categories' && method === 'POST') {
       if (state.failures.categories) return reply({detail: 'Не удалось выполнить запрос'}, 500);
       if (record.state !== 'ready') return reply({detail: 'Профиль ещё не готов'}, 409);
@@ -757,6 +761,33 @@ async function knowledgePending() {
   } finally { await closeWindow(failed); }
 }
 
+async function calendarMinutesSelect() {
+  const t = boot({profile: {state: 'ready', facts: FACTS, calendar_offer: true, calendar_default_minutes: 90}});
+  try {
+    await openKnowledge(t, '.profile-fact');
+    const select = knowledge(t).querySelector('#profile-calendar-minutes');
+    assert.equal(select.tagName, 'SELECT');
+    assert.equal(knowledge(t).querySelector('label[for="profile-calendar-minutes"]').textContent, 'Длительность события в календаре по умолчанию');
+    assert.deepEqual([...select.options].map(o => o.value), ['15', '30', '60', '90', '120']);
+    assert.equal(select.value, '90', 'the start value comes from the profile');
+    select.value = '30'; select.dispatchEvent(new t.w.Event('change', {bubbles: true}));
+    await t.until(() => t.profileCalls('PATCH', '/calendar-minutes').length === 1, 'patch');
+    const patch = t.profileCalls('PATCH', '/calendar-minutes')[0];
+    assert.deepEqual(patch.body, {calendar_default_minutes: 30}); assert.equal(patch.headers['X-CSRF-Token'], 'csrf');
+    await t.until(() => knowledge(t).querySelector('.profile-status').textContent === 'Сохранено.', 'saved');
+    assert.equal(t.w.BerestaProfile.calendarMinutes(), 30);
+    t.state.failures.minutes = true;
+    select.value = '120'; select.dispatchEvent(new t.w.Event('change', {bubbles: true}));
+    await t.until(() => select.value === '30', 'reverted after a failure');
+    assert.equal(t.w.BerestaProfile.calendarMinutes(), 30);
+  } finally { await closeWindow(t); }
+  const fresh = boot({profile: {state: 'ready', facts: FACTS, calendar_offer: true}});
+  try {
+    await openKnowledge(fresh, '.profile-fact');
+    assert.equal(knowledge(fresh).querySelector('#profile-calendar-minutes').value, '60', 'an hour without a value from the server');
+  } finally { await closeWindow(fresh); }
+}
+
 async function calendarOfferSwitch() {
   const t = boot({profile: {state: 'ready', facts: FACTS, calendar_offer: true}});
   try {
@@ -1111,6 +1142,7 @@ module.exports = async function profileWeb() {
   await knowledgeStates();
   await knowledgePending();
   await calendarOfferSwitch();
+  await calendarMinutesSelect();
   await quietBar();
   await categoriesInKnowledge();
   await categoriesOnFinalScreen();

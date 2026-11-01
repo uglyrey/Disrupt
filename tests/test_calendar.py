@@ -30,12 +30,12 @@ def offer(client, value):
 # ---- Адрес ----
 
 
-def test_the_url_is_googles_template_page_with_a_fifteen_minute_event():
+def test_the_url_is_googles_template_page_with_an_hour_event_by_default():
     url = calendar_url("Позвонить маме", AT, LINK)
     assert url.startswith(BASE + "&") and urlsplit(url).netloc == "calendar.google.com"
     data = fields(url)
     assert data["action"] == "TEMPLATE" and data["text"] == "Позвонить маме"
-    assert data["dates"] == f"{stamp(AT)}/{stamp(AT + 900)}" == "20261014T174640Z/20261014T180140Z"
+    assert data["dates"] == f"{stamp(AT)}/{stamp(AT + 3600)}" == "20261014T174640Z/20261014T184640Z"
     assert data["details"] == "Напоминание из beresta\n" + LINK
     assert url.isascii() and " " not in url and "\n" not in url
 

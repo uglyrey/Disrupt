@@ -70,6 +70,8 @@ class User(Base):
     timezone_asked_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Offer the «Добавить в Google Календарь» link when a reminder is created (docs/profile-v1.md).
     calendar_offer: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    # How long a Google Calendar event lasts when the reminder has no length of its own (docs/note-style-v1.md).
+    calendar_default_minutes: Mapped[int] = mapped_column(Integer, default=60, server_default="60")
 
 
 class LoginSession(Base):
@@ -326,6 +328,9 @@ class Reminder(Base):
     time_alt: Mapped[float | None] = mapped_column(Float, nullable=True)
     # The advance reminder «Через час: ...» points at the main reminder it belongs to (docs/profile-v1.md).
     advance_of: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # Event length in minutes for the calendar link: the person's own words or the model's estimate. Empty means
+    # the default of the person (`users.calendar_default_minutes`).
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Inbox(Base):

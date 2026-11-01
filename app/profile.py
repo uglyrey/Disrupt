@@ -15,6 +15,7 @@ from sqlalchemy import select
 
 from app.limits import PROFILE_UNIT_COST, day_window, within_daily_limit
 from app.models import Category, User, UserProfile
+from app.note_style import MINUTE_CHOICES
 from app.profile_questions import INTRO, PRIVACY, QUESTION_IDS, question_views
 
 NEW, DECLINED, PENDING, READY, FAILED = "new", "declined", "pending", "ready", "failed"
@@ -227,6 +228,7 @@ def profile_view(db, user):
         if row is not None else [],
         "updated_at": int(row.updated_at) if row is not None else None,
         "calendar_offer": user.calendar_offer,
+        "calendar_default_minutes": user.calendar_default_minutes,
         "suggested_categories": suggested_categories(row),
         "categories_confirmed": bool(row.categories_confirmed) if row is not None else False,
         "intro": INTRO,
@@ -425,6 +427,14 @@ def delete_fact(db, user_id, fact_id):
 def set_calendar_offer(db, user_id, value):
     lock_account(db, user_id)
     db.get(User, user_id).calendar_offer = value
+
+
+def set_calendar_default_minutes(db, user_id, value):
+    """The length of a Google Calendar event when the reminder has none of its own: 15, 30, 60, 90 or 120 minutes."""
+    if value not in MINUTE_CHOICES:
+        raise ValueError("calendar_default_minutes")
+    lock_account(db, user_id)
+    db.get(User, user_id).calendar_default_minutes = value
 
 
 def create_categories(db, user_id, names):

@@ -3312,6 +3312,46 @@
         "x-implementation-status": "implemented"
       }
     },
+    "/api/v1/profile/calendar-minutes": {
+      "patch": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "Change Calendar Minutes",
+        "operationId": "change_calendar_minutes_api_v1_profile_calendar_minutes_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CalendarMinutesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-implementation-status": "implemented"
+      }
+    },
     "/api/v1/profile/categories": {
       "post": {
         "tags": [
@@ -8148,6 +8188,27 @@
         ],
         "title": "AuthorizeResponse"
       },
+      "CalendarMinutesBody": {
+        "properties": {
+          "calendar_default_minutes": {
+            "type": "integer",
+            "enum": [
+              15,
+              30,
+              60,
+              90,
+              120
+            ],
+            "title": "Calendar Default Minutes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "calendar_default_minutes"
+        ],
+        "title": "CalendarMinutesBody"
+      },
       "CalendarOfferBody": {
         "properties": {
           "calendar_offer": {
@@ -11083,6 +11144,17 @@
               }
             ],
             "title": "Calendar Url"
+          },
+          "duration_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Minutes"
           },
           "advance_of": {
             "anyOf": [

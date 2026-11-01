@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from urllib.parse import quote
 
 BASE = "https://calendar.google.com/calendar/render?action=TEMPLATE"
-EVENT_SECONDS = 15 * 60
+DEFAULT_MINUTES = 60
 TITLE_CHARS = 120
 MAX_URL_CHARS = 1800  # Telegram accepts a URL button of up to about 2000 characters. Keep well below it.
 DETAILS_LINE = "Напоминание из beresta"
@@ -34,12 +34,20 @@ def note_link(public_origin, capture_id, reminder_id):
     return f"{public_origin}/?capture={capture_id}&reminder={reminder_id}"
 
 
-def calendar_url(text, scheduled_at, link):
-    """URL of Google's «new event» page for a 15 minute event at `scheduled_at` (a UTC timestamp)."""
+def event_seconds(minutes):
+    return (minutes if isinstance(minutes, int) and not isinstance(minutes, bool) and 5 <= minutes <= 720
+            else DEFAULT_MINUTES) * 60
+
+
+def calendar_url(text, scheduled_at, link, minutes=None):
+    """URL of Google's «new event» page for an event at `scheduled_at` (a UTC timestamp) that lasts `minutes`.
+
+    `minutes` is the reminder's own length or the person's default; an unusable value gives an hour."""
+    ends = scheduled_at + event_seconds(minutes)
     title, details = clean_title(text), DETAILS_LINE + "\n" + link
     while True:
         url = (
-            f"{BASE}&text={quote(title, safe='')}&dates={stamp(scheduled_at)}/{stamp(scheduled_at + EVENT_SECONDS)}"
+            f"{BASE}&text={quote(title, safe='')}&dates={stamp(scheduled_at)}/{stamp(ends)}"
             f"&details={quote(details, safe='')}"
         )
         shorter = title[:max(10, len(title) // 2)].rstrip() + "…"
@@ -47,5 +55,5 @@ def calendar_url(text, scheduled_at, link):
             break
         title = shorter
     if len(url) > MAX_URL_CHARS:  # A very long site address: keep the event, drop the details.
-        url = f"{BASE}&text={quote(title, safe='')}&dates={stamp(scheduled_at)}/{stamp(scheduled_at + EVENT_SECONDS)}"
+        url = f"{BASE}&text={quote(title, safe='')}&dates={stamp(scheduled_at)}/{stamp(ends)}"
     return url
