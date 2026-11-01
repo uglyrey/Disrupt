@@ -34,7 +34,13 @@ function boot({health = {simulation: false}, usage = cloudUsage, list = () => su
     if (url.pathname === '/api/v1/auth/me') return reply({username: 'tester', csrf_token: 'csrf'});
     if (url.pathname === '/api/v1/categories') return reply([{id: 'c1', name: 'Работа', version: 1}]);
     if (url.pathname === '/api/v1/jobs') return reply([]);
-    if (url.pathname === '/api/v1/notes') return reply(list(url.searchParams));
+    if (url.pathname === '/api/v1/notes') {
+      const result = list(url.searchParams);
+      if (Array.isArray(result)) return reply(result);
+      // {rows, next, wait}: a page with its «next page» header, optionally answered late.
+      const answer = reply(result.rows); if (result.next) answer.headers.set('X-Next-Notes-Offset', String(result.next));
+      return result.wait ? result.wait.then(() => answer) : answer;
+    }
     if (url.pathname === '/api/v1/captures/text') return reply(capture, 202);
     if (url.pathname === '/api/v1/notes/n1' && method === 'GET') return reply(state.note);
     if (url.pathname === '/api/v1/notes/n2' && method === 'GET') return reply({...state.note, id: 'n2', title: 'Другая'});
@@ -238,6 +244,45 @@ async function tagsAndFilters() {
     [...empty.$('source-filter').querySelectorAll('button')].find(c => c.textContent === 'Telegram').click(); await settled();
     assert.ok(empty.$('notes').querySelector('[data-empty=search]'));
   } finally { empty.dom.window.close(); }
+}
+
+// Every chip shows its own rows, «Показать ещё» keeps the chip, and a late answer of the previous chip is dropped.
+async function filterRows() {
+  const all = [];
+  for (let i = 0; i < 45; i++) all.push({id: `m${i}`, title: `Запись ${i}`, version: 1, updated_at: 1791220000, category_id: null,
+    channel: i % 3 === 0 ? 'telegram' : 'web', input_kind: i % 5 === 0 ? 'audio' : 'text'});
+  const match = params => all.filter(n => (!params.get('channel') || n.channel === params.get('channel')) &&
+    (!params.get('input_kind') || n.input_kind === params.get('input_kind')));
+  const held = []; let hold = false;
+  const t = boot({list: params => {
+    const rows = match(params), offset = Number(params.get('offset')), page = rows.slice(offset, offset + 20);
+    const result = {rows: page, next: offset + 20 < rows.length ? offset + 20 : 0};
+    if (hold && params.get('input_kind') === 'audio') result.wait = new Promise(resolve => held.push(resolve));
+    return result;
+  }});
+  try {
+    await settled();
+    const titles = () => [...t.$('notes').querySelectorAll('.note-row-title')].map(n => n.textContent);
+    const chip = name => [...t.$('source-filter').querySelectorAll('button')].find(c => c.textContent === name);
+    assert.equal(titles().length, 20);
+    chip('Telegram').click(); await settled();
+    assert.deepEqual(titles(), all.filter(n => n.channel === 'telegram').slice(0, 15).map(n => n.title));
+    chip('Голос').click(); await settled();
+    assert.deepEqual(titles(), all.filter(n => n.input_kind === 'audio').slice(0, 9).map(n => n.title));
+    chip('Текст').click(); await settled();
+    assert.equal(titles().length, 20); assert.equal(t.$('more-notes').hidden, false);
+    t.$('more-notes').click(); await settled();
+    assert.equal(lastList(t.state).get('input_kind'), 'text'); assert.equal(lastList(t.state).get('offset'), '20');
+    assert.equal(titles().length, 36, 'the next page is also text only');
+    chip('Все').click(); await settled();
+    assert.equal(titles().length, 20); assert.equal(lastList(t.state).get('input_kind'), null);
+    // The slow answer of «Голос» arrives after «Текст» was chosen and must not replace the list.
+    hold = true; chip('Голос').click(); await settled();
+    hold = false; chip('Текст').click(); await settled();
+    const text = titles(); held.forEach(release => release()); await settled();
+    assert.deepEqual(titles(), text);
+    assert.equal(chip('Текст').getAttribute('aria-pressed'), 'true');
+  } finally { t.dom.window.close(); }
 }
 
 async function noteScreen() {
@@ -510,6 +555,7 @@ module.exports = async () => {
   await liveSearchAndCapture();
   await idFallback();
   await tagsAndFilters();
+  await filterRows();
   await noteScreen();
   await checklist();
   await phoneMenu();
