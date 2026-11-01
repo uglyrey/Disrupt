@@ -1,0 +1,109 @@
+/* beresta design system v2, theme layer. Loaded last. It points the older variables at the new tokens of design.css,
+   sets the base type, fields, focus, selection and the shared controls, so that every older screen already wears the new look.
+   Stage 2 will restyle the app screens one by one. Description and every state: docs/DESIGN.md. */
+
+/* ---- Older variables now read the new tokens ---- */
+:root{
+  --ink:var(--c-ink);--muted:var(--c-muted);--line:var(--c-line);--paper:var(--c-surface);--wash:var(--c-bg);
+  --accent:var(--c-green);--accent-strong:var(--c-green-deep);--soft:var(--c-green-tint);--ring:var(--c-green);
+  --btn-primary:var(--c-green);--btn-primary-hover:var(--c-green-deep);--btn-on-primary:#fff;
+  --btn-secondary:var(--c-green-tint);--btn-secondary-hover:#d7e7bf;--btn-on-secondary:var(--c-green-deep);
+  --btn-ink:var(--c-ink);--btn-quiet-hover:var(--c-sunken);--btn-line:#a39d8b;--btn-line-hover:#77725f;
+  --btn-danger:var(--c-danger);--btn-danger-hover:#8f2f20;--btn-link:var(--c-green);--btn-ring:var(--c-green);
+  --btn-radius:var(--r-2);
+  font-family:var(--font-ui);color:var(--c-ink);background:var(--c-bg);accent-color:var(--c-green);caret-color:var(--c-green);
+  scrollbar-color:var(--c-line-strong) transparent;scrollbar-width:thin;
+}
+
+/* ---- Base type ---- */
+body{background:var(--c-bg);color:var(--c-ink);font-family:var(--font-ui);font-size:var(--fs-base);line-height:var(--lh-body);font-feature-settings:"kern","liga"}
+h1,h2,h3,.brand{font-family:var(--font-display);font-weight:700;color:var(--c-ink)}
+h1{letter-spacing:-.01em}
+h2,h3{letter-spacing:0}
+p{color:var(--c-ink-2)}
+.eyebrow{font-family:var(--font-ui);text-transform:none;letter-spacing:.01em;font-weight:600;font-size:var(--fs-xs);color:var(--c-muted)}
+.muted,.field-hint{color:var(--c-muted)}
+a{color:var(--c-green);text-underline-offset:3px;text-decoration-thickness:1px}
+a:hover{color:var(--c-green-deep)}
+::selection{background:#cfe3b4;color:var(--c-ink)}
+::placeholder{color:#6f6b5f;opacity:1}
+hr{border:0;border-top:1px solid var(--c-line)}
+strong,b{font-weight:600}
+code,pre,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+
+/* ---- Header ---- */
+header{background:var(--c-surface);border-bottom:1px solid var(--c-line)}
+.brand{font-size:1.75rem;letter-spacing:-.01em;line-height:1}
+.brand span{font-family:var(--font-ui);font-weight:400;color:var(--c-muted);letter-spacing:0}
+.banner{background:var(--c-sunken);color:var(--c-ink-2)}
+/* On the landing the header sits on the paper with the birch behind it */
+body:has(#auth:not([hidden])) header{background:transparent;border-bottom-color:transparent;position:relative;z-index:2}
+body:has(#auth:not([hidden])) .telegram-channel-link{background:var(--c-surface)!important;border:1px solid var(--c-line-strong)!important}
+body:has(#auth:not([hidden])) .telegram-channel-link:hover{background:var(--c-green-wash)!important;border-color:var(--c-ink)!important}
+#username{background:var(--c-sunken);color:var(--c-ink-2)}
+
+/* ---- Fields ---- */
+label{font-family:var(--font-ui);font-weight:500;color:var(--c-ink)}
+input,textarea,select{font-family:var(--font-ui);border:1px solid var(--c-field);border-radius:var(--r-2);background:var(--c-surface);color:var(--c-ink);transition:border-color var(--dur-base) var(--ease-out),box-shadow var(--dur-base) var(--ease-out),background-color var(--dur-base)}
+input:hover:not(:disabled):not(:focus),textarea:hover:not(:disabled):not(:focus),select:hover:not(:disabled):not(:focus){border-color:var(--c-ink-2)}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--c-green);box-shadow:var(--ring)}
+input:disabled,textarea:disabled,select:disabled{background:var(--c-sunken);border-color:var(--c-line-strong);color:var(--c-muted);cursor:not-allowed}
+input[aria-invalid]{border-color:var(--c-danger);background:var(--c-surface)}
+input[aria-invalid]:focus{box-shadow:0 0 0 3px var(--c-danger-tint)}
+input[type=file]{padding:10px;border-style:dashed}
+.field-error{color:var(--c-danger)}
+.field-error::before{content:"";display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:50%;background:var(--c-danger);vertical-align:.08em}
+
+/* Checkboxes of the sign-in window: a small square that is ticked in green */
+.consent input[type=checkbox]{appearance:none;-webkit-appearance:none;width:22px;height:22px;margin:0;border:1.5px solid var(--c-ink);border-radius:6px 2px 6px 2px;background:var(--c-surface) center / 20px 20px no-repeat;transition:background-color var(--dur-fast),border-color var(--dur-fast),transform var(--dur-fast)}
+.consent input[type=checkbox]:hover{border-color:var(--c-green);background-color:var(--c-green-wash)}
+.consent input[type=checkbox]:checked{background-color:var(--c-green);background-image:url(/static/ui/tick.svg);border-color:var(--c-green)}
+.consent input[type=checkbox]:focus-visible{outline:2px solid var(--c-green);outline-offset:3px;box-shadow:none}
+.consent input[type=checkbox]:active{transform:scale(.92)}
+.consent input[type=checkbox]:disabled{border-color:var(--c-line-strong);background-color:var(--c-sunken)}
+.consent{color:var(--c-ink);font-weight:400}
+
+/* ---- Focus: one ring everywhere, green, 2px, offset 3px ---- */
+:focus-visible{outline:2px solid var(--c-green);outline-offset:3px}
+button:focus-visible,a:focus-visible{outline:2px solid var(--c-green);outline-offset:3px}
+input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none}
+
+/* ---- Buttons. Shape and states live in buttons.css, its variables are set above. ---- */
+button{font-family:var(--font-ui)}
+button:not(:disabled):active{transform:translateY(1px)}
+button:disabled,button[aria-disabled=true]{opacity:1!important;background:var(--c-sunken)!important;border-color:var(--c-line)!important;color:#8b8779!important;cursor:not-allowed}
+button.is-loading,button[aria-busy=true]{cursor:progress;color:transparent!important;position:relative}
+button.is-loading::after,button[aria-busy=true]::after{content:"";position:absolute;inset:50% auto auto 50%;width:16px;height:16px;margin:-8px 0 0 -8px;border:2px solid var(--c-line-strong);border-top-color:var(--c-green);border-radius:50%}
+@media(prefers-reduced-motion:no-preference){button.is-loading::after,button[aria-busy=true]::after{animation:beresta-spin .8s linear infinite}@keyframes beresta-spin{to{transform:rotate(360deg)}}}
+/* The two main sign-in buttons and the landing buttons get the leaf corners */
+.signin-buttons .signin-button,.cta-primary,.cta-quiet,.cta-channel,#landing-login,.landing-cta .cta-primary{border-radius:14px 5px 14px 5px!important}
+#tg-login.telegram-login{background:var(--c-surface)!important;border:1px solid var(--c-ink)!important;color:var(--c-ink)!important}
+#tg-login.telegram-login:hover:not(:disabled){background:var(--c-green-wash)!important;border-color:var(--c-ink)!important;color:var(--c-ink)!important}
+#tg-login.telegram-login:active:not(:disabled){background:var(--c-green-tint)!important}
+#tg-login.telegram-login:focus-visible{background:var(--c-green-wash)!important;outline:2px solid var(--c-green)!important;outline-offset:3px!important;color:var(--c-ink)!important}
+#tg-login.telegram-login:disabled{background:var(--c-sunken)!important;border-color:var(--c-line)!important;color:#8b8779!important}
+.landing-beta .cta-primary{background:var(--c-green-leaf)!important;border-color:var(--c-green-leaf)!important;color:var(--c-bark)!important}
+.landing-beta .cta-primary:hover{background:#9bcb6b!important;border-color:#9bcb6b!important;color:var(--c-bark)!important}
+.landing-beta .cta-channel{background:transparent!important;border-color:#8f8d82!important;color:var(--c-bg)!important}
+.landing-beta .cta-channel:hover{background:#3a3e3b!important;border-color:var(--c-bg)!important}
+
+/* Text links that are buttons */
+.text-link{color:var(--c-green);text-decoration-color:#a9c98a;font-weight:500}
+.text-link:hover:not(:disabled),.signin-links .text-link:hover:not(:disabled),.auth-extra .text-link:hover:not(:disabled),#forgot-password.text-link:hover:not(:disabled){color:var(--c-green-deep);text-decoration-color:currentColor;background:transparent}
+
+/* ---- Messages ---- */
+#auth-message,.auth-info,#message:not(:empty),.dialog-status:not(:empty){border-radius:var(--r-2)}
+#auth-message{border:1px solid #e0b5a9;background:var(--c-danger-tint);color:#7a2a1b;padding-left:36px;position:relative}
+#auth-message::before{content:"";position:absolute;left:14px;top:50%;width:9px;height:9px;margin-top:-4.5px;border-radius:50%;background:var(--c-danger)}
+.auth-info{border:1px solid #cfe0b8;background:var(--c-green-wash);color:var(--c-green-deep)}
+.notice-bar{background:var(--c-notice);color:var(--c-notice-ink);border-bottom-color:#e4d7a6}
+@media(prefers-reduced-motion:no-preference){#auth-message:not([hidden]),.auth-info:not([hidden]){animation:beresta-note var(--dur-slow) var(--ease-out) both}@keyframes beresta-note{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}}
+
+/* ---- Dialogs and floating surfaces ---- */
+.utility-dialog{background:var(--c-surface);border:1px solid var(--c-ink);border-radius:var(--r-leaf-sm);box-shadow:var(--shadow-float)}
+.utility-dialog::backdrop{background:rgba(42,45,43,.42);backdrop-filter:none}
+.menu-sheet{background:var(--c-surface);border:1px solid var(--c-line-strong);box-shadow:var(--shadow-float)}
+@media(prefers-reduced-motion:no-preference){.utility-dialog[open]{animation:beresta-pop var(--dur-slow) var(--ease-out)}@keyframes beresta-pop{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}}
+
+/* ---- Cards of the app wear paper and a graphite hairline ---- */
+.card{background:var(--c-surface);border-color:var(--c-line);box-shadow:none}
