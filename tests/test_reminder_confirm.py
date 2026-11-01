@@ -187,7 +187,7 @@ def test_the_model_sees_the_local_clock_and_the_prompt_stays_short():
     context = json.loads(structure_context(["Работа"], "Europe/Moscow", datetime(2026, 10, 15, 5, 47, tzinfo=MOSCOW)))
     assert (context["today"], context["now"], context["weekday"], context["timezone"]) == (
         "2026-10-15", "05:47", "четверг", "Europe/Moscow")
-    assert len(SYSTEM_PROMPT) <= 3778 * 1.1  # 3778 before the profile rule (profile-v1)
+    assert len(SYSTEM_PROMPT) <= 5600  # 4037 before the note style rules (docs/note-style-v1.md)
     assert "due_at" in SYSTEM_PROMPT and "09:00" in SYSTEM_PROMPT and "null" in SYSTEM_PROMPT
     assert "now" in SYSTEM_PROMPT.splitlines()[1] and '"due_at":null' in SYSTEM_PROMPT
     assert len(TIME_PROMPT) < 1000

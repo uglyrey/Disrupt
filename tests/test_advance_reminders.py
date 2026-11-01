@@ -203,7 +203,7 @@ def test_ai_made_reminders_get_twins_and_quiet_hours_move_only_the_twin(reminder
     assert datetime.fromtimestamp(main.scheduled_at, MOSCOW) == datetime(2026, 10, 11, 10, 30, tzinfo=MOSCOW)
     (twin,) = advance_rows(app)
     assert datetime.fromtimestamp(twin.scheduled_at, MOSCOW) == datetime(2026, 10, 11, 10, 0, tzinfo=MOSCOW)
-    assert twin.text == "Через час: Завтра в 10:30 позвонить маме"
+    assert twin.text == "Через час: Позвонить маме"
 
 
 def test_an_explicit_time_in_quiet_hours_is_kept(reminders):

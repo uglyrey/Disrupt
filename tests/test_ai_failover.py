@@ -715,8 +715,8 @@ def test_a_reached_cap_behaves_like_no_fallback_and_is_logged(env):
 
 
 def test_the_cap_is_checked_before_each_call_when_the_day_runs_out(env):
-    # Наибольшая цена записи около 0,057 доллара, настоящая 0,0075. Две записи помещаются, третья уже нет.
-    context = env(fallback_daily_usd=Decimal("0.07"))
+    # Наибольшая цена записи около 0,06 доллара (промпт стал длиннее), настоящая 0,0075. Две записи помещаются, третья уже нет.
+    context = env(fallback_daily_usd=Decimal("0.075"))
     go_down(context, probe_due=False)
     relay, primary = Relay(), Script()
     worker = context.worker(primary, relay)

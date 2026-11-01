@@ -49,6 +49,7 @@ from app.models import (
     new_id,
 )
 from app.note_images import ImageMergeUnavailable
+from app.note_style import duration_of, restyle
 from app.notes_manage import MergeSourcesChanged, complete_merge, merge_sources_alive
 from app.profile import prompt_profile
 from app.profile_jobs import run_profile_once
@@ -61,7 +62,7 @@ from app.providers import (
     make_provider,
     validate_result,
 )
-from app.reminders import auto_reminders, request_reminders
+from app.reminders import add_reminder_lines, auto_reminders, request_reminders
 from app.retry_policy import BAD_OUTPUT, GATEWAY_CODES, breaker_open, classify, decide, routing_code
 from app.services import general_category_id, lock_account, resolve_ai_category, save_revision
 from app.speech import CloudRuSpeechProvider, make_fallback_speech_provider, make_speech_provider
@@ -430,6 +431,8 @@ class Worker:
             result = self.usage.call(job_id, "llm", provider, structure, spend=attempt.spend)
             if self.router is not None and not attempt.fallback:
                 self.router.on_success()
+            if not blocked and job_kind != "merge":
+                result = restyle(result)  # The event instead of the request (docs/note-style-v1.md).
             now = time.time()
             with self.sessions() as db:
                 lock_account(db, user_id)
@@ -466,6 +469,7 @@ class Worker:
                 db.flush()
                 created = []
                 model_times = {}  # item id to the local deadline the model worked out, for the reminder cross-check
+                model_durations = {}  # item id to the event length in minutes (the model's, or the person's own words)
                 for position, item in enumerate(result.items):
                     row = Item(
                         user_id=user_id,
@@ -485,6 +489,9 @@ class Worker:
                 for row, item in zip(created, result.items, strict=True):
                     if item.due_at:
                         model_times[row.id] = item.due_at
+                    length = duration_of(item.duration_minutes, item.source_quote)
+                    if length:
+                        model_durations[row.id] = length
                 if job_kind == "merge":
                     # Open tasks, reminders and links of the originals move over, the originals go to the trash.
                     # The reminders of the originals are already settled, so the note gets no new automatic ones.
@@ -498,8 +505,14 @@ class Worker:
                     try:
                         # The note matters more than its reminders: a failure here leaves the note as it is.
                         with db.begin_nested():
-                            auto_reminders(db, note, self.settings, model_times=model_times)
-                            request_reminders(db, note, original, self.settings, model_times=model_times)
+                            made = auto_reminders(
+                                db, note, self.settings, model_times=model_times, model_durations=model_durations,
+                            )
+                            made += request_reminders(
+                                db, note, original, self.settings, model_times=model_times,
+                                model_durations=model_durations,
+                            )
+                            add_reminder_lines(db, note, made)
                     except Exception as exc:
                         log_error("auto_reminder_failed", "internal_error", log_file=self.settings.error_log_file,
                                   job_id=job_id, exception=exc)

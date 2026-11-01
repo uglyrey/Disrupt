@@ -249,11 +249,20 @@ class ProposedItem(ProposedConclusion):
     # Local wall time of the deadline, YYYY-MM-DDTHH:MM, as the model worked it out. Optional and never trusted:
     # a malformed value becomes None here, the reminder code cross-checks the rest (docs/reminder-confirm-v1.md).
     due_at: str | None = None
+    # Length of the event in minutes (5..720) as the model estimated it or the person named it. Optional; anything that
+    # is not a whole number in that range becomes None here and the person's default length applies (docs/note-style-v1.md).
+    duration_minutes: int | None = None
 
     @field_validator("due_at", mode="before")
     @classmethod
     def well_formed_due_at(cls, value):
         return well_formed_local_minute(value)
+
+    @field_validator("duration_minutes", mode="before")
+    @classmethod
+    def sane_duration(cls, value):
+        from app.note_style import valid_minutes
+        return valid_minutes(value)
 
 
 class StructuredNote(StrictModel):
@@ -366,6 +375,8 @@ class ReminderResponse(StrictModel):
     # Google Calendar page with the event filled in. Set only for a coming reminder when the account offers the calendar
     # (`calendar_offer`) and the reminder is not an advance one (docs/profile-v1.md).
     calendar_url: str | None = None
+    # Length of the calendar event in minutes when the reminder has its own; empty means the person's default.
+    duration_minutes: int | None = None
     # The advance reminder «Через час: ...» carries the id of the main reminder it belongs to.
     advance_of: str | None = None
 
