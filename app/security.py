@@ -10,6 +10,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from app.config import SESSION_RENEW_SECONDS
 from app.models import LoginSession, LoginThrottle
 
 COOKIE_NAME = "notes_session"
@@ -98,10 +99,9 @@ def get_login_session(request: Request, db, *, write=False) -> LoginSession:
     token = request.cookies.get(COOKIE_NAME, "")
     if not token or len(token) > 200:
         raise HTTPException(401, "Войдите в приложение")
+    now = time.time()
     session = db.scalar(
-        select(LoginSession).where(
-            LoginSession.token_hash == hash_token(token), LoginSession.expires_at > time.time()
-        )
+        select(LoginSession).where(LoginSession.token_hash == hash_token(token), LoginSession.expires_at > now)
     )
     if session is None:
         raise HTTPException(401, "Сессия истекла. Войдите снова")
@@ -110,4 +110,22 @@ def get_login_session(request: Request, db, *, write=False) -> LoginSession:
         check_origin(request)
         if not hmac.compare_digest(request.headers.get("x-csrf-token", "").encode(), session.csrf_token.encode()):
             raise HTTPException(403, "Неверный CSRF-токен")
+    renew_session(request, db, session, token, now)
     return session
+
+
+def renew_session(request: Request, db, session: LoginSession, token: str, now: float):
+    """Slide the sign-in forward at most once a day. The cookie is re-sent by the middleware in app/main.py."""
+    seconds = request.app.state.settings.session_seconds
+    threshold = now + seconds - SESSION_RENEW_SECONDS
+    if session.expires_at >= threshold:
+        return
+    # The condition keeps two parallel requests from both writing: only one of them changes the row.
+    renewed = db.execute(
+        update(LoginSession)
+        .where(LoginSession.token_hash == session.token_hash, LoginSession.expires_at < threshold)
+        .values(expires_at=now + seconds)
+    ).rowcount
+    db.commit()
+    if renewed:
+        request.state.session_cookie = (token, seconds)
