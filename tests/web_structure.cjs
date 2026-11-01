@@ -205,4 +205,4 @@ function submit(form) { form.dispatchEvent(new w.Event('submit',{bubbles:true,ca
     await require('./web_note_images.cjs')();
     console.log('Web DOM checks passed: drafts, conflicts, version, XSS, search, pagination, events and category rename.');
   } finally { dom.window.close(); }
-})().catch(error => {console.error(error);process.exitCode = 1;});
+})().catch(error => {console.error(error);process.exit(1);});  // exit now: a failed sub-test leaves its own timers running

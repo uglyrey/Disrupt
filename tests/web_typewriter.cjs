@@ -74,7 +74,7 @@ module.exports = async () => {
       t.frames.shift()();
       field.dispatchEvent(new w.KeyboardEvent('keyup', {key: 'ArrowDown', bubbles: true}));
       assert.equal(t.frames.length, 1, `${id}: caret keys also ask for a frame`);
-      t.frames.length = 0;
+      t.frames.shift()();  // a browser always runs the frame; dropping it would leave one pending forever
       field.dispatchEvent(new w.KeyboardEvent('keyup', {key: 'a', bubbles: true}));
       assert.equal(t.frames.length, 0, `${id}: a letter key alone does not`);
     }
@@ -85,7 +85,7 @@ module.exports = async () => {
     Object.defineProperty(w, 'scrollY', {get: () => y, configurable: true});
     w.scrollTo = options => { scrolls.push(options); y = options.top; };
     w.__holdScroll(t.$('markdown'), () => { y = 0; });
-    assert.deepEqual(scrolls, [{left: 0, top: 4200, behavior: 'instant'}]);
+    assert.deepEqual(scrolls.map(item => ({...item})), [{left: 0, top: 4200, behavior: 'instant'}]);  // plain copies: the objects come from the jsdom realm
     scrolls.length = 0;
     w.__holdScroll(t.$('markdown'), () => {});
     assert.equal(scrolls.length, 0, 'nothing moved, nothing to restore');
@@ -98,7 +98,7 @@ module.exports = async () => {
     field.focus = options => focus.push(options);
     let revealed = 0; w.BerestaTypewriter.reveal = target => { if (target === field) revealed++; };
     w.BerestaMd.setMode('edit', {end: true});
-    assert.deepEqual(focus, [{preventScroll: true}]);
+    assert.deepEqual(focus.map(item => ({...item})), [{preventScroll: true}]);
     assert.equal(revealed, 1);
     assert.equal(field.selectionStart, field.value.length);
     console.log('Typewriter checks passed: band plan, keyboard area, throttling, scroll kept while fitting, edit entry.');
