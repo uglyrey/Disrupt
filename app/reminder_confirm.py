@@ -15,7 +15,7 @@ from app.integration import IntegrationRejection
 from app.models import Item, Note, Reminder
 from app.profile import time_dayparts
 from app.reminder_proposals import label_for, mentions_time
-from app.reminders import instant_of, reschedule
+from app.reminders import instant_of, reschedule, sync_note_line
 from app.time_check import ASK, CONFIRMED, CORRECTED, NEEDS_CHECK, parse_words, read_model_time
 
 EXPIRED = ("action_expired", "Напоминание отменено, изменено или уже прошло")
@@ -69,8 +69,9 @@ def expired():
 
 def apply_time(db, row, stamp, check, alt=None):
     """Move the reminder to `stamp` (a UTC timestamp) and record how the time was settled."""
-    reschedule(db, row, stamp, row.timezone, row.text, "telegram")
+    reschedule(db, row, stamp, row.timezone, row.text, "telegram", sync=False)
     row.time_check, row.time_alt = check, alt
+    sync_note_line(db, row)  # Only a settled time reaches the note.
 
 
 def button_entries(db, user_id, reminder_ids, now=None, *, edit_only=False):
@@ -113,6 +114,7 @@ def confirm_action(db, user_id, reminder_id, generation, action, now=None):
     if action == "ok":
         if row.time_check in NEEDS_CHECK:
             row.time_check, row.time_alt = CONFIRMED, None
+            sync_note_line(db, row)
         return {"status": "confirmed", "label": time_label(row, now)}
     if row.time_check not in NEEDS_CHECK or not row.time_alt:
         raise expired()

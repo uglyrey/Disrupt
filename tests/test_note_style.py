@@ -1,18 +1,20 @@
 """Human notes, the event instead of the reminder request, and the length of a calendar event (docs/note-style-v1.md)."""
 
+import time
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.models import Note, Reminder, User
+from app.models import Note, Reminder, Revision, User
 from app.note_style import (
     STYLE_PROMPT,
     estimate_duration,
     explicit_duration,
+    human_when,
     restyle,
     strip_reminder_words,
     strip_system_talk,
@@ -44,6 +46,13 @@ def reminder_rows(app):
         rows = db.scalars(select(Reminder).where(Reminder.advance_of.is_(None)).order_by(Reminder.scheduled_at)).all()
         db.expunge_all()
         return rows
+
+
+def day_text(days, hour):
+    """«ср, 5 ноября, 09:00» for the day `days` ahead of today in Moscow."""
+    now = datetime.now(MOSCOW)
+    moment = (now + timedelta(days=days)).replace(hour=hour, minute=0, second=0, microsecond=0).replace(tzinfo=None)
+    return human_when(moment, now.year)
 
 
 def span_minutes(url):
@@ -104,8 +113,8 @@ def test_restyle_cleans_title_text_and_tasks_and_keeps_the_quotes():
 
 
 def test_reminder_lines_one_per_event():
-    assert with_reminder_lines("Позвонить маме.", [("Позвонить маме", "завтра, 10:00")]) == \
-        "Позвонить маме.\n\nНапоминание: завтра, 10:00"
+    assert with_reminder_lines("Позвонить маме.", [("Позвонить маме", "пн, 3 ноября, 10:00")]) == \
+        "Позвонить маме.\n\nНапоминание: пн, 3 ноября, 10:00"
     two = with_reminder_lines("- Тренировка.\n- Созвон.", [("тренировка", "завтра, 09:00"), ("созвон", "завтра, 18:00")])
     assert two.endswith("Напоминание «Тренировка»: завтра, 09:00  \nНапоминание «Созвон»: завтра, 18:00")
     assert with_reminder_lines(two, [("тренировка", "завтра, 09:00"), ("созвон", "завтра, 18:00")]) == two
@@ -180,7 +189,7 @@ def test_the_note_names_the_event_and_the_time_of_the_reminder(reminders):
     run_worker(app)
     note = the_note(app, saved["capture_id"])
     assert note.title == "Позвонить маме"
-    assert note.markdown == "Позвонить маме.\n\nНапоминание: завтра, 10:00"
+    assert note.markdown == f"Позвонить маме.\n\nНапоминание: {day_text(1, 10)}"
     assert "напомни" not in (note.title + note.markdown).casefold().replace("напоминание:", "")
     (row,) = reminder_rows(app)
     assert row.text == "Позвонить маме" and row.duration_minutes == 15 and row.time_check is None
@@ -193,7 +202,8 @@ def test_several_reminders_give_one_line_each(reminders):
                     text="Напомни послезавтра в 9 утра про тренировку, потом послезавтра в 18 вечера про созвон с командой").json()
     run_worker(app)
     note = the_note(app, saved["capture_id"])
-    assert note.markdown.endswith("Напоминание «Тренировка»: послезавтра, 09:00  \nНапоминание «Созвон с командой»: послезавтра, 18:00")
+    assert note.markdown.endswith(
+        f"Напоминание «Тренировка»: {day_text(2, 9)}  \nНапоминание «Созвон с командой»: {day_text(2, 18)}")
     assert [r.text for r in reminder_rows(app)] == ["Тренировка", "Созвон с командой"]
 
 
@@ -289,3 +299,109 @@ def test_the_telegram_link_uses_the_same_length(reminders):
     assert span_minutes(calendar_url("Дело", at, "https://x.example/", None)) == 60
     assert span_minutes(calendar_url("Дело", at, "https://x.example/", 9999)) == 60
     assert timedelta(minutes=60) == timedelta(hours=1)
+
+
+# ---- The line with an absolute date, the guessed time, and a moved reminder ----
+
+
+def test_the_date_is_absolute_and_the_year_only_when_it_differs():
+    assert human_when(datetime(2026, 11, 3, 10, 0), 2026) == "вт, 3 ноября, 10:00"
+    assert human_when(datetime(2026, 11, 5, 9, 5), 2026) == "чт, 5 ноября, 09:05"
+    assert human_when(datetime(2027, 1, 4, 18, 30), 2026) == "пн, 4 января 2027, 18:30"
+
+
+def move(client, row, days, hour):
+    when = (datetime.now(MOSCOW) + timedelta(days=days)).replace(hour=hour, minute=0, second=0, microsecond=0)
+    body = {"scheduled_at": when.isoformat(), "timezone": row.timezone, "text": row.text, "generation": row.generation}
+    reply = client.patch("/api/v1/reminders/" + row.id, json=body)
+    assert reply.status_code == 200, reply.text
+
+
+def set_markdown(app, note_id, markdown):
+    with app.state.sessions.begin() as db:
+        db.get(Note, note_id).markdown = markdown
+
+
+def note_state(app, note_id):
+    with app.state.sessions() as db:
+        note = db.get(Note, note_id)
+        return note.markdown, note.version, db.scalar(
+            select(func.count()).select_from(Revision).where(Revision.note_id == note_id))
+
+
+def test_a_guessed_time_writes_the_line_once_when_the_person_confirms(reminders):
+    from app.reminder_confirm import confirm_action
+    app, client, ids = reminders
+    saved = message(client, update_id=930, text="Напомни позвонить маме").json()
+    run_worker(app)
+    note = the_note(app, saved["capture_id"])
+    (row,) = reminder_rows(app)
+    assert row.time_check == "ask" and "Напоминание" not in note.markdown and row.note_line is None
+    with app.state.sessions.begin() as db:
+        assert confirm_action(db, row.user_id, row.id, row.generation, "ok")["status"] == "confirmed"
+    markdown, version, _ = note_state(app, note.id)
+    (row,) = reminder_rows(app)
+    line = "Напоминание: " + human_when(datetime.fromtimestamp(row.scheduled_at, MOSCOW).replace(tzinfo=None), datetime.now(MOSCOW).year)
+    assert markdown == "Позвонить маме.\n\n" + line and row.note_line == line and version == note.version + 1
+    with app.state.sessions.begin() as db:  # Pressed twice: still one line.
+        confirm_action(db, row.user_id, row.id, row.generation, "ok")
+    assert note_state(app, note.id)[0] == markdown
+
+
+def test_a_time_written_in_the_check_flow_reaches_the_note(reminders):
+    from app.reminder_confirm import answer_time
+    app, client, ids = reminders
+    saved = message(client, update_id=931, text="Напомни позвонить маме").json()
+    run_worker(app)
+    note = the_note(app, saved["capture_id"])
+    (row,) = reminder_rows(app)
+    with app.state.sessions.begin() as db:
+        assert answer_time(db, row.user_id, row.id, row.generation, "послезавтра в 15:00")["status"] == "set"
+    assert note_state(app, note.id)[0].endswith("Напоминание: " + day_text(2, 15))
+
+
+def test_a_moved_reminder_replaces_its_own_line_and_saves_a_revision(reminders):
+    app, client, ids = reminders
+    saved = message(client, update_id=932, text="Завтра в 10 утра напомни позвонить маме").json()
+    run_worker(app)
+    note = the_note(app, saved["capture_id"])
+    (row,) = reminder_rows(app)
+    before = note_state(app, note.id)
+    move(client, row, 3, 16)
+    markdown, version, revisions = note_state(app, note.id)
+    assert markdown == f"Позвонить маме.\n\nНапоминание: {day_text(3, 16)}"
+    assert version == before[1] + 1 and revisions == before[2] + 1
+    assert reminder_rows(app)[0].note_line == f"Напоминание: {day_text(3, 16)}"
+
+
+def test_a_line_the_person_edited_or_removed_is_left_alone(reminders):
+    app, client, ids = reminders
+    saved = message(client, update_id=933, text="Завтра в 10 утра напомни позвонить маме").json()
+    run_worker(app)
+    note = the_note(app, saved["capture_id"])
+    (row,) = reminder_rows(app)
+    edited = f"Позвонить маме.\n\nНапоминание: {day_text(1, 10)}, не забыть цветы"
+    set_markdown(app, note.id, edited)
+    before = note_state(app, note.id)
+    move(client, row, 3, 16)
+    assert note_state(app, note.id) == before and before[0] == edited  # Not a fuzzy match.
+    set_markdown(app, note.id, "Позвонить маме.")
+    before = note_state(app, note.id)
+    (row,) = reminder_rows(app)
+    move(client, row, 4, 11)
+    assert note_state(app, note.id) == before and before[0] == "Позвонить маме."
+
+
+def test_the_telegram_snooze_moves_the_line_too(reminders):
+    from app.reminders import reschedule, snooze_time
+    app, client, ids = reminders
+    saved = message(client, update_id=934, text="Завтра в 10 утра напомни позвонить маме").json()
+    run_worker(app)
+    note = the_note(app, saved["capture_id"])
+    (row,) = reminder_rows(app)
+    with app.state.sessions.begin() as db:
+        live = db.get(Reminder, row.id)
+        reschedule(db, live, snooze_time(live, "snooze_hour", time.time()), live.timezone, live.text, "telegram")
+        stamp = live.scheduled_at
+    local = datetime.fromtimestamp(stamp, MOSCOW).replace(tzinfo=None)
+    assert note_state(app, note.id)[0].endswith("Напоминание: " + human_when(local, datetime.now(MOSCOW).year))

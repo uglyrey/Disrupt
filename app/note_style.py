@@ -8,7 +8,7 @@ reminder data, and reads or estimates the length of an event. No model is called
 
 import re
 
-from app.reminder_proposals import label_for
+from app.reminder_proposals import MONTH_NAMES
 
 MIN_MINUTES, MAX_MINUTES = 5, 720
 DEFAULT_MINUTES = 60
@@ -156,15 +156,46 @@ def restyle(result):
 # ---- «Напоминание: …» ----
 
 
-def human_when(local_time, local_now):
-    """«завтра, 10:00». Both arguments are naive local datetimes of the person."""
-    return label_for(local_time, local_now).replace(" в ", ", ", 1)
+WEEKDAY_SHORT = ("пн", "вт", "ср", "чт", "пт", "сб", "вс")
+
+
+def human_when(local_time, year):
+    """«пн, 3 ноября, 10:00». The date is absolute, so the line does not go stale when the note is read later.
+
+    `local_time` is a naive local datetime of the person, `year` the year of the moment the line is written: the
+    year is added only when it differs («пн, 3 ноября 2027, 10:00»)."""
+    day = f"{local_time.day} {MONTH_NAMES[local_time.month]}" + (f" {local_time.year}" if local_time.year != year else "")
+    return f"{WEEKDAY_SHORT[local_time.weekday()]}, {day}, {local_time:%H:%M}"
+
+
+NAMED_PREFIX = REMINDER_PREFIX + " «"
 
 
 def reminder_line(event, when, *, named):
     if named:
         return f"{REMINDER_PREFIX} «{capital(event)}»: {when}"
     return f"{REMINDER_PREFIX}: {when}"
+
+
+def line_pattern(line):
+    """A whole line of the note that is exactly `line`, with the two trailing spaces of a Markdown line break allowed."""
+    return re.compile(r"(?m)^" + re.escape(line) + r"( {2})?$")
+
+
+def swap_reminder_line(markdown, old, new):
+    """`markdown` with the line `old` replaced by `new`, or None when `old` is not there as a whole line (edited or removed)."""
+    found = line_pattern(old).search(markdown)
+    if found is None:
+        return None
+    return markdown[:found.start()] + new + (found.group(1) or "") + markdown[found.end():]
+
+
+def add_reminder_line(markdown, line, limit=24000):
+    """`markdown` with the line added at the end (in the same block as an earlier reminder line), or None if it does not fit."""
+    last = markdown.rstrip().rsplit("\n", 1)[-1]
+    glue = "  \n" if last.startswith(REMINDER_PREFIX) else "\n\n"
+    joined = markdown.rstrip() + glue + line
+    return joined if len(joined) <= limit else None
 
 
 def with_reminder_lines(markdown, entries, limit=24000):

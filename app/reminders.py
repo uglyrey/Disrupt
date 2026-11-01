@@ -9,7 +9,7 @@ from datetime import time as clock
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.analytics import record_event
@@ -17,15 +17,24 @@ from app.calendar_link import DEFAULT_MINUTES, calendar_url, note_link
 from app.config import Settings
 from app.models import Capture, Item, Note, Outbox, Reminder, User
 from app.note_style import (
+    NAMED_PREFIX,
+    add_reminder_line,
     explicit_duration,
     human_when,
+    reminder_line,
     strip_time_phrase,
+    swap_reminder_line,
     valid_minutes,
-    with_reminder_lines,
 )
 from app.profile import time_prefs
 from app.reminder_proposals import mentions_time, sentence_spans
-from app.services import cancel_reminder_deliveries, lock_account, owned_note
+from app.services import (
+    cancel_reminder_deliveries,
+    close_edit_session,
+    lock_account,
+    owned_note,
+    save_revision,
+)
 from app.time_check import ASK, CORRECTED, NEEDS_CHECK, UNCLEAR, Reading, decide
 from app.timezones import effective_zone, zone_guessed
 
@@ -152,7 +161,7 @@ def edit_reminder(db, user_id, reminder_id, body):
     return row
 
 
-def reschedule(db, row, scheduled_at, timezone, text, channel="web"):
+def reschedule(db, row, scheduled_at, timezone, text, channel="web", sync=True):
     """The one way to move a reminder. The site edit and the Telegram snooze buttons both come here."""
     cancel_reminder_deliveries(db, row.user_id, [row.id])
     row.scheduled_at, row.timezone, row.text = scheduled_at, timezone, text
@@ -162,6 +171,8 @@ def reschedule(db, row, scheduled_at, timezone, text, channel="web"):
     row.time_check, row.time_alt = (CORRECTED if row.time_check in NEEDS_CHECK else row.time_check), None
     record_event(db, row.user_id, "reminder_confirmed", f"{row.id}:{row.generation}", channel, subject_id=row.note_id)
     sync_advance(db, row)
+    if sync:
+        sync_note_line(db, row)
 
 
 def advance_moment(main_at, zone, prefs, now):
@@ -361,26 +372,95 @@ def auto_reminders(db, note, settings=None, now=None, model_times=None, model_du
     return created
 
 
-def add_reminder_lines(db, note, reminders):
-    """Write «Напоминание: завтра, 10:00» into a fresh note, one line per event, from the real reminder data.
+def _local(row, stamp):
+    return datetime.fromtimestamp(stamp, ZoneInfo(row.timezone)).replace(tzinfo=None)
 
-    The day is counted from the moment the reminder was made, in the zone of the reminder. A reminder whose time is
-    still a guess (`time_check` ask or unclear) gets no line: the «Верно?» question settles it first, and the text of
-    a note the person may already be editing is never rewritten afterwards (docs/note-style-v1.md). Returns the
-    reminders that got a line."""
+
+def rendered_line(row, now, *, named):
+    """The «Напоминание: …» line of a reminder at its time now, with an absolute date in the zone of the reminder."""
+    return reminder_line(row.text, human_when(_local(row, row.scheduled_at), _local(row, now).year), named=named)
+
+
+def add_reminder_lines(db, note, reminders):
+    """Write «Напоминание: пн, 3 ноября, 10:00» into a fresh note, one line per event, from the real reminder data.
+
+    The date is absolute (the year only when it is not the year of creation), in the zone of the reminder. A reminder
+    whose time is still a guess (`time_check` ask or unclear) gets no line yet: `sync_note_line` writes it once the
+    person settles the time. Every written line is remembered in `reminder.note_line`. Returns the reminders that got
+    a line."""
     rows = sorted(
         (r for r in reminders if r.advance_of is None and r.status == "confirmed" and r.time_check not in NEEDS_CHECK),
         key=lambda r: (r.scheduled_at, r.id),
     )
-    entries = []
-    for row in rows:
-        zone = ZoneInfo(row.timezone)
-        local = datetime.fromtimestamp(row.scheduled_at, zone).replace(tzinfo=None)
-        today = datetime.fromtimestamp(row.confirmed_at, zone).replace(tzinfo=None)
-        entries.append((row.text, human_when(local, today)))
-    if entries:
-        note.markdown = with_reminder_lines(note.markdown, entries)
-    return rows if entries else []
+    if not rows:
+        return []
+    named = len(rows) > 1
+    lines = [(row, rendered_line(row, row.confirmed_at, named=named)) for row in rows]
+    markdown = note.markdown
+    for row, line in lines:
+        added = markdown if line in markdown else add_reminder_line(markdown, line)
+        if added is None:
+            continue
+        markdown = added
+        row.note_line = line
+    note.markdown = markdown
+    return [row for row, _ in lines if row.note_line]
+
+
+def change_note_markdown(db, note, markdown):
+    """Change the text of a note on the server's own account, the way a normal update does.
+
+    The version goes up, the open editing session is closed (the next autosave of the person starts a new revision)
+    and a revision is saved. A person who still has the old version open gets the usual conflict on their next save.
+    Does nothing, and says so, when the note changed in the meantime or is deleted."""
+    lock_account(db, note.user_id)
+    changed = db.execute(
+        update(Note)
+        .where(Note.id == note.id, Note.user_id == note.user_id, Note.version == note.version, Note.deleted_at.is_(None))
+        .values(markdown=markdown, version=Note.version + 1, updated_at=time.time()),
+        execution_options={"synchronize_session": False},
+    ).rowcount
+    if not changed:
+        return False
+    db.refresh(note)
+    close_edit_session(db, note.id)
+    save_revision(db, note)
+    return True
+
+
+def sync_note_line(db, row, now=None):
+    """Keep the «Напоминание: …» line of a note in step with its reminder (docs/note-style-v1.md).
+
+    Writes the line once when the time is settled (it was a guess before), and replaces it when the reminder moves,
+    but only if the note still holds exactly the line beresta wrote (`row.note_line`, a whole line). A line the person
+    edited or removed is left alone. Returns True when the note text changed."""
+    if row.advance_of is not None or row.status != "confirmed" or row.time_check in NEEDS_CHECK:
+        return False
+    note = db.scalar(select(Note).where(Note.id == row.note_id, Note.user_id == row.user_id, Note.deleted_at.is_(None)))
+    if note is None:
+        return False
+    now = time.time() if now is None else now
+    if row.note_line is None:
+        others = db.scalar(select(func.count()).select_from(Reminder).where(
+            Reminder.note_id == row.note_id, Reminder.user_id == row.user_id, Reminder.id != row.id,
+            Reminder.advance_of.is_(None), Reminder.status == "confirmed",
+        ))
+        line = rendered_line(row, now, named=bool(others))
+        markdown = note.markdown if line in note.markdown else add_reminder_line(note.markdown, line)
+        if markdown is None:
+            return False
+        row.note_line = line
+        return markdown != note.markdown and change_note_markdown(db, note, markdown)
+    line = rendered_line(row, now, named=row.note_line.startswith(NAMED_PREFIX))
+    if line == row.note_line:
+        return False
+    markdown = swap_reminder_line(note.markdown, row.note_line, line)
+    if markdown is None:
+        return False  # The person edited or removed it.
+    if not change_note_markdown(db, note, markdown):
+        return False
+    row.note_line = line
+    return True
 
 
 # Explicit requests to be reminded. They are the person's own instruction, so they are honoured

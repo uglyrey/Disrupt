@@ -11,9 +11,11 @@ depends_on = None
 
 def upgrade():
     op.add_column("reminders", sa.Column("duration_minutes", sa.Integer(), nullable=True))
+    op.add_column("reminders", sa.Column("note_line", sa.Text(), nullable=True))
     op.add_column("users", sa.Column("calendar_default_minutes", sa.Integer(), server_default="60", nullable=False))
 
 
 def downgrade():
     op.drop_column("users", "calendar_default_minutes")
+    op.drop_column("reminders", "note_line")
     op.drop_column("reminders", "duration_minutes")

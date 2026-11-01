@@ -220,7 +220,7 @@ def test_settings_read_encryption_from_environment(monkeypatch, tmp_path):
 EXPECTED_COLUMNS = {
     "captures.original_text", "captures.transcript", "transcript_revisions.text", "notes.title", "notes.markdown",
     "notes.conclusions", "revisions.snapshot", "items.text", "items.source_quote", "items.due_text",
-    "reminders.text", "inbox.response", "outbox.message_text", "assistant_requests.question",
+    "reminders.text", "reminders.note_line", "inbox.response", "outbox.message_text", "assistant_requests.question",
     "assistant_requests.result", "admin_accounts.totp_secret", "feedback.subject", "feedback.description",
     "feedback.steps", "feedback.expected", "feedback.contact", "note_images.data", "time_requests.answer",
     "user_profiles.answers", "user_profiles.facts", "user_profiles.prefs",

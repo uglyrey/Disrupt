@@ -331,6 +331,9 @@ class Reminder(Base):
     # Event length in minutes for the calendar link: the person's own words or the model's estimate. Empty means
     # the default of the person (`users.calendar_default_minutes`).
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # The exact «Напоминание: …» line beresta wrote into the note for this reminder. Empty until it is written. It is
+    # replaced when the reminder moves, and only if the note still holds exactly this line (docs/note-style-v1.md).
+    note_line: Mapped[str | None] = mapped_column(EncryptedText("reminders.note_line"), nullable=True)
 
 
 class Inbox(Base):
