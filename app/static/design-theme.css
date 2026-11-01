@@ -85,7 +85,7 @@ button.is-loading::after,button[aria-busy=true]::after{content:"";position:absol
 .landing-beta .cta-primary{background:var(--c-green-leaf)!important;border-color:var(--c-green-leaf)!important;color:var(--c-bark)!important}
 .landing-beta .cta-primary:hover{background:#9bcb6b!important;border-color:#9bcb6b!important;color:var(--c-bark)!important}
 .landing-beta .cta-channel{background:transparent!important;border-color:#8f8d82!important;color:var(--c-bg)!important}
-.landing-beta .cta-channel:hover{background:#3a3e3b!important;border-color:var(--c-bg)!important}
+.landing-beta .cta-channel:hover{background:#3a3e3b!important;border-color:var(--c-bg)!important;color:var(--c-bg)!important}
 
 /* Text links that are buttons */
 .text-link{color:var(--c-green);text-decoration-color:#a9c98a;font-weight:500}
@@ -107,3 +107,7 @@ button.is-loading::after,button[aria-busy=true]::after{content:"";position:absol
 
 /* ---- Cards of the app wear paper and a graphite hairline ---- */
 .card{background:var(--c-surface);border-color:var(--c-line);box-shadow:none}
+
+/* ---- Narrow header of the app: the serif logo is wider than the old one, so the pieces tighten ---- */
+@media(max-width:640px){header{gap:8px}.brand{font-size:1.4rem}.brand span{display:none}.header-actions{gap:6px}}
+@media(max-width:430px){#username{display:none}}

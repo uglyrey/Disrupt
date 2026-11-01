@@ -32,8 +32,8 @@
   .birch .trunk,.birch .marks{animation:birch-fade .9s ease-out .1s both}
   .birch .sw{animation:birch-fade 1.1s ease-out both,birch-sway 9s ease-in-out infinite alternate;transform-box:fill-box}
   .sw-l{transform-origin:100% 0}.sw-r{transform-origin:0 0}
-  .s1{animation-delay:1.3s,1.3s,0s}.s2{animation-delay:1.2s,1.2s}.s3{animation-delay:1.1s,1.1s}.s4{animation-delay:1.2s,1.2s}.s5{animation-delay:1.5s,1.5s}.s6{animation-delay:1.4s,1.4s}.s7{animation-delay:1.3s,1.3s}.s8{animation-delay:1.6s,1.6s}
-  .s1{animation-duration:1.1s,8.4s}.s2{animation-duration:1.1s,9.6s}.s3{animation-duration:1.1s,10.8s}.s4{animation-duration:1.1s,8.9s}.s5{animation-duration:1.1s,7.6s}.s6{animation-duration:1.1s,9.2s}.s7{animation-duration:1.1s,8.1s}.s8{animation-duration:1.1s,7.2s}
+  .birch .s1{animation-delay:1.3s,1.3s}.birch .s2{animation-delay:1.2s,1.2s}.birch .s3{animation-delay:1.1s,1.1s}.birch .s4{animation-delay:1.2s,1.2s}.birch .s5{animation-delay:1.5s,1.5s}.birch .s6{animation-delay:1.4s,1.4s}.birch .s7{animation-delay:1.3s,1.3s}.birch .s8{animation-delay:1.6s,1.6s}
+  .birch .s1{animation-duration:1.1s,8.4s}.birch .s2{animation-duration:1.1s,9.6s}.birch .s3{animation-duration:1.1s,10.8s}.birch .s4{animation-duration:1.1s,8.9s}.birch .s5{animation-duration:1.1s,7.6s}.birch .s6{animation-duration:1.1s,9.2s}.birch .s7{animation-duration:1.1s,8.1s}.birch .s8{animation-duration:1.1s,7.2s}
   .flutter{transform-box:fill-box;transform-origin:50% 0;animation:birch-flutter 3.8s ease-in-out infinite alternate}
   .f1{animation-delay:-.4s}.f2{animation-delay:-1.3s;animation-duration:4.4s}.f3{animation-delay:-2.1s;animation-duration:3.3s}.f4{animation-delay:-.9s;animation-duration:5s}
   .f5{animation-delay:-3s}.f6{animation-delay:-1.8s;animation-duration:4.1s}.f7{animation-delay:-2.6s;animation-duration:3.6s}.f8{animation-delay:-.2s;animation-duration:4.7s}

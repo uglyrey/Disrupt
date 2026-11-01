@@ -202,7 +202,7 @@ class Birch:
         d = smooth(pts)
         tint = d + "L600 14L0 14Z"
         return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 14" width="600" height="14">'
-                f'<path fill="#efe9d9" d="{tint}"/><path fill="none" stroke="#8c8878" stroke-width="1.3" stroke-linecap="round" d="{d}"/></svg>\n')
+                f'<path fill="#ebe8dc" d="{tint}"/><path fill="none" stroke="#8c8878" stroke-width="1.3" stroke-linecap="round" d="{d}"/></svg>\n')
 
     # ---------- листья ----------
     def leaf(self, x, y, angle, size, color, flutter=None):

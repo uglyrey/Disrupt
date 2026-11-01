@@ -56,7 +56,7 @@
 /* Example: what you write, what you get */
 .sample{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1.1fr);gap:22px;align-items:stretch;margin-top:clamp(36px,5vw,56px)}
 .sample-in,.sample-out{padding:26px;border-radius:var(--r-leaf-sm);border:1px solid var(--c-line-strong)}
-.sample-in{background:var(--c-sunken)}
+.sample-in{background:var(--c-sunken);align-self:start}
 .sample-out{background:var(--c-surface);border-color:var(--c-ink)}
 .sample-label{margin:0 0 14px;font-size:var(--fs-sm);font-weight:600;color:var(--c-muted)}
 .sample-text{margin:0;font-family:var(--font-display);font-style:italic;font-weight:500;font-size:clamp(20px,2vw,24px);line-height:1.5;color:var(--c-ink)}
