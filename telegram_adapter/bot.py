@@ -683,11 +683,18 @@ class Bot:
         """Take the buttons away and add the outcome to the same message. If Telegram refuses, send a short new one."""
         message_id = message.get("message_id")
         original = message.get("text")
-        text = outcome
+        text, entities = outcome, []
         if isinstance(original, str) and original:
             joined = original + "\n\n" + outcome
             if len(joined.encode("utf-16-le")) // 2 <= TELEGRAM_UNITS:
                 text = joined
+                # The text links of the message («Изменить в Бересте») stay clickable. Their offsets still fit,
+                # because the outcome is added at the end.
+                entities = [
+                    entity for entity in message.get("entities") or []
+                    if isinstance(entity, dict) and entity.get("type") == "text_link" and isinstance(entity.get("url"), str)
+                    and type(entity.get("offset")) is int and type(entity.get("length")) is int
+                ]
         markup = message.get("reply_markup")
         keyboard = markup.get("inline_keyboard") if isinstance(markup, dict) else None
         links = [
@@ -698,10 +705,15 @@ class Bot:
         ]
         if type(message_id) is int:
             try:
-                await self.telegram.call("editMessageText", {
+                body = {
                     "chat_id": chat_id, "message_id": message_id, "text": text,
                     "link_preview_options": {"is_disabled": True}, "reply_markup": {"inline_keyboard": links},
-                })
+                }
+                if entities:
+                    body["entities"] = [
+                        {"type": "text_link", "offset": e["offset"], "length": e["length"], "url": e["url"]} for e in entities
+                    ]
+                await self.telegram.call("editMessageText", body)
                 return
             except RemoteFailure as error:
                 if error.fatal:

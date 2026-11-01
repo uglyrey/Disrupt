@@ -150,7 +150,7 @@ def test_two_requests_give_two_reminders_and_a_short_list(reminders):
     assert tail[0] == "Напоминания поставлены:"
     assert tail[1] == "• завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно? Добавить в Google Календарь"
     assert tail[2] == "• послезавтра в 12:00 по Москве, «Послезавтра в 12 оплатить счёт» Добавить в Google Календарь"
-    assert tail[3] == "Изменить: Открыть заметку"
+    assert tail[3] == "Изменить в Бересте"
 
 
 def test_no_duplicate_when_the_model_already_made_the_reminder(reminders):

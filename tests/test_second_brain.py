@@ -365,11 +365,11 @@ def test_processing_reply_offers_a_reminder_for_a_task_with_a_deadline(reminders
     assert text.startswith("Заметка готова.")
     assert text.split("\n\n")[-2] == (
         "Предлагаю напоминание: завтра в 09:00 по Москве, «Андрей завтра уточнит ситуацию.». "
-        "Подтвердить или изменить время: Открыть заметку"
+        "Подтвердить или изменить в Бересте"
     )
     (note,) = delivery["links"]
     assert note["url"] == delivery["note_url"] + "#remind" and "http" not in text
-    assert text.encode("utf-16-le")[note["offset"] * 2:(note["offset"] + note["length"]) * 2].decode("utf-16-le") == "Открыть заметку"
+    assert text.encode("utf-16-le")[note["offset"] * 2:(note["offset"] + note["length"]) * 2].decode("utf-16-le") == "Подтвердить или изменить в Бересте"
     assert text.split("\n")[-1].startswith("Категория: ")  # The category line closes the reply
     assert "\n\nПредлагаю напоминание" in text
     assert len(text.encode("utf-16-le")) <= 4096 * 2
@@ -403,7 +403,7 @@ def test_hint_keeps_the_telegram_length_limit(reminders):
     assert len(text.encode("utf-16-le")) <= 4096 * 2
     assert text.startswith("Заметка готова.") and "Полный результат в Beresta." in text
     assert text.split("\n\n")[-2].startswith("Предлагаю напоминание: завтра в 09:00")
-    assert text.split("\n\n")[-2].endswith("Открыть заметку") and text.split("\n")[-1].startswith("Категория: ")
+    assert text.split("\n\n")[-2].endswith("Подтвердить или изменить в Бересте") and text.split("\n")[-1].startswith("Категория: ")
 
 
 # AI categories

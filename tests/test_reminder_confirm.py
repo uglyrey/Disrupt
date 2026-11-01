@@ -501,7 +501,7 @@ def test_a_settled_time_gets_the_ordinary_line_and_no_buttons(notes):
         ids2 = {"user": note.user_id, "note": note.id}
     add_reminders(app, ids2, 1, check="confirmed")
     (item,) = claim(client).json()["items"]
-    assert item["confirm"] == [] and "Верно?" not in item["text"] and "Изменить: " in item["text"]
+    assert item["confirm"] == [] and "Верно?" not in item["text"] and "Изменить в Бересте" in item["text"] and "http" not in item["text"]
 
 
 # The buttons in the core
