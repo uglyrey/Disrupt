@@ -9,7 +9,7 @@ import time
 from urllib.parse import urlsplit
 from uuid import UUID
 
-from .clients import RemoteFailure
+from .clients import ATTACH_DATA, RemoteFailure
 
 # Telegram accepts up to 4096 UTF-16 units; the core already trims processing replies to fit.
 TELEGRAM_TEXT_UNITS = 4096
@@ -129,6 +129,13 @@ class DeliverySender:
                 label = entry.get("alt_label")
                 if label is not None and (not isinstance(label, str) or not 1 <= len(label) <= 40 or not label.isprintable()):
                     raise ValueError()
+            attach = item.get("attach")
+            if attach is not None and (
+                not isinstance(attach, dict) or set(attach) != {"capture_id", "mode", "title"}
+                or attach["mode"] not in {"ask", "undo"} or not isinstance(attach["title"], str)
+                or len(attach["title"]) > 60 or not ATTACH_DATA.fullmatch("at:" + str(attach["capture_id"]))
+            ):
+                raise ValueError()
             links = item.get("links", [])
             if not isinstance(links, list) or len(links) > 6:
                 raise ValueError()

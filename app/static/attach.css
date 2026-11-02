@@ -1,0 +1,8 @@
+.attach-box { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--line, #d9d4ca); border-radius: 12px; background: var(--panel, transparent); }
+.attach-box[hidden] { display: none; }
+.attach-text { margin: 0 0 8px; }
+.attach-box .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.attach-undo-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.attach-undo-row .attach-text { margin: 0; }
+.attach-sources { margin-top: 8px; }
+.attach-sources pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 10px; }

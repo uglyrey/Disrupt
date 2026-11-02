@@ -6,6 +6,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .clients import (
     ACTION_PREFIXES,
+    ATTACH_DATA,
+    ATTACH_PREFIXES,
     CONFIRM_DATA,
     CONFIRM_PREFIXES,
     MAX_AUDIO_BYTES,
@@ -15,6 +17,7 @@ from .clients import (
     Rejected,
     RemoteFailure,
     TelegramClient,
+    attach_rows,
     confirm_rows,
 )
 from .config import Settings
@@ -254,6 +257,10 @@ class Bot:
                 if token.startswith((ZONE_PREFIX, ZONE_CONFIRM_PREFIX)):
                     await self.answer_callback(callback)
                     await self.zone_button(chat_id, identity, token)
+                    return
+                chosen = ATTACH_DATA.fullmatch(token)
+                if chosen:
+                    await self.attach_button(callback, chat_id, identity, chosen)
                     return
                 confirm = CONFIRM_DATA.fullmatch(token)
                 if confirm:
@@ -571,6 +578,49 @@ class Bot:
             await self.settle_message(message, chat_id, reminder_id, outcome=text)
         else:
             raise RemoteFailure("core_invalid_response")
+
+    async def attach_button(self, callback, chat_id, identity, match):
+        """«Добавить к «X»», «Отдельная заметка» or «Отменить». The core decides. The message becomes the outcome."""
+        action = ATTACH_PREFIXES[match.group(1)]
+        payload = {**identity, "capture_id": match.group(2), "action": action}
+        try:
+            result = await self.core.post("/telegram/attach", payload)
+        except Rejected as error:
+            await self.answer_callback(callback, REJECTIONS[str(error)], alert=True)
+            return
+        text, links = result.get("text"), result.get("links")
+        origin = self.settings.web_url.rstrip("/")
+        valid = (
+            isinstance(text, str) and 1 <= len(text) <= TELEGRAM_UNITS and isinstance(links, list) and len(links) <= 3
+            and all(
+                isinstance(link, dict) and type(link.get("offset")) is int and type(link.get("length")) is int
+                and isinstance(link.get("url"), str) and link["url"].startswith(origin + "/?capture=")
+                and 0 <= link["offset"] and link["length"] > 0
+                for link in links
+            ) and result.get("status") in {"attached", "separate"}
+        )
+        if not valid:
+            raise RemoteFailure("core_invalid_response")
+        await self.answer_callback(callback)
+        keyboard = attach_rows({"capture_id": match.group(2), "mode": "undo"}) if result.get("undo") is True else []
+        message_id = callback["message"].get("message_id")
+        edit = {
+            "chat_id": chat_id, "message_id": message_id, "text": text,
+            "link_preview_options": {"is_disabled": True}, "reply_markup": {"inline_keyboard": keyboard},
+            "entities": [
+                {"type": "text_link", "offset": link["offset"], "length": link["length"], "url": link["url"]}
+                for link in links
+            ],
+        }
+        if type(message_id) is int:
+            try:
+                await self.telegram.call("editMessageText", edit)
+                return
+            except RemoteFailure as error:
+                if error.fatal:
+                    raise
+                logger.warning("bot_edit_failed code=%s", error.code)
+        await self.notify(chat_id, text.split("\n", 1)[0])
 
     async def answer_time(self, chat_id, identity, waiting, text):
         """The written time. Returns handled, not_time (save the text as a note) or gone (also a note)."""

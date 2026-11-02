@@ -54,6 +54,14 @@ class TextLink(StrictModel):
     url: str = Field(min_length=12, max_length=2000, pattern=r"^(https://calendar\.google\.com/calendar/render\?action=TEMPLATE&|https?://[^/\s]+/\?capture=)")
 
 
+class AttachButtons(StrictModel):
+    """Under the reply about a record that may continue a note. ask: «Добавить к «X»» and «Отдельная заметка».
+    undo: the record was added to the note «X», one button «Отменить»."""
+    capture_id: str = Field(pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+    mode: Literal["ask", "undo"]
+    title: str = Field(max_length=60)
+
+
 class Delivery(StrictModel):
     delivery_id: str
     lease_token: str
@@ -66,6 +74,8 @@ class Delivery(StrictModel):
     confirm: list[ConfirmButtons] = Field(default_factory=list, max_length=3)
     # Text links inside `text`: «Добавить в Google Календарь» (at most five, one per reminder line) and «Открыть заметку».
     links: list[TextLink] = Field(default_factory=list, max_length=6)
+    # Buttons for a record that continues a note (docs/attach-to-note-v1.md). Empty for other messages.
+    attach: AttachButtons | None = None
 
 
 class ClaimResponse(StrictModel):

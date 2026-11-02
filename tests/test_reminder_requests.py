@@ -55,7 +55,7 @@ def test_prompt_asks_for_a_task_and_no_longer_forbids_reminders():
     assert "не создавай напоминания" not in lowered
     assert "напомни" in lowered and "remind me" in lowered and "будильник" in lowered
     assert "due_text" in SYSTEM_PROMPT and "Не придумывай даты" in SYSTEM_PROMPT
-    assert len(SYSTEM_PROMPT) <= 5600  # 4037 before the note style rules (docs/note-style-v1.md)
+    assert len(SYSTEM_PROMPT) <= 5700  # 4037 before the note style rules (docs/note-style-v1.md)
 
 
 # Grounding

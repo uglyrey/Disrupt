@@ -489,6 +489,10 @@ def note_view(db, note, settings=None, now=None):
         "created_at": note.created_at,
         "updated_at": note.updated_at,
     }
+    from app import attach  # attach.py imports this module
+    view["attach_offer"] = attach.offer_view(db, capture, now.timestamp() if now else None) \
+        if note.deleted_at is None else None
+    view["attached"] = attach.attached_views(db, note, now.timestamp() if now else None)
     proposals = reminder_proposals(db, note.user_id, view["items"], settings, now)
     for item in view["items"]:
         item["proposed_reminder"] = proposals.get(item["id"])
@@ -520,7 +524,7 @@ def capture_view(db, capture):
     return {
         "capture_id": capture.id, "original_text": capture.original_text,
         "processing_mode": capture.processing_mode, **audio_metadata(db, capture),
-        "note_id": db.scalar(select(Note.id).where(Note.capture_id == capture.id, Note.deleted_at.is_(None))),
+        "note_id": visible_note_ids(db, [capture]).get(capture.id),
         "job": job_view(db, job) if job else None,
         "images": capture_image_views(db, capture.id),
     }
@@ -877,11 +881,16 @@ def saved_audio_view(db, capture):
     }
 
 
+def visible_note_ids(db, captures):
+    from app import attach
+    return attach.visible_note_ids(db, captures)
+
+
 def job_view(db, job, *, capture=None, note_id=None):
     """One job. A list passes the capture and note it already loaded, so the list costs two queries, not 2 per job."""
     if capture is None:
         capture = db.get(Capture, job.capture_id)
-        note_id = db.scalar(select(Note.id).where(Note.capture_id == job.capture_id, Note.deleted_at.is_(None)))
+        note_id = visible_note_ids(db, [capture]).get(capture.id)
     return {
         "id": job.id,
         "capture_id": job.capture_id,
@@ -891,6 +900,7 @@ def job_view(db, job, *, capture=None, note_id=None):
         "provider": job.provider,
         "error_code": job.error_code,
         "note_id": note_id,
+        "attached": capture.attach_state == "attached" and note_id is not None and note_id == capture.attach_note_id,
         "original_text": capture.original_text,
         "created_at": job.created_at,
         "finished_at": job.finished_at,
@@ -905,7 +915,5 @@ def job_views(db, jobs):
     if not ids:
         return []
     captures = {c.id: c for c in db.scalars(select(Capture).where(Capture.id.in_(ids)))}
-    notes = dict(db.execute(
-        select(Note.capture_id, Note.id).where(Note.capture_id.in_(ids), Note.deleted_at.is_(None))
-    ).all())
+    notes = visible_note_ids(db, list(captures.values()))
     return [job_view(db, job, capture=captures[job.capture_id], note_id=notes.get(job.capture_id)) for job in jobs]

@@ -17,7 +17,7 @@ import time
 from pydantic import ValidationError
 from sqlalchemy import or_, select, update
 
-from app import crypto
+from app import attach, crypto
 from app.ai_guard import BLOCKED_CODE, OutputGuard
 from app.analytics import record_event
 from app.assistant import run_assistant_once
@@ -404,6 +404,14 @@ class Worker:
                 user_zone = effective_zone(db.get(User, user_id), self.settings)
                 # What the questionnaire «Знакомство» turned into. The raw answers never leave the database.
                 profile = prompt_profile(db, user_id)
+                # Titles of a few notes this record may continue (docs/attach-to-note-v1.md). Never fails the job.
+                candidates, refs = [], {}
+                if job_kind != "merge":
+                    try:
+                        candidates, refs = attach.candidate_context(db, user_id, original)
+                    except Exception as exc:
+                        log_error("attach_candidates_failed", "internal_error", log_file=self.settings.error_log_file,
+                                  job_id=job_id, exception=exc)
                 if self.settings.provider == "cloudru" and not attempt.fallback:
                     self.reserve_budget(db, user_id)
             provider = self.fallback_provider if attempt.fallback else self.provider
@@ -414,6 +422,8 @@ class Worker:
                 extra = {"timezone": user_zone} if takes_timezone(call) else {}
                 if profile and takes_parameter(call, "profile"):
                     extra["profile"] = profile
+                if candidates and takes_parameter(call, "candidates"):
+                    extra["candidates"] = candidates
                 result = (
                     measured(original, categories=tuple(category_context), on_usage=on_usage, **extra)
                     if measured else provider.structure(original, categories=tuple(category_context), **extra)
@@ -518,6 +528,14 @@ class Worker:
                                   job_id=job_id, exception=exc)
                 save_revision(db, note)
                 capture = db.get(Capture, capture_id)
+                if job_kind != "merge":
+                    try:
+                        # The note is already stored. A failure here leaves it as its own note, like before.
+                        with db.begin_nested():
+                            self.continue_note(db, capture, note, original, None if blocked else result.continues_note, refs)
+                    except Exception as exc:
+                        log_error("attach_failed", "internal_error", log_file=self.settings.error_log_file,
+                                  job_id=job_id, exception=exc)
                 record_event(db, user_id, "processing_completed", job_id, capture.channel)
                 finish_component(db, user_id, component_id, "capture_worker", "succeeded")
                 db.commit()
@@ -538,6 +556,18 @@ class Worker:
                                      final.error_code or final.last_error_code)
                     db.commit()
         return True
+
+    def continue_note(self, db, capture, note, original, continues, refs):
+        """The record reads like a continuation: add it at once when the person asked, otherwise offer to."""
+        decision = attach.decide(db, note, original, continues, refs)
+        if decision is None:
+            return
+        if decision.mode == "attach":
+            attach.attach_capture(db, capture, db.get(Note, decision.target_id), self.settings, explicit=True)
+            return
+        capture.attach_state, capture.attach_note_id = attach.OFFERED, decision.target_id
+        capture.attach_offered_at = time.time()
+        record_event(db, capture.user_id, "attach_offered", capture.id, capture.channel, subject_id=decision.target_id)
 
     def budget_available(self):
         """Keep queued originals intact when the deployment's total call cap is spent."""

@@ -67,6 +67,8 @@ def restore_note(db, user_id, note_id, now=None):
     now = time.time() if now is None else now
     lock_account(db, user_id)
     note = owned_note(db, note_id, user_id, state="trashed")
+    if is_added_record(db, note):
+        raise HTTPException(404, "Заметка не найдена")  # It lives inside another note; «Отменить» brings it back.
     advance_note(db, note, note.version, deleted_at=None, merged_into=None)
     stale = db.scalars(select(Reminder.id).where(
         Reminder.note_id == note.id, Reminder.user_id == user_id,
@@ -84,9 +86,17 @@ def restore_note(db, user_id, note_id, now=None):
     return note
 
 
+def is_added_record(db, note):
+    """The hidden own note of a record that was added to another note (docs/attach-to-note-v1.md)."""
+    return db.scalar(select(Capture.id).where(
+        Capture.id == note.capture_id, Capture.user_id == note.user_id, Capture.attach_state == "attached",
+    )) is not None
+
+
 def trash_views(db, user_id, settings, limit=200):
+    from app.attach import hidden_note_ids
     rows = db.scalars(
-        select(Note).where(Note.user_id == user_id, Note.deleted_at.is_not(None))
+        select(Note).where(Note.user_id == user_id, Note.deleted_at.is_not(None), Note.id.not_in(hidden_note_ids(db, user_id)))
         .order_by(Note.deleted_at.desc(), Note.id).limit(limit)
     ).all()
     targets = {row.merged_into for row in rows if row.merged_into}
@@ -109,6 +119,10 @@ class PurgeBlocked(Exception):
 
 def purge_note(db, note, audio_storage):
     """Erase one note and all that belongs to it. The caller owns the account lock and commits."""
+    for hidden in db.scalars(select(Note).join(Capture, Capture.id == Note.capture_id).where(
+        Capture.attach_note_id == note.id, Capture.attach_state == "attached", Note.id != note.id,
+    )).all():
+        purge_note(db, hidden, audio_storage)  # Records added to this note go with it, audio files included.
     capture = db.get(Capture, note.capture_id)
     if capture is not None and capture.audio_key:
         if audio_storage is None:
@@ -158,8 +172,11 @@ def purge_expired(sessions, settings, audio_storage=None, now=None, batch=PURGE_
     counts = {"notes": 0, "items": 0, "skipped": 0}
     with sessions() as db:
         due_notes = db.execute(
-            select(Note.id, Note.user_id).where(Note.deleted_at.is_not(None), Note.deleted_at < cutoff)
-            .order_by(Note.deleted_at, Note.id).limit(batch)
+            select(Note.id, Note.user_id).where(
+                Note.deleted_at.is_not(None), Note.deleted_at < cutoff,
+                # The hidden note of an added record is erased together with the note that holds it.
+                Note.capture_id.not_in(select(Capture.id).where(Capture.attach_state == "attached")),
+            ).order_by(Note.deleted_at, Note.id).limit(batch)
         ).all()
     for note_id, user_id in due_notes:
         with sessions.begin() as db:

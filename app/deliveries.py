@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import and_, or_, select
 
+from app import attach as attach_mod
 from app.analytics import record_event
 from app.calendar_link import LABEL, LINE_END
 from app.components import record as record_component
@@ -66,7 +67,7 @@ def current_target(db, row, now):
         ))
         if (
             capture is None or capture.user_id != row.user_id or capture.channel != "telegram"
-            or note is None or note.deleted_at is not None
+            or note is None or (note.deleted_at is not None and capture.attach_state != "attached")
         ):
             return None
         return (None, note) if identity else None
@@ -152,12 +153,15 @@ def short_task(text):
     return task if len(task) <= HINT_TASK_CHARS else task[:HINT_TASK_CHARS - 1].rstrip() + "…"
 
 
-def upcoming_auto_reminders(db, note, now):
-    """The reminders the AI has set for this note that are still ahead, soonest first."""
-    return db.scalars(select(Reminder).where(
+def upcoming_auto_reminders(db, note, now, only_ids=None):
+    """The reminders the AI has set for this note that are still ahead, soonest first.
+
+    `only_ids` narrows them to the ones a record brought into the note when it was added to it."""
+    rows = db.scalars(select(Reminder).where(
         Reminder.note_id == note.id, Reminder.user_id == note.user_id, Reminder.status == "confirmed",
         Reminder.scheduled_at > now, Reminder.idempotency_key.like(AUTO_KEY_PREFIX + "%"),
     ).order_by(Reminder.scheduled_at, Reminder.id)).all()
+    return rows if only_ids is None else [row for row in rows if row.id in only_ids]
 
 
 def offers_calendar(db, user_id):
@@ -216,14 +220,14 @@ def link_note_urls(text, links, origin):
     return out, sorted([*moved, *added], key=lambda link: link["offset"])
 
 
-def auto_reminder_hint(db, note, settings, now):
+def auto_reminder_hint(db, note, settings, now, only_ids=None):
     """The line for reminders the AI has set for this note, or an empty string. They are still ahead and can be changed.
 
     Returns (text, ids, linked): ids are the reminders (at most three) that the line asks «Верно?» about. The bot draws
     «Верно» and «Изменить время» under the message for them. When the account offers the calendar, every reminder line
     ends with «Добавить в Google Календарь» and `linked` names those reminders in order of the lines.
     """
-    rows = upcoming_auto_reminders(db, note, now)
+    rows = upcoming_auto_reminders(db, note, now, only_ids)
     if not rows:
         return "", [], []
     offer = offers_calendar(db, note.user_id)
@@ -269,12 +273,16 @@ def auto_reminder_hint(db, note, settings, now):
     return "Напоминания поставлены:\n" + "\n".join(lines) + f"\nИзменить: {link}", ids, linked
 
 
-def reminder_line(db, note, settings, now=None):
+def reminder_line(db, note, settings, now=None, *, only_ids=None, source=None):
     """(text, ids, linked) of the one line about reminders for a processed note.
 
     `ids` are the reminders it asks «Верно?» about, `linked` the reminders whose line ends with the calendar link."""
-    missed = NOT_UNDERSTOOD if unscheduled_requests(db, note) else ""
-    done, ids, linked = auto_reminder_hint(db, note, settings, time.time() if now is None else now.timestamp())
+    missed = NOT_UNDERSTOOD if unscheduled_requests(db, source or note) else ""
+    done, ids, linked = auto_reminder_hint(
+        db, note, settings, time.time() if now is None else now.timestamp(), only_ids,
+    )
+    if only_ids is not None:
+        return (done + ("\n" + missed if missed else "") if done else missed), ids, linked
     if done:
         return done + ("\n" + missed if missed else ""), ids, linked
     items = [item_view(item) for item in db.scalars(
@@ -336,20 +344,34 @@ def category_line(db, note):
     return "Категория: " + (name or GENERAL_CATEGORY)
 
 
-def reply_tail(hint, category):
-    return "".join("\n\n" + part for part in (hint, category) if part)
+def reply_tail(hint, category, ask=""):
+    return "".join("\n\n" + part for part in (hint, category, ask) if part)
 
 
-def processing_reply_text(note, hint="", category=""):
+def processing_reply_text(note, hint="", category="", ask=""):
     """Reply text. The note part stays within 3500 UTF-16 units, the whole text within Telegram's 4096.
 
     The reminder line `hint` and the line `category` close the reply, so they are never cut."""
-    tail = reply_tail(hint, category)
+    tail = reply_tail(hint, category, ask)
     text = "Заметка готова.\n\n" + note.title + "\n\n" + note.markdown
     room = min(REPLY_UNITS, TELEGRAM_UNITS - utf16_units(tail) - utf16_units(REPLY_FOOTER))
     if utf16_units(text) > room:
         text = text.encode("utf-16-le")[:room * 2].decode("utf-16-le", errors="ignore") + REPLY_FOOTER
     return text + tail
+
+
+def added_reply(db, capture, own, target, settings, now):
+    """The reply for a record that went into another note: «Добавил в «X».», its reminders, the link, «Отменить»."""
+    moved = set((capture.attach_moved or {}).get("reminders") or [])
+    reply, ids, linked = reminder_line(db, target, settings, only_ids=moved, source=own)
+    title = attach_mod.clip_title(target.title, 60)
+    head = f"Добавил в «{title}»."
+    link = settings.public_origin + "/?capture=" + capture.id
+    text = head + ("\n\n" + reply if reply else "") + "\n\n" + link
+    text, links = attach_links(text, link_urls(db, capture.user_id, linked, settings))
+    text, links = link_note_urls(text, links, settings.public_origin)
+    undo = {"capture_id": capture.id, "mode": "undo", "title": title} if attach_mod.can_undo(capture, now) else None
+    return text, links, ids, undo
 
 
 def claim_deliveries(db, body, settings):
@@ -386,12 +408,14 @@ def claim_deliveries(db, body, settings):
         select(Outbox.id, Outbox.user_id, Outbox.created_at)
         .join(Job, and_(Job.id == Outbox.job_id, Job.user_id == Outbox.user_id))
         .join(Note, and_(Note.capture_id == Job.capture_id, Note.user_id == Outbox.user_id))
+        .join(Capture, Capture.id == Job.capture_id)
         .join(TelegramIdentity, and_(
             TelegramIdentity.user_id == Outbox.user_id, TelegramIdentity.bot_id == Outbox.bot_id,
             TelegramIdentity.chat_id == Outbox.chat_id,
         ))
         .where(
-            Outbox.bot_id == body.bot_id, Job.status == "succeeded", Outbox.generation == 1, Note.deleted_at.is_(None),
+            Outbox.bot_id == body.bot_id, Job.status == "succeeded", Outbox.generation == 1,
+            or_(Note.deleted_at.is_(None), Capture.attach_state == "attached"),
             TelegramIdentity.notifications_enabled.is_(True), TelegramIdentity.delivery_status == "available",
             or_(
                 and_(Outbox.status == "pending", Outbox.authorized_at.is_(None)),
@@ -432,6 +456,7 @@ def claim_deliveries(db, body, settings):
             continue
         message = row.message_kind is not None
         links = []
+        attach = None
         if message:
             if not message_deliverable(db, row, now):
                 row.status, row.error_code, row.message_text = "cancelled", "delivery_invalid", None
@@ -453,14 +478,27 @@ def claim_deliveries(db, body, settings):
             if reminder is not None:
                 text = reminder_message_text(reminder, note)  # No calendar link when a reminder fires.
             else:
-                reply, ids, linked = reminder_line(db, note, settings)
-                confirm = button_entries(db, row.user_id, ids, now)
-                category = category_line(db, note)
-                text = processing_reply_text(note, reply, category)
-                text, links = attach_links(
-                    text, link_urls(db, row.user_id, linked, settings), len(text) - len(reply_tail(reply, category)),
-                )
-                text, links = link_note_urls(text, links, settings.public_origin)
+                capture = db.get(Capture, note.capture_id)
+                added = attach_mod.attached_target(db, capture)
+                if added is not None:
+                    text, links, ids, attach = added_reply(db, capture, note, added, settings, now)
+                    confirm = button_entries(db, row.user_id, ids, now)
+                else:
+                    reply, ids, linked = reminder_line(db, note, settings)
+                    confirm = button_entries(db, row.user_id, ids, now)
+                    category = category_line(db, note)
+                    pending = attach_mod.offer_state(db, capture, now)
+                    ask = ""
+                    if pending is not None:
+                        title = attach_mod.clip_title(pending[1].title, 60)
+                        ask = f"Похоже, это продолжение «{title}». Добавить туда?"
+                        attach = {"capture_id": capture.id, "mode": "ask", "title": title}
+                    text = processing_reply_text(note, reply, category, ask)
+                    text, links = attach_links(
+                        text, link_urls(db, row.user_id, linked, settings),
+                        len(text) - len(reply_tail(reply, category, ask)),
+                    )
+                    text, links = link_note_urls(text, links, settings.public_origin)
         lease = secrets.token_urlsafe(32)
         callback = secrets.token_urlsafe(32) if reminder is not None else None
         row.status, row.lease_token_hash = "leased", hash_token(lease)
@@ -474,7 +512,7 @@ def claim_deliveries(db, body, settings):
             "note_url": settings.public_origin + "/" if message else settings.public_origin
                         + "/?capture=" + note.capture_id
                         + ("&reminder=" + reminder.id if reminder is not None else ""), "callback_token": callback,
-            "confirm": confirm, "links": links,
+            "confirm": confirm, "links": links, "attach": attach,
         })
     db.flush()
     return {"items": results}

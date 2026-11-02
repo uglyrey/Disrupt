@@ -159,6 +159,8 @@ class AudioJobResponse(StrictModel):
     provider: Literal["mock", "cloudru"]
     error_code: str | None
     note_id: str | None
+    # True when the record was added to an existing note: note_id is then that note (docs/attach-to-note-v1.md).
+    attached: bool = False
     original_text: str
     created_at: float
     finished_at: float | None
@@ -265,6 +267,25 @@ class ProposedItem(ProposedConclusion):
         return valid_minutes(value)
 
 
+class ContinuesNote(StrictModel):
+    """The model thinks the record continues one of the notes it was shown (docs/attach-to-note-v1.md)."""
+    ref: str = Field(min_length=1, max_length=8, pattern=r"^n[0-9]{1,3}$")
+    hint: str | None = Field(default=None, max_length=200)
+    confidence: float = Field(ge=0, le=1)
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def number(cls, value):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError("confidence must be a number")
+        return float(value)
+
+    @field_validator("hint", mode="before")
+    @classmethod
+    def short_hint(cls, value):
+        return value[:200] if isinstance(value, str) else None
+
+
 class StructuredNote(StrictModel):
     # Server-only processing metadata, never accepted from model JSON or exported to the contract.
     _grounding_details_omitted: bool = PrivateAttr(default=False)
@@ -273,6 +294,18 @@ class StructuredNote(StrictModel):
     conclusions: list[ProposedConclusion] = Field(max_length=5)
     items: list[ProposedItem] = Field(default_factory=list, max_length=30)
     category_name: str | None = Field(default=None, min_length=1, max_length=100)
+    # Optional hint about a note this record continues. A malformed value is dropped: it never spoils the note.
+    continues_note: ContinuesNote | None = None
+
+    @field_validator("continues_note", mode="before")
+    @classmethod
+    def lenient_continues(cls, value):
+        if value is None or isinstance(value, ContinuesNote):
+            return value
+        try:
+            return ContinuesNote.model_validate(value)
+        except ValueError:
+            return None
 
     @field_validator("title", "markdown")
     @classmethod
@@ -487,6 +520,40 @@ class ConclusionResponse(ProposedConclusion):
     status: Literal["proposed", "accepted", "rejected"]
 
 
+class AttachOffer(StrictModel):
+    """Under a processed record: «Похоже, это продолжение «X». Добавить туда?» Open for 24 hours."""
+    capture_id: str
+    note_id: str
+    title: str
+    expires_at: float
+
+
+class AttachedSource(StrictModel):
+    """A record that was added to this note. Its own text stays here as an extra source."""
+    capture_id: str
+    created_at: float
+    added_at: float | None
+    channel: Literal["web", "telegram"]
+    input_kind: Literal["text", "audio"]
+    original_text: str
+    can_undo: bool
+    undo_until: float | None
+
+
+class AttachResult(StrictModel):
+    capture_id: str
+    state: Literal["attached", "separate"]
+    # The note to open: the target when the record was added, its own note otherwise.
+    note_id: str
+    note_title: str
+    # Undo only: the added section had been edited, so it stays in the target. Nothing is lost.
+    target_text_kept: bool = False
+
+
+class AttachRequest(StrictModel):
+    note_id: str = Field(min_length=1, max_length=36, pattern=r"^[A-Za-z0-9-]+$")
+
+
 class NoteResponse(AudioMetadata):
     id: str
     capture_id: str
@@ -503,6 +570,8 @@ class NoteResponse(AudioMetadata):
     provider: str
     created_at: float
     updated_at: float
+    attach_offer: AttachOffer | None = None
+    attached: list[AttachedSource] = Field(default_factory=list)
 
 
 class NoteSummary(StrictModel):
@@ -548,6 +617,12 @@ class TelegramReminderConfirm(TelegramOperation):
     reminder_id: str = Field(min_length=1, max_length=36, pattern=r"^[A-Za-z0-9-]+$")
     generation: Counter
     action: Literal["ok", "edit", "alt"]
+
+
+class TelegramAttach(TelegramOperation):
+    """A button under the reply about a record that may continue a note: add, keep apart, or undo."""
+    capture_id: str = Field(min_length=36, max_length=36, pattern=r"^[0-9a-f-]+$")
+    action: Literal["attach", "separate", "undo"]
 
 
 class TelegramReminderTime(TelegramOperation):

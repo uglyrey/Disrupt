@@ -624,6 +624,7 @@ async function pollJob(id, currentEpoch, {kind = 'text', generation = viewGenera
       if (currentEpoch!==epoch || generation!==viewGeneration) return;
       if (canShowJobResult(generation,draft)) {
         await openNote(job.note_id,{backgroundDraft:draft,visibleResult:true});
+        if (job.attached && currentEpoch === epoch && currentNote?.id === job.note_id) message(`Добавил в «${currentNote.title}».`);
         if (jobNotice(job) && currentEpoch === epoch &&
             viewGeneration === generation + 1 && currentNote?.id === job.note_id) {
           message(jobNotice(job));
