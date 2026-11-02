@@ -194,22 +194,38 @@ def attach_links(text, urls, start=0):
 
 
 NOTE_LABEL = "Открыть заметку"
+EDIT_LABEL = "Изменить в Бересте"
+CONFIRM_LABEL = "Подтвердить или изменить в Бересте"
+RESET_LABEL = "Задать новый пароль"
+# A phrase before an address that becomes part of the link: «Изменить: <адрес>» turns into the one link «Изменить в Бересте».
+PHRASE_LABELS = (("Подтвердить или изменить время: ", CONFIRM_LABEL), ("Изменить: ", EDIT_LABEL))
 
 
 def link_note_urls(text, links, origin):
-    """(text, links) where every address of a note of this service in the text is the clickable «Открыть заметку».
+    """(text, links) where every address of this service in the text is a clickable short label.
 
-    Telegram shows a bare address as a long line. The address moves into a `text_link` entry (UTF-16 offsets) and the
-    text keeps the short label. Entries that already exist and sit after an address move left by what it gave up."""
-    found = list(re.finditer(re.escape(origin) + r"/\?capture=[^\s]+", text))
+    Telegram shows a bare address as a long line. The address moves into a `text_link` entry (UTF-16 offsets):
+    «Изменить: <адрес>» becomes «Изменить в Бересте», «Подтвердить или изменить время: <адрес>» becomes
+    «Подтвердить или изменить в Бересте», the password reset address becomes «Задать новый пароль», any other
+    note address becomes «Открыть заметку». Entries that already exist and sit after an address move left by what
+    it gave up."""
+    found = list(re.finditer(re.escape(origin) + r"/(?:\?capture=|#reset=)[^\s]+", text))
     if not found:
         return text, links
     out, pos, added, cut = "", 0, [], []
     for match in found:
-        out += text[pos:match.start()]
-        added.append({"offset": utf16_units(out), "length": utf16_units(NOTE_LABEL), "url": match.group()})
-        out += NOTE_LABEL
-        cut.append((utf16_units(text[:match.end()]), utf16_units(match.group()) - utf16_units(NOTE_LABEL)))
+        label, start = NOTE_LABEL, match.start()
+        if "/#reset=" in match.group():
+            label = RESET_LABEL
+        else:
+            for phrase, phrase_label in PHRASE_LABELS:
+                if text.endswith(phrase, pos, start):
+                    label, start = phrase_label, start - len(phrase)
+                    break
+        out += text[pos:start]
+        added.append({"offset": utf16_units(out), "length": utf16_units(label), "url": match.group()})
+        out += label
+        cut.append((utf16_units(text[:match.end()]), utf16_units(text[start:match.end()]) - utf16_units(label)))
         pos = match.end()
     out += text[pos:]
     moved = [{**link, "offset": link["offset"] - sum(gain for end, gain in cut if end <= link["offset"])} for link in links]

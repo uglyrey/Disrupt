@@ -815,6 +815,8 @@ def edit_item(db, note, item_id, body):
         raise HTTPException(404, "Элемент не найден")
     content_changed = item.text != body.text or item.kind != body.kind
     completed = body.kind == "task" and body.status == "completed" and item.status != "completed"
+    # A done task that is open again (or stops being a task) leaves the «выполнено» history.
+    reopened = item.kind == "task" and item.status == "completed" and not (body.kind == "task" and body.status == "completed")
     # A type correction also invalidates reminders belonging to the former task.
     if completed or (item.kind == "task" and body.kind != "task"):
         cancel_item_reminders(db, note.user_id, item.id)
@@ -825,6 +827,8 @@ def edit_item(db, note, item_id, body):
         record_event(db, note.user_id, "note_edited", f"{note.id}:{note.version}", subject_id=note.id)
     if completed:
         record_event(db, note.user_id, "task_completed", f"{item.id}:{item.version}")
+    if reopened:
+        record_event(db, note.user_id, "task_reopened", f"{item.id}:{item.version}")
     db.flush()
     save_revision(db, note)
     db.commit()

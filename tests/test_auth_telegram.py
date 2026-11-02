@@ -22,7 +22,7 @@ from app.models import (
 from app.policy import POLICY_VERSION
 from app.security import hash_token, verify_password
 from telegram_adapter.bot import Bot
-from telegram_adapter.clients import CoreClient
+from telegram_adapter.clients import CoreClient, RemoteFailure
 from telegram_adapter.delivery import DeliverySender
 from telegram_adapter.state import OffsetStore
 from tests.conftest import register
@@ -477,7 +477,11 @@ def test_reset_link_arrives_works_once_and_ends_every_session(service):
         assert item["callback_token"] is None and item["note_url"] == app.state.settings.public_origin + "/"
         assert auth(client, item).json() == {"send": True}
         assert result(client, item).status_code == 200
-        token = reset_token(item["text"])
+        # The address is not in the text any more: it is the link «Задать новый пароль».
+        assert "http" not in item["text"] and len(item["links"]) == 1
+        (link,) = item["links"]
+        assert item["text"].encode("utf-16-le")[link["offset"] * 2:(link["offset"] + link["length"]) * 2].decode("utf-16-le") == "Задать новый пароль"
+        token = reset_token(link["url"])
         assert "15 минут" in item["text"]
         with app.state.sessions() as db:
             sent = db.scalar(select(Outbox).where(Outbox.message_kind.is_not(None)))
@@ -628,7 +632,7 @@ def test_real_adapter_delivers_the_reset_link_once(service, tmp_path):
     assert sends[0]["reply_markup"]["inline_keyboard"] == [[
         {"text": "Открыть Beresta", "url": app.state.settings.public_origin + "/"}
     ]]
-    assert reset_token(sends[0]["text"])
+    assert "http" not in sends[0]["text"] and reset_token(sends[0]["entities"][0]["url"])
 
 
 def test_telegram_account_can_set_a_password_through_recovery(service):
@@ -638,7 +642,7 @@ def test_telegram_account_can_set_a_password_through_recovery(service):
     with TestClient(app) as anonymous:
         assert request_reset(anonymous, name).status_code == 200
         item = claim(client).json()["items"][0]
-        assert reset_password(anonymous, reset_token(item["text"])).status_code == 200
+        assert reset_password(anonymous, reset_token(item["links"][0]["url"])).status_code == 200
         assert anonymous.post("/api/v1/auth/login", json={"username": name, "password": NEW_PASSWORD}).status_code == 200
 
 
@@ -651,3 +655,22 @@ def test_core_client_accepts_reset_delivery_shape(tmp_path):
         "note_url": "http://127.0.0.1:8000/", "callback_token": None,
     }
     sender.validate_claim(item)
+
+
+def test_adapter_accepts_the_reset_link_entity_only_on_its_own_host(tmp_path):
+    settings = settings_for(tmp_path)
+    sender = DeliverySender(settings, CoreClient(None, settings), None, None)
+    label = "Задать новый пароль"
+    text = "Сброс пароля в beresta.\n\n" + label
+    item = {
+        "delivery_id": "6f1a1d84-0b0e-4b53-a3d1-1ab2c3d4e5f6", "lease_token": "A" * 43, "generation": 1,
+        "chat_id": BASE["chat_id"], "text": text, "note_url": "http://127.0.0.1:8000/", "callback_token": None,
+        "links": [{"offset": text.index(label), "length": len(label), "url": "http://127.0.0.1:8000/#reset=" + "B" * 43}],
+    }
+    sender.validate_claim(item)
+    other = {**item, "links": [{**item["links"][0], "url": "http://evil.test/#reset=" + "B" * 43}]}
+    with pytest.raises(RemoteFailure):
+        sender.validate_claim(other)
+    other = {**item, "links": [{**item["links"][0], "url": "http://127.0.0.1:8000/#other=x"}]}
+    with pytest.raises(RemoteFailure):
+        sender.validate_claim(other)

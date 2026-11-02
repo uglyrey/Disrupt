@@ -11608,7 +11608,7 @@
             "type": "string",
             "maxLength": 2000,
             "minLength": 12,
-            "pattern": "^(https://calendar\\.google\\.com/calendar/render\\?action=TEMPLATE&|https?://[^/\\s]+/\\?capture=)",
+            "pattern": "^(https://calendar\\.google\\.com/calendar/render\\?action=TEMPLATE&|https?://[^/\\s]+/(?:\\?capture=|#reset=))",
             "title": "Url"
           }
         },
@@ -11620,7 +11620,7 @@
           "url"
         ],
         "title": "TextLink",
-        "description": "A clickable part of the message text: «Добавить в Google Календарь» or «Открыть заметку». Offset and length are UTF-16 units."
+        "description": "A clickable part of the message text: «Добавить в Google Календарь», «Изменить в Бересте», «Открыть заметку» or «Задать новый пароль». Offset and length are UTF-16 units."
       },
       "TokenBody": {
         "properties": {

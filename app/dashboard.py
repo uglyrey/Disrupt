@@ -37,6 +37,32 @@ def streak_length(days_with_captures, today):
     return length
 
 
+def completed_tasks(db, user_id, period_start, alive_notes):
+    """(tasks done now in the whole history, of them done since `period_start`). Deleting never lowers it.
+
+    The history is the events `task_completed` and `task_reopened`, both keyed «item_id:version». The event with
+    the highest version of a task says where it stands. Tasks that were done before events existed and have none
+    count by their live row. Note and item rows may be gone (deleted forever): the events do not need them."""
+    state = {}
+    for name, operation, stamp in db.execute(select(
+        ProductEvent.name, ProductEvent.operation_id, ProductEvent.occurred_at,
+    ).where(ProductEvent.user_id == user_id, ProductEvent.name.in_(["task_completed", "task_reopened"]))):
+        item_id, _, version = operation.rpartition(":")
+        rank = int(version) if version.isdigit() else 0
+        last = state.get(item_id)
+        if last is None or rank > last[0] or (rank == last[0] and name == "task_reopened"):
+            # The latest event decides: a task done again after a reopen counts once, at the new moment.
+            state[item_id] = (rank, name, stamp)
+    done = {item_id: row[2] for item_id, row in state.items() if row[1] == "task_completed"}
+    live = db.scalars(select(Item.id).where(
+        Item.user_id == user_id, Item.kind == "task", Item.status == "completed", Item.deleted_at.is_(None),
+        Item.note_id.in_(alive_notes),
+    )).all()
+    # Old rows have no moment, they count in the total but not in a period.
+    legacy = [item_id for item_id in live if item_id not in state]
+    return len(done) + len(legacy), sum(1 for stamp in done.values() if stamp >= period_start)
+
+
 def build_dashboard(db, settings, user_id, days, now=None):
     now = time.time() if now is None else now
     zone_name = effective_zone(db.get(User, user_id), settings)
@@ -81,21 +107,8 @@ def build_dashboard(db, settings, user_id, days, now=None):
         .group_by(Note.category_id, Item.kind, Item.status)
     ).all()
     task_open = sum(n for _, kind, status, n in kinds if kind == "task" and status == "open")
-    task_done = sum(n for _, kind, status, n in kinds if kind == "task" and status == "completed")
     ideas = sum(n for _, kind, _, n in kinds if kind == "idea")
-    done_events = db.scalars(select(ProductEvent.operation_id).where(
-        ProductEvent.user_id == user_id, ProductEvent.name == "task_completed",
-        ProductEvent.occurred_at >= period_start,
-    )).all()
-    # Events stay as history. A task that was reopened or removed no longer counts as done.
-    done_ids = {operation.split(":")[0] for operation in done_events}
-    done_now = (
-        set(db.scalars(select(Item.id).where(
-            Item.user_id == user_id, Item.kind == "task", Item.status == "completed", Item.id.in_(done_ids),
-            Item.deleted_at.is_(None), Item.note_id.in_(alive_notes),
-        )).all())
-        if done_ids else set()
-    )
+    done_total, done_in_period = completed_tasks(db, user_id, period_start, alive_notes)
 
     note_counts = dict(db.execute(
         select(Note.category_id, func.count())
@@ -125,7 +138,7 @@ def build_dashboard(db, settings, user_id, days, now=None):
         .where(*pending).order_by(Reminder.scheduled_at, Reminder.id).limit(1)
     ).first()
     usage = daily_state(db, settings, user_id, now)
-    total_tasks = task_open + task_done
+    total_tasks = task_open + done_total
     return {
         "days": days,
         "timezone": zone_name,
@@ -137,9 +150,9 @@ def build_dashboard(db, settings, user_id, days, now=None):
         },
         "notes_per_day": [{"date": day.isoformat(), "notes": count} for day, count in per_day.items()],
         "tasks": {
-            "open": task_open, "completed": task_done,
-            "completed_in_period": len(done_now),
-            "completion_rate": round(task_done / total_tasks, 2) if total_tasks else None,
+            "open": task_open, "completed": done_total,
+            "completed_in_period": done_in_period,
+            "completion_rate": round(done_total / total_tasks, 2) if total_tasks else None,
         },
         "ideas": ideas,
         "categories": categories,

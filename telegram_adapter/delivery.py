@@ -151,11 +151,11 @@ class DeliverySender:
             raise RemoteFailure("core_invalid_delivery", fatal=True) from None
 
     def note_link(self, link):
-        """A note of this service: the address of the web app with a capture, the same host as the note button."""
+        """An address of this service: a note (capture) or the password reset page, the same host as the note button."""
         parsed, expected = urlsplit(link), urlsplit(self.settings.web_url)
         return (
             (parsed.scheme, parsed.netloc) == (expected.scheme, expected.netloc) and not parsed.username
-            and parsed.path == "/" and parsed.query.startswith("capture=")
+            and parsed.path == "/" and (parsed.query.startswith("capture=") or parsed.fragment.startswith("reset="))
         )
 
     async def flush_result(self):

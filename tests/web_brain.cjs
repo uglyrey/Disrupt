@@ -220,13 +220,24 @@ async function tasksView() {
     const rowsText = () => [...$('tasks-list').querySelectorAll('.tk-text')].map(n => n.textContent);
     assert.deepEqual(rowsText(), ['Позвонить <b>маме</b>', 'Купить молоко', 'Отправить макет']);
     assert.equal($('tasks-list').querySelector('b'), null, 'Task text is never markup');
-    const first = $('tasks-list').querySelector('.tk-row');
+    let first = $('tasks-list').querySelector('.tk-row');
     assert.match(first.querySelector('.tk-due').textContent, /^Просрочено, срок /);
     const second = $('tasks-list').querySelectorAll('.tk-row')[1];
     assert.equal(second.querySelector('.tk-due').textContent, 'Срок завтра');
     assert.equal($('tasks-list').querySelectorAll('.tk-row')[2].querySelector('.tk-due'), null, 'An unresolved quote shows no deadline');
     assert.ok(!$('tasks-list').textContent.includes('до пятницы') && !$('tasks-list').textContent.includes('из записи'), 'The quote is never shown');
     assert.ok(first.querySelector('.tk-due').compareDocumentPosition(first.querySelector('.tk-note')) & w.Node.DOCUMENT_POSITION_FOLLOWING, 'Deadline goes before the note link');
+    // The reminder was moved to the future: the next load shows the new time and no overdue badge.
+    const t1 = state.tasks.find(r => r.id === 't1'), oldDue = t1.due_resolved_at;
+    t1.due_resolved_at = Date.now() / 1000 + 5 * 3600; t1.due_has_time = true;
+    $('tasks-retry').click();
+    await until(() => !/Просрочено/.test($('tasks-list').querySelector('.tk-row .tk-due').textContent), 'overdue badge gone');
+    assert.match($('tasks-list').querySelector('.tk-row .tk-due').textContent, /^Срок /);
+    assert.equal($('tasks-list').querySelector('.tk-due.is-late'), null);
+    t1.due_resolved_at = oldDue;
+    $('tasks-retry').click();
+    await until(() => /^Просрочено/.test($('tasks-list').querySelector('.tk-row .tk-due').textContent), 'overdue again');
+    first = $('tasks-list').querySelector('.tk-row');
     const box = first.querySelector('input[type=checkbox]');
     assert.equal(w.document.getElementById(box.getAttribute('aria-labelledby')).textContent, 'Позвонить <b>маме</b>');
     assert.equal(first.querySelector('.tk-note').textContent, 'План');

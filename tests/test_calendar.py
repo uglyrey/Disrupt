@@ -160,7 +160,7 @@ def test_the_confirmation_ends_with_a_text_link_and_has_no_new_buttons(reminders
     assert first.endswith("«Позвонить». " + LABEL)
     link, note = item["links"]
     assert clicked(item, link) == LABEL and link["url"].startswith(BASE + "&")
-    assert clicked(item, note) == "Открыть заметку" and note["url"].startswith("http") and "http" not in item["text"]
+    assert clicked(item, note) == "Изменить в Бересте" and note["url"].startswith("http") and "http" not in item["text"]
     assert f"reminder={reminder_id}" in fields(link["url"])["details"]
     assert "calendar" not in item and item["confirm"] == []  # No button of any kind was added
     assert auth(client, item).status_code == 200 and result(client, item).status_code == 200
@@ -173,8 +173,8 @@ def test_with_the_offer_off_the_confirmation_has_no_link_and_no_phrase(reminders
     (item,) = claim(client).json()["items"]
     (note,) = item["links"]  # Only the note address is a link, no calendar phrase
     assert "Google" not in item["text"] and "http" not in item["text"]
-    assert item["text"].split("\n")[0].endswith("«Позвонить». Изменить: Открыть заметку")
-    assert clicked(item, note) == "Открыть заметку" and "reminder=" in note["url"]
+    assert item["text"].split("\n")[0].endswith("«Позвонить». Изменить в Бересте")
+    assert clicked(item, note) == "Изменить в Бересте" and "reminder=" in note["url"]
 
 
 def test_a_cancelled_reminder_leaves_no_dead_phrase(reminders):
@@ -213,15 +213,15 @@ def test_a_phrase_inside_the_text_of_a_task_is_not_a_link():
 
 
 def test_note_addresses_become_one_label_and_move_the_calendar_links_in_utf16():
-    from app.deliveries import NOTE_LABEL, link_note_urls
+    from app.deliveries import EDIT_LABEL, NOTE_LABEL, link_note_urls
     origin = "https://example.test"
     url = origin + "/?capture=c1&reminder=r1"
     text = "😀 первая. " + LABEL + "\nИзменить: " + url + "\nещё"
     full, links = attach_links(text, [BASE + "&text=a"])
     out, links = link_note_urls(full, links, origin)
-    assert out == "😀 первая. " + LABEL + "\nИзменить: " + NOTE_LABEL + "\nещё"
+    assert out == "😀 первая. " + LABEL + "\n" + EDIT_LABEL + "\nещё"
     units = out.encode("utf-16-le")
-    assert [units[i["offset"] * 2:(i["offset"] + i["length"]) * 2].decode("utf-16-le") for i in links] == [LABEL, NOTE_LABEL]
+    assert [units[i["offset"] * 2:(i["offset"] + i["length"]) * 2].decode("utf-16-le") for i in links] == [LABEL, EDIT_LABEL]
     assert [i["url"] for i in links] == [BASE + "&text=a", url]
     # An address after the calendar phrase does not move it; one before it does.
     head = "Открыть: " + url + "\nx "
@@ -230,3 +230,27 @@ def test_note_addresses_become_one_label_and_move_the_calendar_links_in_utf16():
     # Other addresses and plain text stay as they are.
     assert link_note_urls("см. https://other.test/?capture=1", [], origin) == ("см. https://other.test/?capture=1", [])
     assert link_note_urls("без ссылок", [], origin) == ("без ссылок", [])
+
+
+def test_every_edit_address_is_a_short_text_link_with_cyrillic_offsets():
+    from app.deliveries import CONFIRM_LABEL, EDIT_LABEL, RESET_LABEL, link_note_urls
+    origin = "https://example.test"
+    edit, confirm, reset = origin + "/?capture=c1&reminder=r1", origin + "/?capture=c1#remind", origin + "/#reset=" + "B" * 43
+    text = f"Напоминание поставлено: завтра, «Позвонить маме». Изменить: {edit}\nПредлагаю: в 9. Подтвердить или изменить время: {confirm}\nСброс\n{reset}\nконец"
+    out, links = link_note_urls(text, [], origin)
+    assert "http" not in out
+    assert out == (
+        f"Напоминание поставлено: завтра, «Позвонить маме». {EDIT_LABEL}\nПредлагаю: в 9. {CONFIRM_LABEL}\nСброс\n{RESET_LABEL}\nконец"
+    )
+    units = out.encode("utf-16-le")
+    assert [units[i["offset"] * 2:(i["offset"] + i["length"]) * 2].decode("utf-16-le") for i in links] == [
+        EDIT_LABEL, CONFIRM_LABEL, RESET_LABEL,
+    ]
+    assert [i["url"] for i in links] == [edit, confirm, reset]
+    assert all(i["length"] <= 256 for i in links)
+    # An existing calendar link behind the addresses stays on its words.
+    tail = "Изменить: " + edit + "\nх " + LABEL
+    shifted, links = link_note_urls(tail, [{"offset": len(tail) - len(LABEL), "length": len(LABEL), "url": BASE}], origin)
+    assert [shifted[i["offset"]:i["offset"] + i["length"]] for i in links] == [EDIT_LABEL, LABEL]
+    # The words «Изменить:» alone, without an address of this service, are plain text.
+    assert link_note_urls("Изменить: https://other.test/?capture=1", [], origin)[1] == []

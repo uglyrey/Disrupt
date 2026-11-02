@@ -3,3 +3,8 @@
 .tw-mirror>span{display:inline-block;vertical-align:top;width:0;overflow:hidden}
 /* Room under the last line, so that it can come up to the middle of the screen while the note is edited */
 .note-body.is-editing{padding-bottom:38vh}
+/* The page keeps the room that the on-screen keyboard takes, so the caret line can be scrolled above it. typewriter.js sets
+   --kb (keyboard height) and --vv-half (half of the visible height) and the class kb-open while a text field has the focus. */
+html{scroll-padding-bottom:var(--kb,0px)}
+html.kb-open body::after{content:"";display:block;height:calc(var(--kb,0px) + var(--vv-half,40vh));pointer-events:none}
+html.kb-open #note-tools{visibility:hidden}
