@@ -47,12 +47,15 @@ def test_general_category_and_profile_columns_round_trip_on_a_filled_database(tm
             assert notes == {"na": general["a"].id, "nd": general["a"].id, "nb": "own", "nc": "work"}
             assert db.execute(text("SELECT calendar_offer FROM users")).scalars().all() == [1, 1, 1]
             assert db.execute(text("SELECT COUNT(*) FROM user_profiles")).scalar() == 0
+            assert db.execute(text("SELECT calendar_default_minutes FROM users")).scalars().all() == [60, 60, 60]
+            assert "duration_minutes" in {item[1] for item in db.execute(text("PRAGMA table_info(reminders)")).all()}
             assert "advance_of" in {item[1] for item in db.execute(text("PRAGMA table_info(reminders)")).all()}
         command.downgrade(config, BEFORE)
         with engine.connect() as db:
             assert {"calendar_offer"}.isdisjoint({item[1] for item in db.execute(text("PRAGMA table_info(users)")).all()})
             assert "is_general" not in {item[1] for item in db.execute(text("PRAGMA table_info(categories)")).all()}
             assert "advance_of" not in {item[1] for item in db.execute(text("PRAGMA table_info(reminders)")).all()}
+            assert "duration_minutes" not in {item[1] for item in db.execute(text("PRAGMA table_info(reminders)")).all()}
             tables = {row[0] for row in db.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
             assert "user_profiles" not in tables
             assert db.execute(text("SELECT id,category_id FROM notes ORDER BY id")).all() == [

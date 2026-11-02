@@ -28,6 +28,7 @@ def user_payload(user: User, csrf: str, db=None) -> dict:
         # Whether the web shows the questionnaire «Знакомство» (new), and whether the calendar link is offered (docs/profile-v1.md).
         "profile_state": profile_state(db, user.id) if db is not None else "new",
         "calendar_offer": user.calendar_offer,
+        "calendar_default_minutes": user.calendar_default_minutes,
     }
 
 

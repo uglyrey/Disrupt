@@ -55,7 +55,7 @@ def test_prompt_asks_for_a_task_and_no_longer_forbids_reminders():
     assert "не создавай напоминания" not in lowered
     assert "напомни" in lowered and "remind me" in lowered and "будильник" in lowered
     assert "due_text" in SYSTEM_PROMPT and "Не придумывай даты" in SYSTEM_PROMPT
-    assert len(SYSTEM_PROMPT) <= 4155  # 3778 before the profile rule (profile-v1), plus 10%
+    assert len(SYSTEM_PROMPT) <= 5600  # 4037 before the note style rules (docs/note-style-v1.md)
 
 
 # Grounding
@@ -113,7 +113,7 @@ def test_nothing_from_the_model_still_gives_exactly_one_reminder(reminders):
     (row,) = auto_rows(app)
     assert row.status == "confirmed" and row.idempotency_key.startswith("ai:")
     assert datetime.fromtimestamp(row.scheduled_at, MOSCOW) == tomorrow_at(10)
-    assert row.text == "Завтра в 10 позвонить маме"
+    assert row.text == "Позвонить маме"
     with app.state.sessions() as db:
         note = db.scalar(select(Note).where(Note.capture_id == saved["capture_id"]))
         item = db.get(Item, row.item_id)
@@ -134,7 +134,7 @@ def test_telegram_reply_names_the_reminder_with_the_change_link(reminders):
     # «Завтра в 10» has no daypart, the parser is unsure and the model gave no time, so the person is asked.
     lines = delivery["text"].split("\n")
     assert lines[-3] == (
-        "Напоминание поставлено: завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно? Добавить в Google Календарь"
+        "Напоминание поставлено: завтра в 10:00 по Москве, «Позвонить маме». Верно? Добавить в Google Календарь"
     )
     assert lines[-1].startswith("Категория: ")
 
@@ -144,12 +144,12 @@ def test_two_requests_give_two_reminders_and_a_short_list(reminders):
     message(client, update_id=302, text="Напомни завтра в 10 позвонить маме. Не забудь послезавтра в 12 оплатить счёт.")
     run_worker(app, Silent())
     rows = auto_rows(app)
-    assert [r.text for r in rows] == ["Завтра в 10 позвонить маме", "Послезавтра в 12 оплатить счёт"]
+    assert [r.text for r in rows] == ["Позвонить маме", "Оплатить счёт"]
     text = claim(client).json()["items"][0]["text"]
     tail = text.split("\n\n")[-2].split("\n")
     assert tail[0] == "Напоминания поставлены:"
-    assert tail[1] == "• завтра в 10:00 по Москве, «Завтра в 10 позвонить маме». Верно? Добавить в Google Календарь"
-    assert tail[2] == "• послезавтра в 12:00 по Москве, «Послезавтра в 12 оплатить счёт» Добавить в Google Календарь"
+    assert tail[1] == "• завтра в 10:00 по Москве, «Позвонить маме». Верно? Добавить в Google Календарь"
+    assert tail[2] == "• послезавтра в 12:00 по Москве, «Оплатить счёт» Добавить в Google Календарь"
     assert tail[3] == "Изменить: Открыть заметку"
 
 
@@ -189,7 +189,7 @@ def test_manual_capture_with_a_request_gets_a_reminder_and_a_telegram_message(re
     (row,) = auto_rows(app)
     assert datetime.fromtimestamp(row.scheduled_at, MOSCOW) == tomorrow_at(10)
     text = claim(client).json()["items"][0]["text"]
-    assert text.startswith("Напоминание поставлено: завтра в 10:00 по Москве, «Завтра в 10 позвонить маме»")
+    assert text.startswith("Напоминание поставлено: завтра в 10:00 по Москве, «Позвонить маме»")
 
 
 def test_manual_capture_without_a_request_makes_nothing(reminders):
@@ -273,7 +273,7 @@ def test_a_named_time_beats_the_default(reminders):
     app, client, ids = reminders
     now = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
     assert default_run(app, ids, now, "Напомните через 2 часа выключить духовку") == [
-        (datetime(2026, 10, 10, 17, 0, tzinfo=MOSCOW), "Через 2 часа выключить духовку"),
+        (datetime(2026, 10, 10, 17, 0, tzinfo=MOSCOW), "Выключить духовку"),
     ]
 
 

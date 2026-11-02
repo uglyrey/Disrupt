@@ -259,7 +259,7 @@ def test_tomorrow_at_ten_is_ten_in_the_account_zone(reminders):
     assert row.timezone == "Asia/Novosibirsk" and row.zone_guessed is False
     assert datetime.fromtimestamp(row.scheduled_at, NOVOSIBIRSK) == tomorrow_at(NOVOSIBIRSK, 10)
     text = claim(client).json()["items"][0]["text"]
-    assert "завтра в 10:00, «Завтра в 10 позвонить маме»" in text and "по Москве" not in text
+    assert "завтра в 10:00, «Позвонить маме»" in text and "по Москве" not in text
 
 
 def test_model_deadline_is_read_in_the_account_zone(reminders):

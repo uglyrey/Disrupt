@@ -24,6 +24,17 @@ from app.config import (
     read_secret_file,
     stream_deadline_seconds,
 )
+from app.note_style import (
+    STYLE_PROMPT,
+    TIME_PHRASE,
+    estimate_duration,
+    explicit_duration,
+    has_reminder_words,
+    has_system_talk,
+    strip_duration_phrase,
+    strip_reminder_words,
+    strip_system_talk,
+)
 from app.profile_example import EXAMPLE_ANSWERS, EXAMPLE_PROFILE
 from app.reminder_proposals import sentence_spans
 from app.schemas import ProposedItem, StrictModel, StructuredNote, well_formed_local_minute
@@ -40,9 +51,7 @@ user_profile (если есть) описывает автора: имена, с
 (short коротко по пунктам, detailed подробнее). Используй его, чтобы понять записи и стиль. Не вставляй его факты в заметку как слова автора.
 Используй простые Markdown-заголовки, абзацы и списки; не добавляй HTML или ссылки.
 Заголовки и списки нужны, если в записи несколько тем или перечисление. Короткую мысль оставь абзацем.
-Пиши так, как писал бы сам автор записи: от первого лица или безлично, без рассказчика.
-Не пиши «пользователь решил», «автор хочет», «он планирует» и не упоминай пользователя
-в третьем лице. Пример: вместо «Пользователь решил позвонить маме» пиши «Позвонить маме».
+{style}
 title: конкретный, словами автора, не длиннее 60 символов.
 Чек-листы допустимы только для явно названных пользователем действий.
 Предложи от 0 до 5 возможных выводов отдельно от заметки. Если оснований нет, верни [].
@@ -76,9 +85,9 @@ category_name: если у записи ясная сфера жизни, выб
 Верни только JSON без кодовых ограждений в таком формате.
 {"title":"Заголовок","markdown":"Текст с базовой разметкой",
 "conclusions":[{"text":"Возможный вывод","source_quote":"Точная цитата"}],
-"items":[{"kind":"task","text":"Явное действие","source_quote":"Точная цитата","due_text":null,"due_at":null}],
+"items":[{"kind":"task","text":"Явное действие","source_quote":"Точная цитата","due_text":null,"due_at":null,"duration_minutes":null}],
 "category_name":null}
-"""
+""".replace("{style}", STYLE_PROMPT.strip())
 
 # Один короткий вопрос: какое время человек имел в виду в письменном ответе на «Верно?» (app/time_ai.py).
 TIME_PROMPT = """Ты определяешь время напоминания по ответу человека. Вход это JSON с данными: answer, sentence,
@@ -522,6 +531,30 @@ def mock_category(text, categories=()):
     return next((c for c in categories if c.casefold().replace("ё", "е") == key), best)
 
 
+_CLAUSE_SPLIT = re.compile(r",?\s+(?:а\s+)?(?:потом|затем|и\s+ещё|и\s+еще)\s+", re.IGNORECASE)
+_NOMINATIVE = {"встречу": "Встреча", "тренировку": "Тренировка", "лекцию": "Лекция", "консультацию": "Консультация",
+               "презентацию": "Презентация", "оплату": "Оплата", "пару": "Пара", "созвон": "Созвон", "звонок": "Звонок"}
+
+
+def _clause_spans(sentence):
+    """Parts of a sentence about several events: «в 9 про тренировку, потом в 18 про созвон»."""
+    spans, position = [], 0
+    for match in _CLAUSE_SPLIT.finditer(sentence):
+        spans.append((position, match.start()))
+        position = match.end()
+    return spans + [(position, len(sentence))]
+
+
+def _nominative(event):
+    """«Про встречу с Лидой» as «Встреча с Лидой» for the few nouns the offline mock knows."""
+    head, _, rest = event.partition(" ")
+    if head.casefold() in ("про", "о", "об") and rest:
+        noun, _, tail = rest.partition(" ")
+        if noun.casefold() in _NOMINATIVE:
+            return (_NOMINATIVE[noun.casefold()] + " " + tail).strip()
+    return event
+
+
 class MockProvider:
     """Deterministic formatting only; deliberately does not claim semantic analysis."""
 
@@ -556,6 +589,44 @@ class MockProvider:
             markdown="\n\n".join(sections) or text, conclusions=[], items=[], category_name=None,
         )
 
+    @staticmethod
+    def human(text, categories=()):
+        """Mock of the style rules (docs/note-style-v1.md): the event instead of the request, no talk to the system.
+
+        Used for a text with «напомни», «запиши ...» or «скажи ИИ». Every sentence becomes a short line, a reminder
+        sentence becomes a task whose text is the event, with the quoted time and a length. Other texts keep the
+        plain draft below."""
+        lines, items = [], []
+        for start, end in sentence_spans(text):
+            sentence = text[start:end]
+            if not has_reminder_words(sentence):
+                line = strip_system_talk(sentence).rstrip(".!?…")
+                lines.append(line[:1].upper() + line[1:] + ".")
+                continue
+            for first, last in _clause_spans(sentence):
+                clause = sentence[first:last].strip()
+                time = TIME_PHRASE.search(clause)
+                due_text = time.group(0) if time else None
+                event = strip_duration_phrase(strip_reminder_words(strip_system_talk(clause), due_text))
+                event = _nominative(event.rstrip(".!?…"))
+                duration = explicit_duration(clause) or estimate_duration(event)
+                lines.append(event + ".")
+                items.append(ProposedItem(kind="task", text=event, source_quote=clause, due_text=due_text,
+                                          duration_minutes=duration))
+        events = [item.text for item in items]
+        head = events or [line.rstrip(".") for line in lines]
+        title = head[0] if len(head) == 1 else f"{head[0]} и {head[1][:1].lower() + head[1][1:]}" if len(head) == 2 \
+            else f"{head[0]} и ещё {len(head) - 1}"
+        if len(title) > 60:
+            title = title[:59].rstrip() + "…"
+        if not items:
+            quote = text.strip()[:1500]
+            items = [ProposedItem(kind="note", text=" ".join(lines)[:1500], source_quote=quote)]
+        return StructuredNote(
+            title=title, markdown=lines[0] if len(lines) == 1 else "\n".join(f"- {line}" for line in lines),
+            conclusions=[], items=items, category_name=mock_category(text, categories),
+        )
+
     def structure(self, text, *, categories=(), timezone=None, profile=None):
         if text == DEMO_TEXT:
             return StructuredNote(
@@ -584,6 +655,8 @@ class MockProvider:
             )
         if text.startswith(MERGE_MARKER):
             return self.merge(text)
+        if has_reminder_words(text) or has_system_talk(text):
+            return self.human(text, categories)
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         return StructuredNote(
             title="Черновик мыслей",

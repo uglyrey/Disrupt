@@ -19,6 +19,7 @@
   const MAX_ANSWER = 1000, COUNTER_FROM = 800, MAX_FACT = 500, MAX_NAME = 100, MAX_NEW = 10;
   const PRIVACY = 'Ответы хранятся в зашифрованном виде, в админке мы их не видим. ИИ использует их только для разбора ваших заметок. Всё можно посмотреть, исправить или удалить в разделе «Что beresta знает обо мне».';
   const INTRO = 'Мы хотим подстроиться под вас. Ответьте на несколько вопросов своими словами, и beresta лучше разложит заметки, задачи и напоминания. На любой вопрос можно не отвечать.';
+  const MINUTES_HINT = 'Так долго событие длится в Google Календаре, если у напоминания нет своей длины. Если вы сами назвали длительность («на два часа», «с 14 до 16»), берётся она.';
   const CALENDAR_HINT = 'К новому напоминанию появится ссылка «Добавить в Google Календарь». Она открывает Google Календарь с готовым событием. beresta не получает доступ к вашему аккаунту Google.';
 
   const el = (tag, text, className) => {
@@ -37,7 +38,7 @@
     : 'Не удалось выполнить запрос. Попробуйте ещё раз.');
 
   let request = null, session = 0;
-  let state = null, calendarOffer = true, profile = null, shownThisLoad = false, waitTimer = 0, scheduled = false;
+  let state = null, calendarOffer = true, calendarMinutes = 60, profile = null, shownThisLoad = false, waitTimer = 0, scheduled = false;
   let popup = null, ui = null, knowledge = null, know = null, bar = null;
 
   /* ---------- Draft: memory plus the consent-aware storage ---------- */
@@ -118,6 +119,28 @@
     });
     wrap.append(label, el('p', CALENDAR_HINT, 'muted profile-hint'));
     return {box: wrap, input};
+  }
+
+  // «Длительность события в календаре по умолчанию». `onPick` returns a promise, a failure puts the old value back.
+  const MINUTE_CHOICES = [15, 30, 60, 90, 120];
+  const minuteLabel = minutes => (minutes === 60 ? '1 час' : minutes === 90 ? '1,5 часа' : minutes === 120 ? '2 часа' : `${minutes} минут`);
+  function calendarMinutesSelect(current, onPick) {
+    const wrap = el('div', '', 'profile-calendar-minutes');
+    const label = el('label', 'Длительность события в календаре по умолчанию', 'profile-minutes-label'); label.htmlFor = 'profile-calendar-minutes';
+    const select = doc.createElement('select'); select.id = 'profile-calendar-minutes'; select.className = 'profile-minutes';
+    for (const minutes of MINUTE_CHOICES) {
+      const option = doc.createElement('option'); option.value = String(minutes); option.textContent = minuteLabel(minutes);
+      select.append(option);
+    }
+    select.value = String(MINUTE_CHOICES.includes(current) ? current : 60);
+    let value = Number(select.value);
+    select.addEventListener('change', async () => {
+      const wanted = Number(select.value);
+      if (wanted === value) return;
+      try { await onPick(wanted); value = wanted; } catch { select.value = String(value); }
+    });
+    wrap.append(label, select, el('p', MINUTES_HINT, 'muted profile-hint'));
+    return {box: wrap, select};
   }
 
   // «Создадим категории: …». Rows are checkboxes with a name that can be edited. `done` runs after the server answered.
@@ -419,6 +442,7 @@
     profile = {...(profile || {}), ...data};
     if (typeof data.state === 'string') state = data.state;
     if (typeof data.calendar_offer === 'boolean') calendarOffer = data.calendar_offer;
+    if (MINUTE_CHOICES.includes(data.calendar_default_minutes)) calendarMinutes = data.calendar_default_minutes;
     if (state !== 'ready' || profile.categories_confirmed !== false) hideBar();
   }
   async function reload() {
@@ -599,8 +623,15 @@
         calendarOffer = value; knowStatus('Сохранено.');
       } catch (error) { knowStatus(failure(error)); throw error; }
     });
-    switchWrap.replaceChildren(picker.box);
-    know.picker = picker;
+    const minutes = calendarMinutesSelect(calendarMinutes, async value => {
+      knowStatus('Сохраняем…');
+      try {
+        await request(`${PATH}/calendar-minutes`, {method: 'PATCH', body: JSON.stringify({calendar_default_minutes: value})});
+        calendarMinutes = value; knowStatus('Сохранено.');
+      } catch (error) { knowStatus(failure(error)); throw error; }
+    });
+    switchWrap.replaceChildren(picker.box, minutes.box);
+    know.picker = picker; know.minutes = minutes;
     renderKnowledge();
     if (state === 'pending') poll();
     know.focusAfter = true;
@@ -610,7 +641,7 @@
 
   /* ---------- Entry points ---------- */
   function reset() {
-    session++; stopWaiting(); scheduled = false; shownThisLoad = false; state = null; profile = null; calendarOffer = true;
+    session++; stopWaiting(); scheduled = false; shownThisLoad = false; state = null; profile = null; calendarOffer = true; calendarMinutes = 60;
     const a = popup, b = knowledge;
     popup = null; ui = null; knowledge = null;
     stopPolling(); know = null; hideBar();
@@ -622,6 +653,7 @@
     if (!user || typeof user !== 'object') return;
     state = typeof user.profile_state === 'string' ? user.profile_state : null;
     if (typeof user.calendar_offer === 'boolean') calendarOffer = user.calendar_offer;
+    if (MINUTE_CHOICES.includes(user.calendar_default_minutes)) calendarMinutes = user.calendar_default_minutes;
     if (state !== 'new' && state !== 'ready') return;
     const mine = session;
     try {
@@ -654,6 +686,6 @@
     start, openKnowledge, openQuestions: () => openQuestions({manual: true}),
     // The guided tips wait while this is true: the popup is open or about to open.
     pending: () => Boolean(popup) || (scheduled && !shownThisLoad),
-    state: () => state, calendarOffer: () => calendarOffer,
+    state: () => state, calendarOffer: () => calendarOffer, calendarMinutes: () => calendarMinutes,
   };
 })();

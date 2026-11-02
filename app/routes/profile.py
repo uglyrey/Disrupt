@@ -5,6 +5,7 @@ facts by the worker, so no model is called in this process.
 """
 
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -23,6 +24,10 @@ class AnswersBody(StrictModel):
 
 class CalendarOfferBody(StrictModel):
     calendar_offer: bool
+
+
+class CalendarMinutesBody(StrictModel):
+    calendar_default_minutes: Literal[15, 30, 60, 90, 120]
 
 
 class CategoriesBody(StrictModel):
@@ -108,6 +113,14 @@ def build_router(database):
         service.set_calendar_offer(db, session.user_id, body.calendar_offer)
         db.commit()
         return {"calendar_offer": body.calendar_offer}
+
+    @router.patch("/calendar-minutes")
+    def change_calendar_minutes(body: CalendarMinutesBody, request: Request, db=Depends(database)):
+        session = get_login_session(request, db, write=True)
+        edits(db, session)
+        service.set_calendar_default_minutes(db, session.user_id, body.calendar_default_minutes)
+        db.commit()
+        return {"calendar_default_minutes": body.calendar_default_minutes}
 
     @router.post("/categories")
     def confirm_categories(body: CategoriesBody, request: Request, db=Depends(database)):

@@ -621,7 +621,7 @@ def test_the_gateway_request_carries_the_profile_as_data_and_the_prompt_stays_sh
     assert with_profile["messages"][0]["content"] == SYSTEM_PROMPT
     assert "user_profile" in SYSTEM_PROMPT and "note_style" in SYSTEM_PROMPT
     # The rule for the profile is short: the prompt grew by less than a tenth.
-    assert len(SYSTEM_PROMPT) <= 3778 * 1.1
+    assert len(SYSTEM_PROMPT) <= 5600  # 4037 before the note style rules (docs/note-style-v1.md)
 
 
 def test_structure_context_has_no_profile_key_without_one():
